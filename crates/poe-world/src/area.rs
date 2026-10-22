@@ -608,7 +608,7 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
                 }
             }
         }
-        std::fs::write(path, out).ok();
+        std::fs::write(format!("{path}.{}x{}", map.width, map.height), out).ok();
     }
     // Overlays around the fill (`0x14209c4c0`: the context `0x141fa0ac0`, phase 1, the fill of
     // the listed cells, phase 2). The generator's room list (`+0x58`) is empty for `.dgr`.

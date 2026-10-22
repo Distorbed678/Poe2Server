@@ -371,6 +371,7 @@ impl Overlays {
         for yy in y..y + h {
             for xx in x..x + w {
                 if !g.flags & self.occupied[(yy * self.width + xx) as usize] != 0 {
+                    if std::env::var("POE_DBG_OVERLAY").is_ok() { eprintln!("FIT {w}x{h} ({x},{y}) occupied {:#x} flags {:#x}", self.occupied[(yy * self.width + xx) as usize], g.flags); }
                     return Ok(false);
                 }
             }
@@ -743,12 +744,18 @@ pub fn room_fits(map: &TileMap, pos: (i32, i32), key: &TileKey, wild: bool, marg
     }
     let mut diffs: Vec<i32> = Vec::new();
     for (s, &(cx, cy)) in corners.iter().enumerate() {
-        let (a, ah) = corner(map, cx, cy);
-        let b = key_ground(s);
+        // Raw grounds here (`0x141f9d200` reads the lattice and key grounds without the
+        // `.gt` flag 0x10 filter).
+        let (_, ah) = corner(map, cx, cy);
+        let a = map.point_index(cx, cy).and_then(|i| map.lattice[i].ground.clone());
+        let b = key.grounds[s].clone();
         let takes = |g: &Option<String>| g.as_ref().is_none_or(|g| map.gt_flags(g) & 1 != 0);
         if takes(&b) && takes(&a) {
             diffs.push(key.heights[s] as i8 as i32 - ah);
         }
+    }
+    if std::env::var("POE_DBG_FITH").is_ok() && pos == (65, 53) {
+        eprintln!("FITH {pos:?} key {:?} corners {:?}", key.heights, corners.iter().map(|&(cx, cy)| (corner(map, cx, cy), map.point_index(cx, cy).map(|i| (map.lattice[i].ground.clone(), map.lattice[i].flags)))).collect::<Vec<_>>());
     }
     diffs.sort();
     diffs.dedup();
