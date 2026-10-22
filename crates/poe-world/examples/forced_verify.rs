@@ -15,9 +15,9 @@
 //! rows, in input order: `area  seed  topology  orientation  match|fail  detail`, the format
 //! `cargo xtask terrain-matrix` reads as `forced-results.tsv`. The detail of a `fail` is the
 //! first difference: `map WxH vs client WxH`, the generator's error (`error: ...`, `panic`,
-//! `timeout after Ns`), or `tile hash ours X client Y`. The doodad hash is compared too once the
-//! port produces one; until then a `match` says `doodads not ported` (the port has no doodad
-//! pass, WP7.11) and only the tile hash and map size were checked.
+//! `timeout after Ns`), or `tile hash ours X client Y`. A tile-hash match also compares the doodad
+//! hash: the detail says `doodads match` or `doodads differ: ours X client Y`; the row stays
+//! `match` either way (the tile result decides), and stderr ends with the counts.
 //!
 //! - `--out FILE`: merge into FILE instead of printing: rows of FILE with the same area, seed,
 //!   topology and orientation are replaced, other rows are kept (so batches accumulate).
@@ -49,8 +49,7 @@ struct Job {
     topology: u32,
     orientation: u8,
     tile_hash: String,
-    /// The client's doodad hash, kept for the comparison once the port has one.
-    #[allow(dead_code)]
+    /// The client's doodad hash.
     doodad_hash: String,
     size: Option<(u32, u32)>,
 }
@@ -58,7 +57,7 @@ struct Job {
 /// What the port made of one (area, seed, topology, orientation).
 #[derive(Clone)]
 enum Ours {
-    Done { hash: String, size: (u32, u32) },
+    Done { hash: String, doodad_hash: String, size: (u32, u32) },
     Error(String),
     Panic,
     Timeout(u64),
@@ -94,7 +93,7 @@ fn compare(job: &Job, ours: &Ours) -> Option<String> {
         Ours::Error(e) => Some(format!("error: {e}")),
         Ours::Panic => Some("panic".into()),
         Ours::Timeout(s) => Some(format!("timeout after {s}s")),
-        Ours::Done { hash, size } => {
+        Ours::Done { hash, size, .. } => {
             if let Some((w, h)) = job.size
                 && (w, h) != *size
             {
@@ -152,7 +151,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                             let mut rng = TerrainRng::new(seed);
                             let forced = Forced { topology: Some(topology), orientation: Some(orientation) };
-                            poe_world::area::generate_with_files(gd, files, &area, &mut rng, Some(forced)).map(|g| Ours::Done { hash: g.map.tile_hash().to_string(), size: (g.map.width, g.map.height) })
+                            poe_world::area::generate_with_files(gd, files, &area, &mut rng, Some(forced)).map(|g| Ours::Done { hash: g.map.tile_hash().to_string(), doodad_hash: g.doodad_hash().to_string(), size: (g.map.width, g.map.height) })
                         }));
                         let _ = tx.send(match r {
                             Ok(Ok(o)) => o,
@@ -177,6 +176,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut rows: Vec<((String, u32, u32, u8), String)> = Vec::new();
     let mut per_area: BTreeMap<&str, (u32, u32)> = BTreeMap::new();
+    let (mut doodads_match, mut doodads_differ) = (0u32, 0u32);
     for j in &jobs {
         let ours = results[index[&(j.area.clone(), j.seed, j.topology, j.orientation)]].clone().expect("every layout was generated");
         let e = per_area.entry(j.area.as_str()).or_default();
@@ -184,12 +184,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let line = match compare(j, &ours) {
             None => {
                 e.0 += 1;
-                "match\tdoodads not ported".to_string()
+                // Tile hash and size match: the doodad hash is reported but does not decide
+                // match/fail (the matrix reads the tile result).
+                match &ours {
+                    Ours::Done { doodad_hash, .. } if *doodad_hash == j.doodad_hash => {
+                        doodads_match += 1;
+                        "match\tdoodads match".to_string()
+                    }
+                    Ours::Done { doodad_hash, .. } => {
+                        doodads_differ += 1;
+                        format!("match\tdoodads differ: ours {doodad_hash} client {}", j.doodad_hash)
+                    }
+                    _ => "match".to_string(),
+                }
             }
             Some(d) => format!("fail\t{d}"),
         };
         rows.push(((j.area.clone(), j.seed, j.topology, j.orientation), line));
     }
+    eprintln!("tile-matching rows: doodad hash matches {doodads_match}, differs {doodads_differ}");
     for (a, (m, n)) in &per_area {
         eprintln!("{a}\t{m}/{n}");
     }

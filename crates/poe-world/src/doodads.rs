@@ -275,6 +275,9 @@ fn pick(cache: &mut AoCache, path: &str, rng: &mut TerrainRng) -> Option<(f32, (
                 if s.orientation_mask != 0 {
                     let u = rng.below(0x348);
                     let o = orientation_pick(s.orientation_mask, u);
+                    if std::env::var("POE_DBG_DOODAD_ORDER").is_ok() {
+                        eprintln!("    orientation u {u} mask {:#x} -> {o}", s.orientation_mask);
+                    }
                     angle = turn_angle(angle, o);
                 }
                 if s.scale.0 < 1.0 || s.scale.1 > 1.0 {
@@ -315,6 +318,9 @@ pub fn resolve(gd: &poe_data::GameData, files: &dyn Files, rng: &mut TerrainRng,
     let dbg = std::env::var("POE_DBG_DOODAD_ORDER").is_ok();
     for (i, mut d) in doodads.into_iter().enumerate() {
         let before = rng.draws;
+        if dbg {
+            eprintln!("    base angle {:.4} at ({}, {})", d.angle, d.x, d.y);
+        }
         let picked = pick(&mut cache, &d.path, rng);
         if dbg && rng.draws != before {
             eprintln!("DOODAD #{i} ({}, {}) {} draws {} -> {}", d.x, d.y, d.path.rsplit('/').next().unwrap_or(""), rng.draws - before, if picked.is_some() { "kept" } else { "null" });

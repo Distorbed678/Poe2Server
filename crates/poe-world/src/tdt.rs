@@ -40,6 +40,27 @@ pub struct Tdt {
     pub orientation_mask: u8,
     /// Override flags of an inheriting tile (see the module docs).
     pub inherit_flags: u8,
+    /// Sub-tiles (row-major in the tile's own orientation, `size.0 × size.1`) with their cell
+    /// maps; empty when the file has none.
+    pub subtiles: Vec<SubTile>,
+    /// Hull plane masks (data +0x173, `n` bytes; `[0]` for a single plane): plane `i` serves the
+    /// orientations in its mask bits, 0 meaning all.
+    pub hull_masks: Vec<u8>,
+}
+
+/// One sub-tile's data (`0x1429153f0`): flag byte, the 23×23 byte map of cell codes and the
+/// byte list that follows it.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct SubTile {
+    pub flags: u8,
+    /// The byte after the flags (present with the header; bit 0: the plane reaches 4 cells
+    /// past the left edge).
+    pub b1: u8,
+    /// Header byte of the cell map (kind in bits 0..2) and the decoded map: `None` for a
+    /// sub-tile without a map (flag 4), `Some(vec![v])` for a uniform map (kind 0, value `v`;
+    /// empty for value 0), else 529 codes, row-major.
+    pub map: Option<Vec<u8>>,
+    pub list: Vec<u8>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -159,6 +180,10 @@ impl Tdt {
         } else if f & 0x10 != 0 {
             t.size = self.size;
         }
+        if f & 0x10 != 0 {
+            t.hull_masks = self.hull_masks.clone();
+            t.subtiles = self.subtiles.clone();
+        }
         if f & 0x20 != 0 && self.version > 9 {
             t.orientation_mask = self.orientation_mask;
         }
@@ -193,9 +218,10 @@ impl Tdt {
             if n > 4 {
                 return Err(TdtError { offset: r.pos, what: "invalid number of hull planes" });
             }
+            self.hull_masks = vec![0; n.max(1) as usize];
             if n >= 2 {
-                for _ in 0..n {
-                    r.u8()?;
+                for i in 0..n as usize {
+                    self.hull_masks[i] = r.u8()?;
                 }
             }
         }
@@ -206,10 +232,16 @@ impl Tdt {
             let count = u16::from_le_bytes(r.bytes()?);
             let full = has(0x10) || (has(1) && hi & 2 != 0);
             for _ in 0..count {
+                let mut st = SubTile::default();
                 let w4 = match (full, v < 10) {
                     (false, _) => 0,
                     (true, true) => r.u8()?,
-                    (true, false) => u16::from_le_bytes(r.bytes()?) as u8,
+                    (true, false) => {
+                        // The u16 is flags and a second flags byte (bit 0: left margin).
+                        let [lo, hi] = r.bytes::<2>()?;
+                        st.b1 = hi;
+                        lo
+                    }
                 };
                 if has(8) {
                     r.u8()?;
@@ -220,16 +252,25 @@ impl Tdt {
                 if !has(0x10) {
                     continue;
                 }
+                st.flags = w4;
+                if full && v < 10 && !(w4 & 1 != 0 && w4 & 2 != 0) {
+                    // Old files: planes reach 4 cells past every side.
+                    st.flags |= 0xe0;
+                    st.b1 |= 1;
+                }
                 if w4 & 4 == 0 {
-                    skip_byte_map(r, v)?;
+                    st.map = Some(read_byte_map(r, v)?);
                 }
                 if !(w4 & 1 != 0 && w4 & 2 != 0) {
                     let n = u16::from_le_bytes(r.bytes()?) as usize;
-                    r.pos = r.pos.checked_add(n).filter(|&p| p <= r.data.len()).ok_or(TdtError {
+                    let end = r.pos.checked_add(n).filter(|&p| p <= r.data.len()).ok_or(TdtError {
                         offset: r.pos,
                         what: "sub-tile bytes truncated",
                     })?;
+                    st.list = r.data[r.pos..end].to_vec();
+                    r.pos = end;
                 }
+                self.subtiles.push(st);
             }
         }
         if !has(8) {
@@ -252,26 +293,107 @@ impl Tdt {
 }
 
 /// A sub-tile byte map (`0x1429179c0`): raw 0x211 bytes before version 10, else a header byte
-/// (type in bits 0..2, extra size bytes in bits 3..4, size in bits 5..7) and, for types 1..4, a
-/// compressed payload of that size.
-fn skip_byte_map(r: &mut Reader, version: u32) -> Result<(), TdtError> {
-    let n = if version < 10 {
-        0x211
-    } else {
-        let b = r.u8()?;
-        let kind = b & 7;
-        let extra = (b >> 3) & 3;
-        let mut size = ((b >> 5) & 7) as usize;
-        for k in 0..extra {
-            size |= (r.u8()? as usize) << (8 * k as usize + 3);
-        }
-        if kind == 0 { 0 } else { size }
+/// (kind in bits 0..2, extra size bytes in bits 3..4, size in bits 5..7) and, for kinds 1..4, an
+/// LZ4 block of that size that decodes to 69 (kind 1: 2 palette bytes and 1 bit per cell),
+/// 137 (kind 2: 4 palette bytes, 2 bits), 281 (kind 3: 16 palette bytes, 4 bits) or 529 bytes
+/// (kind 4: one byte per cell). Kind 0 has no payload: the size field is the uniform value.
+fn read_byte_map(r: &mut Reader, version: u32) -> Result<Vec<u8>, TdtError> {
+    let trunc = |pos| TdtError { offset: pos, what: "byte map truncated" };
+    if version < 10 {
+        let end = r.pos + 0x211;
+        let m = r.data.get(r.pos..end).ok_or(trunc(r.pos))?.to_vec();
+        r.pos = end;
+        return Ok(m);
+    }
+    let b = r.u8()?;
+    let kind = b & 7;
+    let extra = (b >> 3) & 3;
+    let mut size = ((b >> 5) & 7) as usize;
+    for k in 0..extra {
+        size |= (r.u8()? as usize) << (8 * k as usize + 3);
+    }
+    if kind == 0 {
+        return Ok(if size == 0 { Vec::new() } else { vec![size as u8] });
+    }
+    let end = r.pos.checked_add(size).filter(|&p| p <= r.data.len()).ok_or(trunc(r.pos))?;
+    let payload = &r.data[r.pos..end];
+    r.pos = end;
+    let out = match kind {
+        1 => 69,
+        2 => 137,
+        3 => 281,
+        4 => 529,
+        _ => return Err(TdtError { offset: r.pos, what: "unknown data compression" }),
     };
-    r.pos = r.pos.checked_add(n).filter(|&p| p <= r.data.len()).ok_or(TdtError {
-        offset: r.pos,
-        what: "byte map truncated",
-    })?;
-    Ok(())
+    let raw = lz4_block(payload, out).ok_or(TdtError { offset: r.pos, what: "failed to decompress byte map" })?;
+    let bits = match kind {
+        1 => 1,
+        2 => 2,
+        3 => 4,
+        _ => return Ok(raw),
+    };
+    let pal = 1usize << bits;
+    let (palette, data) = raw.split_at(pal);
+    Ok((0..529usize)
+        .map(|i| {
+            let bit = i * bits;
+            let v = (data[bit / 8] >> (bit % 8)) & ((1 << bits) - 1);
+            palette[v as usize]
+        })
+        .collect())
+}
+
+/// LZ4 block decompression to exactly `out` bytes.
+fn lz4_block(src: &[u8], out: usize) -> Option<Vec<u8>> {
+    lz4_decode(src).filter(|d| d.len() == out)
+}
+
+/// LZ4 block decompression (the output length is whatever the block holds).
+pub fn lz4_decode(src: &[u8]) -> Option<Vec<u8>> {
+    let mut dst: Vec<u8> = Vec::new();
+    let mut i = 0;
+    while i < src.len() {
+        let token = src[i];
+        i += 1;
+        let mut lit = (token >> 4) as usize;
+        if lit == 15 {
+            loop {
+                let b = *src.get(i)?;
+                i += 1;
+                lit += b as usize;
+                if b != 255 {
+                    break;
+                }
+            }
+        }
+        dst.extend_from_slice(src.get(i..i + lit)?);
+        i += lit;
+        if i >= src.len() {
+            break;
+        }
+        let off = u16::from_le_bytes([*src.get(i)?, *src.get(i + 1)?]) as usize;
+        i += 2;
+        if off == 0 || off > dst.len() {
+            return None;
+        }
+        let mut len = (token & 15) as usize;
+        if len == 15 {
+            loop {
+                let b = *src.get(i)?;
+                i += 1;
+                len += b as usize;
+                if b != 255 {
+                    break;
+                }
+            }
+        }
+        len += 4;
+        for _ in 0..len {
+            let b = dst[dst.len() - off];
+            dst.push(b);
+        }
+    }
+    Some(dst)
 }
 
 #[cfg(test)]
