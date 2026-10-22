@@ -40,6 +40,11 @@ fn data_err(path: &str, e: impl std::fmt::Debug) -> GenError {
 /// Reads game files (the generator's only input besides the seed).
 pub trait Files {
     fn read(&self, path: &str) -> Result<Vec<u8>, GenError>;
+    /// Row `row` of `SpecialTiles.dat` (`TDTFile`), when the source knows the table
+    /// ([`crate::area::generate_probed_files`] wraps its files with it).
+    fn special_tile(&self, _row: usize) -> Option<String> {
+        None
+    }
 }
 
 impl Files for poe_data::GameFiles {
@@ -67,6 +72,10 @@ impl<'a> CachedFiles<'a> {
 }
 
 impl Files for CachedFiles<'_> {
+    fn special_tile(&self, row: usize) -> Option<String> {
+        self.inner.special_tile(row)
+    }
+
     fn read(&self, path: &str) -> Result<Vec<u8>, GenError> {
         let key = path.to_ascii_lowercase();
         if let Some(b) = self.cache.read().unwrap_or_else(|e| e.into_inner()).get(&key) {

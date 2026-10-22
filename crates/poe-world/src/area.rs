@@ -137,6 +137,21 @@ pub fn generate_probed(gd: &GameData, area_id: &str, rng: &mut TerrainRng, force
     generate_probed_files(gd, gd.files(), area_id, rng, forced, probe)
 }
 
+/// The files plus the `SpecialTiles` table (`OverlayBlank` is row 2, `0x141d08fe0`).
+struct WithSpecialTiles<'a> {
+    inner: &'a dyn crate::generate::Files,
+    special: Vec<String>,
+}
+
+impl crate::generate::Files for WithSpecialTiles<'_> {
+    fn read(&self, path: &str) -> Result<Vec<u8>, GenError> {
+        self.inner.read(path)
+    }
+    fn special_tile(&self, row: usize) -> Option<String> {
+        self.special.get(row).cloned()
+    }
+}
+
 /// [`generate_probed`] with the file source given.
 pub fn generate_probed_files(gd: &GameData, files: &dyn crate::generate::Files, area_id: &str, rng: &mut TerrainRng, forced: Option<Forced>, probe: &mut dyn FnMut(Stage)) -> Result<Generated, GenError> {
     let forced = forced.unwrap_or_default();
@@ -156,7 +171,9 @@ pub fn generate_probed_files(gd: &GameData, files: &dyn crate::generate::Files, 
     let orientation = forced.orientation.filter(|&o| o < 8).unwrap_or(if mask == 0 || mask == 0xff { 0 } else { mask.trailing_zeros() as u8 });
     let mut graph = Graph::parse_bytes(&files.read(&dgr)?).map_err(|e| data(format!("{dgr}: {e:?}")))?;
     turn(files, &mut graph, orientation)?;
-    let map = generate_graph_probed(files, &graph, rng, probe)?;
+    let special: Vec<String> = gd.table("SpecialTiles").ok().map(|t| (0..).map_while(|r| t.row(r)).filter_map(|r| r.str("TDTFile").ok().map(String::from)).collect()).unwrap_or_default();
+    let files = WithSpecialTiles { inner: files, special };
+    let map = generate_graph_probed(&files, &graph, rng, probe)?;
     Ok(Generated { graph: dgr, map, draws: rng.draws })
 }
 
@@ -994,7 +1011,7 @@ fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng:
                     }
                 })
                 .collect();
-            Some(crate::overlay::Overlays::new(files, &toy, &map, &mut master, &rects)?)
+            Some(crate::overlay::Overlays::new(files, &toy, &map, &mut master, &rects, files.special_tile(2))?)
         }
         None => None,
     };
@@ -1014,6 +1031,7 @@ fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng:
     rooms.extend(fill_rooms.iter().map(|r| RoomPlacement { room: &r.room, origin: r.origin, orientation: r.orientation }));
     if let Some(o) = &overlays {
         rooms.extend(o.placed.iter().map(|&(i, origin, orientation)| RoomPlacement { room: o.room(i), origin, orientation }));
+        rooms.extend(o.fill_rooms.iter().map(|r| RoomPlacement { room: &r.room, origin: r.origin, orientation: r.orientation }));
     }
     derepeat_pass(&mut map, &master, &rooms, rng);
     crate::postunique::run(&mut map, &mut master, files, rng)?;
