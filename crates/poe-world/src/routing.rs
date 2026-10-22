@@ -282,6 +282,10 @@ impl Router {
             let q = e.waypoint(i - 1);
             self.mark_line(q, a, -1, e.margin);
             if !self.astar(a, p) {
+                if std::env::var("POE_ROUTE_DEBUG").is_ok() {
+                    let t = |q: Pos| { let k = (q.1 * w + q.0) as usize; format!("{:?} cost {} uses {} occ {}", q, self.tiles[k].cost, self.tiles[k].uses, self.tiles[k].occupied) };
+                    eprintln!("ROUTEFAIL leg {i}/{n} from {} to {} ends {:?} off {:?}", t(a), t(p), e.ends, e.offsets);
+                }
                 if i == n + 1 {
                     for k in 1..path.len() {
                         self.mark_line(path[k - 1], path[k], -1, e.margin);
@@ -341,7 +345,14 @@ pub fn route_reserved(
     while !todo.is_empty() {
         let mut failed = Vec::new();
         for &i in &todo {
-            if !router.route(&mut edges[i], rng) {
+            let before = edges[i].points.clone();
+            let ok = router.route(&mut edges[i], rng);
+            if std::env::var("POE_ROUTE_DEBUG").is_ok() {
+                let f = |v: &[Pos]| v.iter().map(|p| format!("{},{}", p.0, p.1)).collect::<Vec<_>>().join(" ");
+                let e = &edges[i];
+                eprintln!("ROUTE {i} {},{}->{},{} off {:?} ok={} before [{}]\t{}", e.ends[0].0, e.ends[0].1, e.ends[1].0, e.ends[1].1, e.offsets, ok as u8, f(&before), f(&e.points));
+            }
+            if !ok {
                 failed.push(i);
                 router.reserve(&edges[i]);
             }

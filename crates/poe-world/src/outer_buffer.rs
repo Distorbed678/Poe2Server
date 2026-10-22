@@ -276,7 +276,7 @@ impl Pass<'_> {
                 let (mut key, m) = self.edge_key(&et, [0, 2], [e, full, full.wrapping_sub(e).wrapping_sub(1), full], [ga.clone(), gb.clone(), gb, ga], [ha, hb, hb, ha]);
                 let list = self.edge_candidates(&et, &mut key)?;
                 if list.is_empty() {
-                    return Err(GenError::Unsupported(format!("no edge tile to expand the outer buffer down at ({x},{top})")));
+                    return Err(GenError::Unsupported(format!("no edge tile to expand the outer buffer down at ({x},{top}): {et} {key:?}")));
                 }
                 let total = list.iter().map(|c| c.weight).sum();
                 let c = pick(&list, rng.below(total)).unwrap();
@@ -336,7 +336,7 @@ impl Pass<'_> {
                 let (mut key, m) = self.edge_key(&et, [0, 2], [full.wrapping_sub(e).wrapping_sub(1), full, e, full], [ga.clone(), gb.clone(), gb, ga], [ha, hb, hb, ha]);
                 let list = self.edge_candidates(&et, &mut key)?;
                 if list.is_empty() {
-                    return Err(GenError::Unsupported(format!("no edge tile to expand the outer buffer up at ({x},{bottom})")));
+                    return Err(GenError::Unsupported(format!("no edge tile to expand the outer buffer up at ({x},{bottom}): {et} {key:?}")));
                 }
                 let total = list.iter().map(|c| c.weight).sum();
                 let c = pick(&list, rng.below(total)).unwrap();
@@ -390,7 +390,7 @@ impl Pass<'_> {
                 let (mut key, m) = self.edge_key(&et, [1, 3], [full, full.wrapping_sub(e).wrapping_sub(1), full, e], [ga.clone(), ga, gb.clone(), gb], [ha, ha, hb, hb]);
                 let list = self.edge_candidates(&et, &mut key)?;
                 if list.is_empty() {
-                    return Err(GenError::Unsupported(format!("no edge tile to expand the outer buffer left at ({x},{y})")));
+                    return Err(GenError::Unsupported(format!("no edge tile to expand the outer buffer left at ({x},{y}): {et} {key:?}")));
                 }
                 let total = list.iter().map(|c| c.weight).sum();
                 let c = pick(&list, rng.below(total)).unwrap();
@@ -443,7 +443,7 @@ impl Pass<'_> {
                 let (mut key, m) = self.edge_key(&et, [1, 3], [full, e, full, full.wrapping_sub(e).wrapping_sub(1)], [ga.clone(), ga, gb.clone(), gb], [ha, ha, hb, hb]);
                 let list = self.edge_candidates(&et, &mut key)?;
                 if list.is_empty() {
-                    return Err(GenError::Unsupported(format!("no edge tile to expand the outer buffer right at ({x},{y})")));
+                    return Err(GenError::Unsupported(format!("no edge tile to expand the outer buffer right at ({x},{y}): {et} {key:?}")));
                 }
                 let total = list.iter().map(|c| c.weight).sum();
                 let c = pick(&list, rng.below(total)).unwrap();
