@@ -20,6 +20,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (mut only, mut verbose) = (None::<String>, false);
     let mut dump: Option<PathBuf> = None;
     let mut blame = false;
+    let mut footprints = false;
     let mut threads = std::thread::available_parallelism().map_or(1, |n| n.get());
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -28,6 +29,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "--threads" => threads = args.next().ok_or("--threads needs a number")?.parse()?,
             "--verbose" => verbose = true,
             "--blame" => blame = true,
+            "--footprints" => footprints = true,
             "--dump" => dump = Some(PathBuf::from(args.next().ok_or("--dump needs a dir")?)),
             _ => dirs.push(PathBuf::from(a)),
         }
@@ -80,17 +82,33 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let mut rng = TerrainRng::new(*seed);
                     let forced = Forced { topology: Some(*t), orientation: Some(*o) };
                     let g = poe_world::area::generate_with_files(gd, files, area, &mut rng, Some(forced))?;
-                    let grid = poe_world::collision::build(&g.map, files)?;
-                    Ok::<_, poe_world::generate::GenError>((grid, g.map))
+                    let grid = poe_world::collision::build(&g.map, files, &g.doodads)?;
+                    Ok::<_, poe_world::generate::GenError>((grid, g.map, g.doodads))
                 }));
                 let (line, ok) = match r {
-                    Ok(Ok((grid, map))) => {
+                    Ok(Ok((grid, map, doodads))) => {
                         let ours = grid.pwg1();
+                        let theirs = std::fs::read(dir.join("grids.bin")).unwrap_or_default();
+                        if footprints {
+                            let theirs_g = |l: usize, x: i32, y: i32| -> u8 {
+                                let bpr = grid.cells_x.div_ceil(2);
+                                if x < 0 || y < 0 || x as usize >= grid.cells_x || y as usize >= grid.cells_y { return 5; }
+                                (theirs[20 + l * bpr * grid.cells_y + y as usize * bpr + x as usize / 2] >> (4 * (x as usize & 1))) & 15
+                            };
+                            let mut cache = poe_world::doodads::AoCache::new(files);
+                            for d in doodads.iter().filter(|d| d.counted && !d.leaf.is_empty()) {
+                                let secs = poe_world::collision::parse_hull(&cache.get(&d.leaf).hull);
+                                let fp = poe_world::collision::hull_footprint(&secs, (d.x, d.y), d.angle, d.scale, d.flip, (0, 0));
+                                let zeros: Vec<_> = fp.iter().filter(|f| f.0 == 0 && f.3 == 0).collect();
+                                if zeros.is_empty() { continue; }
+                                let ok = zeros.iter().filter(|f| theirs_g(0, f.1, f.2) == 0).count();
+                                eprintln!("FP {} {} zeros {} client-zero {} kind {}", name, d.leaf.rsplit('/').next().unwrap_or(""), zeros.len(), ok, d.kind);
+                            }
+                        }
                         if let Some(d) = &dump {
                             std::fs::create_dir_all(d).ok();
                             std::fs::write(d.join(format!("{name}.bin")), &ours).ok();
                         }
-                        let theirs = std::fs::read(dir.join("grids.bin")).unwrap_or_default();
                         if ours == theirs {
                             (format!("ok   {name}"), true)
                         } else if ours.len() != theirs.len() || ours[..20] != theirs[..20] {

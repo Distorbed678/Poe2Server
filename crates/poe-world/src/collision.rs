@@ -143,7 +143,7 @@ fn turn(x: i32, y: i32, o: u8) -> (i32, i32) {
 }
 
 /// Builds the cell grid of a generated tile map (`files` read the tiles' `.tdt`).
-pub fn build(map: &TileMap, files: &dyn Files) -> Result<CellGrid, GenError> {
+pub fn build(map: &TileMap, files: &dyn Files, doodads: &[crate::doodads::Doodad]) -> Result<CellGrid, GenError> {
     let (w, h) = (map.width as i32, map.height as i32);
     let mut grid = CellGrid::new((w * TILE) as usize, (h * TILE) as usize);
     let mut tdts: HashMap<String, Tdt> = HashMap::new();
@@ -237,6 +237,23 @@ pub fn build(map: &TileMap, files: &dyn Files) -> Result<CellGrid, GenError> {
             }
         }
     }
+    // Object hulls (any order: the layers only ever take minimums).
+    let mut cache = crate::doodads::AoCache::new(files);
+    let mut hulls: HashMap<String, std::sync::Arc<Vec<HullSection>>> = HashMap::new();
+    for d in doodads {
+        if d.leaf.is_empty() || !d.solid {
+            continue;
+        }
+        let key = d.leaf.to_ascii_lowercase();
+        if !hulls.contains_key(&key) {
+            let info = cache.get(&d.leaf);
+            hulls.insert(key.clone(), std::sync::Arc::new(parse_hull(&info.hull)));
+        }
+        if std::env::var("POE_DBG_HULLS").is_ok() && hulls[&key].iter().any(|s| !s.walk_tri.is_empty() || !s.proj_tri.is_empty() || !s.walk_circle.is_empty() || !s.proj_circle.is_empty()) {
+            eprintln!("HULL {} counted {} kind {} leaf {}", d.path.rsplit('/').next().unwrap_or(""), d.counted, d.kind, d.leaf.rsplit('/').next().unwrap_or(""));
+        }
+        stamp_hull(&mut grid, &hulls[&key], (d.x, d.y), d.angle, d.scale, d.flip);
+    }
     Ok(grid)
 }
 
@@ -279,4 +296,263 @@ fn clear(grid: &mut CellGrid, rec: &[Option<u8>], w: i32, h: i32, tx: i32, ty: i
             }
         }
     }
+}
+
+
+// ---------------------------------------------------------------------------------------------
+// Doodad hulls (0x141d104d0): every created object whose .ao has a Hull stamps its walk
+// and projectile shapes into layers 0 and 1.
+
+/// 0x1434bfab0: the clearance stamped around a triangle corner, (dx, dy, value).
+const CORNER_KERNEL: [(i32, i32, u8); 48] = [(-4,0,4),(-3,-2,4),(-3,-1,3),(-3,0,3),(-3,1,3),(-3,2,4),(-2,-3,4),(-2,-2,3),(-2,-1,2),(-2,0,2),(-2,1,2),(-2,2,3),(-2,3,4),(-1,-3,3),(-1,-2,2),(-1,-1,1),(-1,0,1),(-1,1,1),(-1,2,2),(-1,3,3),(0,-4,4),(0,-3,3),(0,-2,2),(0,-1,1),(0,1,1),(0,2,2),(0,3,3),(0,4,4),(1,-3,3),(1,-2,2),(1,-1,1),(1,0,1),(1,1,1),(1,2,2),(1,3,3),(2,-3,4),(2,-2,3),(2,-1,2),(2,0,2),(2,1,2),(2,2,3),(2,3,4),(3,-2,4),(3,-1,3),(3,0,3),(3,1,3),(3,2,4),(4,0,4)];
+
+/// One hull section's shapes (0x141d6d6b0): triangles x0 y0 x1 y1 x2 y2 and circles
+/// x y r, walk and projectile.
+#[derive(Debug, Clone, Default)]
+pub struct HullSection {
+    pub walk_tri: Vec<[f32; 6]>,
+    pub proj_tri: Vec<[f32; 6]>,
+    pub walk_circle: Vec<[f32; 3]>,
+    pub proj_circle: Vec<[f32; 3]>,
+}
+
+/// The sections of a Hull block's lines (section = name starts a new one; the first is
+/// unnamed).
+pub fn parse_hull(lines: &[(String, String)]) -> Vec<HullSection> {
+    let mut out = vec![HullSection::default()];
+    let nums = |v: &str| v.split_whitespace().filter_map(|n| n.parse::<f32>().ok()).collect::<Vec<_>>();
+    for (k, v) in lines {
+        let n = nums(v);
+        let last = out.last_mut().unwrap();
+        match k.as_str() {
+            "section" => out.push(HullSection::default()),
+            "walk_tri" if n.len() == 6 => last.walk_tri.push(n.try_into().unwrap()),
+            "proj_tri" if n.len() == 6 => last.proj_tri.push(n.try_into().unwrap()),
+            "walk_circle" if n.len() == 3 => last.walk_circle.push(n.try_into().unwrap()),
+            "proj_circle" if n.len() == 3 => last.proj_circle.push(n.try_into().unwrap()),
+            _ => {}
+        }
+    }
+    out
+}
+
+/// Where a stamp lands: the object's cell, the map bounds and the layer.
+struct Stamp<'a> {
+    grid: &'a mut CellGrid,
+    origin: (i32, i32),
+    layer: usize,
+}
+
+impl Stamp<'_> {
+    fn inside(&self, x: i32, y: i32) -> bool {
+        x >= 0 && y >= 0 && (x as usize) < self.grid.cells_x && (y as usize) < self.grid.cells_y
+    }
+
+    /// Zero the nibble at local (x, y) (0x141d1d250).
+    fn clear(&mut self, x: i32, y: i32) {
+        let (x, y) = (self.origin.0 + x, self.origin.1 + y);
+        if self.inside(x, y) {
+            let i = y as usize * self.grid.cells_x + x as usize;
+            self.grid.layers[self.layer][i] = 0;
+        }
+    }
+
+    /// Lower the nibble at absolute (x, y) to v (a 5 counts as unset); 0 clears it.
+    fn lower(&mut self, x: i32, y: i32, v: i32) {
+        if !self.inside(x, y) {
+            return;
+        }
+        let i = y as usize * self.grid.cells_x + x as usize;
+        let v = v.max(0) as u8;
+        let old = self.grid.layers[self.layer][i];
+        let old = if old == 5 { 0xff } else { old };
+        self.grid.layers[self.layer][i] = if v == 0 { 0 } else { old.min(v) };
+    }
+}
+
+type V2 = (f32, f32);
+
+fn sub(a: V2, b: V2) -> V2 {
+    (a.0 - b.0, a.1 - b.1)
+}
+
+fn dot(a: V2, b: V2) -> f32 {
+    a.1 * b.1 + a.0 * b.0
+}
+
+fn len(a: V2) -> f32 {
+    (a.0 * a.0 + a.1 * a.1).sqrt()
+}
+
+fn normalize(a: V2) -> V2 {
+    let l = len(a);
+    if l > 0.0 {
+        let inv = 1.0 / l;
+        (a.0 * inv, a.1 * inv)
+    } else {
+        (0.0, 0.0)
+    }
+}
+
+/// 0x141d1d250 / 0x141d18d60: the cells (4-bit fixed point, top-left rule) a triangle covers,
+/// as local (x, y).
+fn scan(a: V2, b: V2, c: V2, mut act: impl FnMut(i32, i32)) {
+    let fx = |v: f32| (v * 16.0 + 0.5).floor() as i32;
+    let (ax0, ay0, bx, by, cx0, cy0) = (fx(a.0), fx(a.1), fx(b.0), fx(b.1), fx(c.0), fx(c.1));
+    let (mut ax, mut ay, mut cx, mut cy) = (ax0, ay0, cx0, cy0);
+    if b.0 * c.1 + a.0 * b.1 + c.0 * a.1 <= a.0 * c.1 + b.0 * a.1 + c.0 * b.1 {
+        (ax, ay, cx, cy) = (cx0, cy0, ax0, ay0);
+    }
+    let (d3, d21, d12) = (bx - ax, cx - bx, ax - cx);
+    let (d10, d16, d11) = (cy - by, by - ay, ay - cy);
+    let xmin = (ax.min(bx).min(cx) + 15) >> 4;
+    let xmax = (ax.max(bx).max(cx) + 15) >> 4;
+    let ymin = (ay.min(by).min(cy) + 15) >> 4;
+    let ymax = (ay.max(by).max(cy) + 15) >> 4;
+    if ymax == ymin || xmax == xmin {
+        return;
+    }
+    let mut e0 = cx * d10 - cy * d21;
+    let mut e1 = bx * d16 - by * d3;
+    let mut e2 = ax * d11 - ay * d12;
+    if d10 < 0 || (d10 == 0 && d21 > 0) {
+        e0 += 1;
+    }
+    if d16 < 0 || (d16 == 0 && d3 > 0) {
+        e1 += 1;
+    }
+    if d11 < 0 || (d11 == 0 && d12 > 0) {
+        e2 += 1;
+    }
+    let (y16, x16) = (ymin * 16, xmin * 16);
+    e0 += y16 * d21 - x16 * d10;
+    e1 += y16 * d3 - x16 * d16;
+    e2 += y16 * d12 - x16 * d11;
+    for y in ymin..=ymax {
+        let (mut r0, mut r1, mut r2) = (e0, e1, e2);
+        for x in xmin..=xmax {
+            if r0 >= 0 && r1 >= 0 && r2 >= 0 {
+                act(x, y);
+            }
+            r0 += d10 * -16;
+            r1 += d16 * -16;
+            r2 += d11 * -16;
+        }
+        e0 += d21 * 16;
+        e1 += d3 * 16;
+        e2 += d12 * 16;
+    }
+}
+
+/// 0x141d10be0: one triangle of the object at its origin.
+fn stamp_triangle(st: &mut Stamp, v: [V2; 3]) {
+    if v[0] == v[1] || v[0] == v[2] || v[1] == v[2] {
+        return;
+    }
+    scan(v[0], v[1], v[2], |x, y| st.clear(x, y));
+    for i in 0..3 {
+        let cur = v[i];
+        let next = v[(i + 1) % 3];
+        let third = v[(i + 2) % 3];
+        let (vx, vy) = (st.origin.0 + cur.0 as i32, st.origin.1 + cur.1 as i32);
+        if st.inside(vx, vy) {
+            let j = vy as usize * st.grid.cells_x + vx as usize;
+            st.grid.layers[st.layer][j] = 0;
+        }
+        for &(dx, dy, kv) in &CORNER_KERNEL {
+            st.lower(vx + dx, vy + dy, kv as i32);
+        }
+        let dir = normalize(sub(next, cur));
+        let mut off = (-dir.1 * 4.0, dir.0 * 4.0);
+        if dot(off, sub(third, cur)) >= 0.0 {
+            off = (-off.0, -off.1);
+        }
+        let cur_o = (cur.0 + off.0, cur.1 + off.1);
+        let next_o = (next.0 + off.0, next.1 + off.1);
+        let edge = |a: V2, b: V2, c: V2, st: &mut Stamp| {
+            scan(a, b, c, |x, y| {
+                let (ax, ay) = (st.origin.0 + x, st.origin.1 + y);
+                if !st.inside(ax, ay) {
+                    return;
+                }
+                let delta = sub((x as f32, y as f32), cur);
+                let p = dot(dir, delta);
+                let perp = sub(delta, (dir.0 * p, dir.1 * p));
+                let d = (len(perp) + 0.5).floor() as i32;
+                st.lower(ax, ay, d);
+            });
+        };
+        edge(cur, cur_o, next, st);
+        edge(cur_o, next_o, next, st);
+    }
+}
+
+/// 0x141d19370: one circle.
+fn stamp_circle(st: &mut Stamp, c: V2, r: f32) {
+    let (cx, cy) = ((c.0 + 0.5).floor() as i32, (c.1 + 0.5).floor() as i32);
+    let reach = (r + 5.0) - 1.0;
+    let n = (reach + 0.5).floor() as i32;
+    let limit = (reach * reach + 0.5).floor() as i32;
+    for dy in -n..=n {
+        for dx in -n..=n {
+            if dx * dx + dy * dy < limit {
+                let (x, y) = (dx + cx, dy + cy);
+                let (ax, ay) = (st.origin.0 + x, st.origin.1 + y);
+                if st.inside(ax, ay) {
+                    let d = len(sub((x as f32, y as f32), c)) - r;
+                    st.lower(ax, ay, d.ceil() as i32);
+                }
+            }
+        }
+    }
+}
+
+/// Stamps an object's hull at cell (x, y) with angle, scale and mirroring (0x141d104d0:
+/// walk and projectile shapes into layer 0, projectile shapes into layer 1).
+pub fn stamp_hull(grid: &mut CellGrid, sections: &[HullSection], (x, y): (i32, i32), angle: f32, scale: f32, flip: bool) {
+    let angle = if angle >= std::f32::consts::TAU { angle - std::f32::consts::TAU } else { angle };
+    let (s, c) = (angle.sin(), angle.cos());
+    let f9 = c * scale;
+    let f12 = -s * scale;
+    let (mut f10, mut f11) = (f9, s * scale);
+    if flip {
+        f10 = -f9;
+        f11 = -f11;
+    }
+    let tf = |p: V2| (p.0 * f10 + p.1 * f12, p.0 * f11 + p.1 * f9);
+    for (layer, kind) in [(0usize, 0usize), (0, 1), (1, 1)] {
+        let mut st = Stamp { grid, origin: (x, y), layer };
+        for sec in sections {
+            let tris = if kind == 0 { &sec.walk_tri } else { &sec.proj_tri };
+            for t in tris {
+                let f = flip as usize;
+                let v = [tf((t[0], t[1])), tf((t[2 + f * 2], t[3 + f * 2])), tf((t[4 - f * 2], t[5 - f * 2]))];
+                stamp_triangle(&mut st, v);
+            }
+            let circles = if kind == 0 { &sec.walk_circle } else { &sec.proj_circle };
+            for ci in circles {
+                stamp_circle(&mut st, tf((ci[0], ci[1])), scale * ci[2]);
+            }
+        }
+    }
+}
+
+/// The cells a hull stamps (layer, absolute x, y, value) for an object at `(x, y)`, with the
+/// window `grid` as scratch (for tools).
+pub fn hull_footprint(sections: &[HullSection], (x, y): (i32, i32), angle: f32, scale: f32, flip: bool, cells: (usize, usize)) -> Vec<(usize, i32, i32, u8)> {
+    let (ox, oy) = (64, 64);
+    let mut g = CellGrid::new(128 + cells.0.min(0), 128 + cells.1.min(0));
+    stamp_hull(&mut g, sections, (ox, oy), angle, scale, flip);
+    let mut out = Vec::new();
+    for l in 0..2 {
+        for gy in 0..g.cells_y {
+            for gx in 0..g.cells_x {
+                let v = g.get(l, gx, gy);
+                if v != 5 {
+                    out.push((l, x + gx as i32 - ox, y + gy as i32 - oy, v));
+                }
+            }
+        }
+    }
+    out
 }

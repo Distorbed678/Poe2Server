@@ -9,11 +9,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if !(l.starts_with("metadata/") && (l.ends_with(".ao") || l.ends_with(".ot"))) { continue; }
         let Ok(b) = files.read(&l) else { continue };
         let t = poe_world::text_utf16(&b);
-        let mut inb = false; let mut depth = 0;
+        let mut inb = false; let mut depth = 0; let block = std::env::args().nth(1).unwrap_or("AOSet".into()); let block = block.as_str();
         let mut it = t.lines().peekable();
         while let Some(line) = it.next() {
             let s = line.trim();
-            if depth == 0 && s == "AOSet" { inb = true; }
+            if depth == 0 && s == block { inb = true; }
             if s == "{" { depth += 1; continue; }
             if s == "}" { depth -= 1; if depth == 0 { inb = false; } continue; }
             if inb && depth == 1 {

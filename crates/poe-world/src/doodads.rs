@@ -33,6 +33,21 @@ pub struct Doodad {
     /// Whether the doodad adds to the doodad hash ([`type_counts`]); [`resolve`] sets it,
     /// placement leaves it `false`.
     pub counted: bool,
+    /// The object type is static (`Positioned.static = true`): only those stamp their hull into
+    /// the collision grid; set by [`resolve`].
+    pub solid: bool,
+    /// The object file the doodad resolved to after the `AOSet` picks (its `Hull` is rasterised
+    /// into the collision grid); empty before [`resolve`].
+    pub leaf: String,
+    /// The placement is mirrored (orientations 4..7) and the arm entry's flip flag.
+    pub mirrored: bool,
+    pub entry_flip: bool,
+    /// The arm entry's scale.
+    pub entry_scale: f32,
+    /// Mirrored hull (placement XOR pick XOR entry flag; `0x141fe78d0`); set by [`resolve`].
+    pub flip: bool,
+    /// Entry scale times the `AOSet` scale pick; set by [`resolve`].
+    pub scale: f32,
 }
 
 /// `0x141fe78d0`: the cell of an entry `(ex, ey)` of a room of `w × h` tiles turned by
@@ -87,6 +102,13 @@ pub fn room_doodads(room: &Room, origin: (i32, i32), o: u8) -> Vec<Doodad> {
                 path: d.ao_file.clone(),
                 kind: d.stub.clone(),
                 counted: false,
+                leaf: String::new(),
+                solid: false,
+                mirrored: (4..8).contains(&o),
+                entry_flip: d.bool1,
+                entry_scale: d.scale,
+                flip: false,
+                scale: 1.0,
             }
         })
         .collect()
@@ -97,6 +119,13 @@ pub fn room_doodads(room: &Room, origin: (i32, i32), o: u8) -> Vec<Doodad> {
 /// one) and its merged `BaseEvents` sets neither `server_only` nor `client_only` (the side flag
 /// that `+0x2d0` holds) and no `league_category` (`+0x2d4`: 0x39 without one; with one it must
 /// equal the area's league category, which is 0 for areas without league mechanics rolled).
+pub fn type_solid(gd: &poe_data::GameData, kind: &str) -> bool {
+    poe_data::template::ObjectTemplate::load(gd, kind)
+        .map(|t| t.component("Positioned").iter().any(|(k, v)| k == "static" && v == "true"))
+        .unwrap_or(false)
+}
+
+/// Whether objects of type `kind` count for the hash (see above).
 pub fn type_counts(gd: &poe_data::GameData, kind: &str) -> bool {
     let Ok(t) = poe_data::template::ObjectTemplate::load(gd, kind) else { return false };
     !t.component("BaseEvents").iter().any(|(k, v)| match k.as_str() {
@@ -123,6 +152,8 @@ pub struct AoInfo {
     /// `random_orientation` (all eight orientations) / `random_flip` (the mirrored pair): the
     /// allowed-orientation mask at `+0x5c` (`0x11` flip, `0xff` orientation; 0 none).
     pub orientation_mask: u8,
+    /// `Hull` block lines (`key`, unquoted value) over the `extends` chain, base first.
+    pub hull: Vec<(String, String)>,
 }
 
 fn quoted(v: &str) -> &str {
@@ -130,8 +161,9 @@ fn quoted(v: &str) -> &str {
 }
 
 /// Parses one `.ao` file's text: its `extends` and `AOSet` block.
-fn parse_ao(text: &str) -> (Option<String>, Option<AoInfo>) {
+fn parse_ao(text: &str) -> (Option<String>, Option<AoInfo>, Vec<(String, String)>) {
     let mut extends = None;
+    let mut hull: Vec<(String, String)> = Vec::new();
     let mut set: Option<AoInfo> = None;
     let (mut depth, mut name) = (0usize, String::new());
     for line in text.lines() {
@@ -148,6 +180,9 @@ fn parse_ao(text: &str) -> (Option<String>, Option<AoInfo>) {
             if name == "AOSet" && set.is_none() {
                 set = Some(AoInfo { has_set: true, scale: (1.0, 1.0), ..Default::default() });
             }
+        }
+        if depth == 1 && name == "Hull" && let Some((k, v)) = l.split_once('=') {
+            hull.push((k.trim().to_string(), quoted(v).to_string()));
         }
         let inside = depth == 1 && name == "AOSet";
         if inside && let Some((k, v)) = l.split_once('=') {
@@ -180,7 +215,7 @@ fn parse_ao(text: &str) -> (Option<String>, Option<AoInfo>) {
             }
         }
     }
-    (extends, set)
+    (extends, set, hull)
 }
 
 /// Object files by path, parsed once.
@@ -208,11 +243,13 @@ impl<'a> AoCache<'a> {
                 break;
             }
             let Ok(bytes) = self.files.read(&format!("{p}")) else { break };
-            let (ext, set) = parse_ao(&crate::text_utf16(&bytes));
-            chain.push(set);
+            let (ext, set, hull) = parse_ao(&crate::text_utf16(&bytes));
+            chain.push((set, hull));
             next = ext.filter(|e| !e.is_empty() && e != "nothing").map(|e| crate::generate::normalize_path(&format!("{e}.ao")));
         }
-        for set in chain.into_iter().rev().flatten() {
+        for (set, hull) in chain.into_iter().rev() {
+            info.hull.extend(hull);
+            let Some(set) = set else { continue };
             info.has_set = true;
             info.choices.extend(set.choices);
             info.fixed += set.fixed;
@@ -251,7 +288,15 @@ fn orientation_pick(mask: u8, u: u32) -> u8 {
 /// `fixed_ao` entries ends the chain, and the last set seen then draws for its rotation
 /// (`0x200`), orientation (`0x348`), scale (`0x200`, `0x141fe775c`) and translation (two `0x200`).
 /// Returns the angle and cell offset that adds to the entry.
-fn pick(cache: &mut AoCache, path: &str, rng: &mut TerrainRng) -> Option<(f32, (i32, i32))> {
+struct Pick {
+    angle: f32,
+    off: (i32, i32),
+    scale: f32,
+    mirror: bool,
+    leaf: String,
+}
+
+fn pick(cache: &mut AoCache, path: &str, rng: &mut TerrainRng) -> Option<Pick> {
     let mut path = path.to_string();
     let mut last: Option<std::sync::Arc<AoInfo>> = None;
     loop {
@@ -265,6 +310,7 @@ fn pick(cache: &mut AoCache, path: &str, rng: &mut TerrainRng) -> Option<(f32, (
         if !info.has_set || info.fixed != 0 {
             let mut angle = 0.0;
             let mut off = (0, 0);
+            let (mut scale, mut mirror) = (1.0f32, false);
             if let Some(s) = &last {
                 // `random_rotation = true` without a range is -π..π.
                 let (lo, hi) = if s.random_rotation && s.rotation == (0.0, 0.0) { (-std::f32::consts::PI, std::f32::consts::PI) } else { s.rotation };
@@ -279,17 +325,19 @@ fn pick(cache: &mut AoCache, path: &str, rng: &mut TerrainRng) -> Option<(f32, (
                         eprintln!("    orientation u {u} mask {:#x} -> {o}", s.orientation_mask);
                     }
                     angle = turn_angle(angle, o);
+                    mirror = (4..8).contains(&o);
                 }
                 if s.scale.0 < 1.0 || s.scale.1 > 1.0 {
-                    rng.below(0x200);
+                    let u = rng.below(0x200) as f32;
+                    scale = (s.scale.1 - s.scale.0) * u * 0.001953125 + s.scale.0;
                 }
                 if s.translate_radius > 0.0 {
                     let d = (s.translate_radius * s.translate_radius * rng.below(0x200) as f32 / 512.0).sqrt();
                     let t = rng.below(0x200) as f32 / 512.0 * std::f32::consts::TAU;
-                    off = ((d * t.sin()).round() as i32, (-d * t.cos()).round() as i32);
+                    off = ((d * t.sin() + 0.5).floor() as i32, (-d * t.cos() + 0.5).floor() as i32);
                 }
             }
-            return Some((angle, off));
+            return Some(Pick { angle, off, scale, mirror, leaf: path });
         }
         let total: u32 = info.choices.iter().map(|c| c.1).sum();
         let mut r = rng.below(total) as i64;
@@ -314,6 +362,7 @@ fn pick(cache: &mut AoCache, path: &str, rng: &mut TerrainRng) -> Option<(f32, (
 pub fn resolve(gd: &poe_data::GameData, files: &dyn Files, rng: &mut TerrainRng, doodads: Vec<Doodad>) -> Vec<Doodad> {
     let mut cache = AoCache::new(files);
     let mut kinds: std::collections::HashMap<String, bool> = std::collections::HashMap::new();
+    let mut solids: std::collections::HashMap<String, bool> = std::collections::HashMap::new();
     let mut out = Vec::with_capacity(doodads.len());
     let dbg = std::env::var("POE_DBG_DOODAD_ORDER").is_ok();
     for (i, mut d) in doodads.into_iter().enumerate() {
@@ -325,11 +374,15 @@ pub fn resolve(gd: &poe_data::GameData, files: &dyn Files, rng: &mut TerrainRng,
         if dbg && rng.draws != before {
             eprintln!("DOODAD #{i} ({}, {}) {} draws {} -> {}", d.x, d.y, d.path.rsplit('/').next().unwrap_or(""), rng.draws - before, if picked.is_some() { "kept" } else { "null" });
         }
-        let Some((angle, off)) = picked else { continue };
-        d.angle += angle;
-        d.x += off.0;
-        d.y += off.1;
+        let Some(p) = picked else { continue };
+        d.angle += p.angle;
+        d.x += p.off.0;
+        d.y += p.off.1;
+        d.leaf = p.leaf;
+        d.flip = d.mirrored ^ p.mirror ^ d.entry_flip;
+        d.scale = d.entry_scale * p.scale;
         d.counted = *kinds.entry(d.kind.clone()).or_insert_with(|| type_counts(gd, &d.kind));
+        d.solid = *solids.entry(d.kind.clone()).or_insert_with(|| type_solid(gd, &d.kind));
         out.push(d);
     }
     out

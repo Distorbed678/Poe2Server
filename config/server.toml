@@ -130,6 +130,11 @@ remote_animated_path = false
 # with the one the client reports. The client always generates the terrain itself; leave this
 # off until the generator covers every area (docs/status/terrain.md).
 generate = false
+# Use the collision grid the server generates (poe-world: tile planes plus doodad hulls, byte
+# for byte the client's for the areas the generator reproduces) instead of the one the client
+# uploads or the layout cache holds. Used only when the server's tile hash equals the client's;
+# otherwise the uploaded grid stands in. docs/architecture/collision.md. Off by default.
+generated_grid = false
 
 [cluster]
 # Identity of this cluster (docs/architecture/accounts.md). Login tokens carry it; a token

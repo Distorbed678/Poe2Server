@@ -320,7 +320,13 @@ impl InstanceServer {
             }
         }
         .unwrap_or((0, 0));
-        let grid = spawn::client_grid(&self.config.spawn, hashes.hash_a);
+        let grid = match self.config.terrain.generated_grid {
+            true => match self.generated_grid(&ticket.area, seed, hashes.hash_a, instance).await {
+                Some(g) => Some(g),
+                None => spawn::client_grid(&self.config.spawn, hashes.hash_a),
+            },
+            false => spawn::client_grid(&self.config.spawn, hashes.hash_a),
+        };
         let mut cell = spawn;
         if saved.is_some() {
             // Same layout, so the saved cell is normally walkable; otherwise use the nearest
@@ -648,6 +654,45 @@ impl InstanceServer {
                         warn!(?took, "slow session frame");
                     }
                 }
+            }
+        }
+    }
+
+    /// The collision grid the server generates for the instance's layout (`[terrain]
+    /// generated_grid`): `poe-world` makes the `PWG1` bytes and `poe-game` reads them, so the
+    /// two crates stay independent (docs/architecture/collision.md). `None` when the generator
+    /// fails or its tile hash differs from the client's (the caller falls back).
+    async fn generated_grid(&self, area: &str, seed: u32, client_hash: u32, instance: Option<u32>) -> Option<spawn::Grid> {
+        let data = self.data.clone();
+        let area = area.to_string();
+        let forced = instance
+            .and_then(|id| self.instances.get(id))
+            .filter(|i| i.spec.topology.is_some() || i.spec.orientation.is_some())
+            .map(|i| poe_world::area::Forced { topology: i.spec.topology, orientation: i.spec.orientation });
+        let started = std::time::Instant::now();
+        let result = tokio::task::spawn_blocking(move || {
+            let mut rng = poe_world::rng::TerrainRng::new(seed);
+            let g = poe_world::area::generate_with(&data, &area, &mut rng, forced).map_err(|e| e.to_string())?;
+            let ours = g.map.tile_hash();
+            if ours != client_hash {
+                return Err(format!("tile hash {ours} differs from the client's {client_hash}"));
+            }
+            let grid = poe_world::collision::build(&g.map, data.files(), &g.doodads).map_err(|e| e.to_string())?;
+            spawn::Grid::parse(&grid.pwg1()).ok_or_else(|| "generated grid is not PWG1".to_string())
+        })
+        .await;
+        match result {
+            Ok(Ok(grid)) => {
+                info!(seed, took = ?started.elapsed(), cells = ?(grid.cells_x, grid.cells_y), "using the generated collision grid");
+                Some(grid)
+            }
+            Ok(Err(e)) => {
+                warn!(seed, "generated collision grid unavailable: {e}");
+                None
+            }
+            Err(e) => {
+                warn!(seed, "generated collision grid task: {e}");
+                None
             }
         }
     }
