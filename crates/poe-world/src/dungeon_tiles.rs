@@ -276,7 +276,8 @@ pub struct TilePass<'a> {
     pub overlap_fixes: bool,
     /// `.tsi` `DisableDoors` (master +0x167): no door placement.
     pub doors_disabled: bool,
-    /// The graph's three ground types (pass context +0x20 default, +0x28 lowest, +0x30 highest).
+    /// The graph's ground types as the pass context holds them: +0x20 the default (graph line 2),
+    /// +0x28 the ground of the lowest points (line 3), +0x30 that of the highest (line 1).
     pub grounds: [Option<String>; 3],
 }
 
@@ -1001,6 +1002,7 @@ pub fn wiggle(master: &mut Master, files: &dyn crate::generate::Files, map: &mut
     // `0x141fff9b0`: a set ordered by x·65536 + y.
     list.sort_by_key(|p| p.0.wrapping_mul(0x10000).wrapping_add(p.1));
     list.dedup();
+    if std::env::var("POE_DBG_WIGGLE").is_ok() { eprintln!("WLIST {:?}", list); }
     rng.below(list.len() as u32);
     let n = list.len();
     for i in 0..n {

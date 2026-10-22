@@ -39,6 +39,9 @@ pub struct ToyEntry {
     pub exclusions: Vec<String>,
     /// Allowed orientations (bit per orientation).
     pub orientations: u8,
+    /// The entry listed its orientations (`R90 FI ...`); a pick then counts the room once per
+    /// listed orientation that turns the group's key, else once.
+    pub explicit: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -105,6 +108,8 @@ pub fn parse_toy(text: &str) -> Result<Vec<ToyPass>, GenError> {
             }
             if e.orientations == 0 {
                 e.orientations = 0xff;
+            } else {
+                e.explicit = true;
             }
             pass.entries.push(e);
         } else {
@@ -134,6 +139,7 @@ pub fn parse_toy(text: &str) -> Result<Vec<ToyPass>, GenError> {
 /// One room of a group.
 #[derive(Debug, Clone)]
 struct GroupRoom {
+    explicit: bool,
     room: usize,
     limit: u8,
     exclusions: Vec<String>,
@@ -163,6 +169,8 @@ pub struct Overlays {
     /// A `.dgr` graph: candidate positions are scanned cell by cell (the generator flag
     /// `+0x90` bit 0 turns the 3-tile stride off, `0x141fa1e60`).
     pub dungeon: bool,
+    /// Dungeon: tiles the refill placed that the exit wiggle may move (the fill listener `0x14209a2c0`).
+    pub wiggle: Vec<(i32, i32)>,
     /// Overlays placed per room (for `limit=`).
     counts: HashMap<usize, u32>,
     /// Rooms placed so far (room index, origin, orientation): rooms like any other for the
@@ -226,7 +234,7 @@ impl Overlays {
                     };
                     match groups[g].rooms.iter_mut().find(|r| r.room == idx) {
                         Some(r) => r.orientations |= 1 << o,
-                        None => groups[g].rooms.push(GroupRoom { room: idx, limit: e.limit, exclusions: e.exclusions.clone(), orientations: 1 << o, weight: e.weight }),
+                        None => groups[g].rooms.push(GroupRoom { explicit: e.explicit, room: idx, limit: e.limit, exclusions: e.exclusions.clone(), orientations: 1 << o, weight: e.weight }),
                     }
                 }
             }
@@ -243,7 +251,7 @@ impl Overlays {
             built.push((pass, groups));
         }
         let (width, height) = (map.width as i32, map.height as i32);
-        let mut s = Self { passes: built, rooms, occupied: vec![0; (width * height) as usize], width, height, dungeon: false, counts: HashMap::new(), placed: Vec::new(), fill_rooms: Vec::new(), overlay_blank: overlay_blank.map(|p| p.to_ascii_lowercase()) };
+        let mut s = Self { passes: built, rooms, occupied: vec![0; (width * height) as usize], width, height, dungeon: false, wiggle: Vec::new(), counts: HashMap::new(), placed: Vec::new(), fill_rooms: Vec::new(), overlay_blank: overlay_blank.map(|p| p.to_ascii_lowercase()) };
         if s.passes.iter().any(|p| p.0.phases & 3 != 0) {
             for r in rooms_placed {
                 if r.described {
@@ -363,6 +371,7 @@ impl Overlays {
         for yy in y..y + h {
             for xx in x..x + w {
                 if !g.flags & self.occupied[(yy * self.width + xx) as usize] != 0 {
+                    if std::env::var("POE_DBG_OVERLAY").is_ok() { eprintln!("FIT {w}x{h} ({x},{y}) occupied {:#x} flags {:#x}", self.occupied[(yy * self.width + xx) as usize], g.flags); }
                     return Ok(false);
                 }
             }
@@ -414,6 +423,9 @@ impl Overlays {
                     live.push((gi, w));
                 }
             }
+            if std::env::var("POE_DBG_OVERLAY").is_ok() {
+                eprintln!("PLACE phase {phase} pos {pos:?} live {:?} of {:?}", live, list);
+            }
             if live.is_empty() {
                 continue;
             }
@@ -429,21 +441,43 @@ impl Overlays {
             }
             let g = &groups[gi];
             let (w, h) = (g.key.size.0 as i32, g.key.size.1 as i32);
-            let mut options: Vec<(Option<usize>, u32)> = Vec::new();
+            let mut options: Vec<(Option<(usize, u8)>, u32)> = Vec::new();
             for (ri, room) in g.rooms.iter().enumerate() {
                 if room.limit != 0 && self.counts.get(&room.room).copied().unwrap_or(0) >= room.limit as u32 {
                     continue;
                 }
-                if !room.exclusions.is_empty() {
-                    return Err(GenError::Unsupported("overlay exclusions (0x141fa3470) are not ported".into()));
+                if !room.exclusions.is_empty() && !self.has_features(&room.exclusions, (pos.0, pos.1, pos.0 + w, pos.1 + h), map, master, files)? {
+                    continue;
                 }
                 if g.flags & 0x40 != 0 {
-                    return Err(GenError::Unsupported("MatchAllTileKeys overlays (0x141fa3780) are not ported".into()));
+                    let mut any = false;
+                    for o in 0..8u8 {
+                        if room.orientations >> o & 1 != 0 && self.matches_all_keys(&self.rooms[room.room].1, pos, o, map, master, files)? {
+                            any = true;
+                            break;
+                        }
+                    }
+                    if !any {
+                        continue;
+                    }
                 }
-                options.push((Some(ri), room.weight));
+                // A position counts a room once, but the pick lists it once per orientation
+                // whose turned root key is the group's (the sums were 200 for a symmetric room).
+                if self.dungeon && room.explicit {
+                    for o in 0..8u8 {
+                        if room.orientations >> o & 1 != 0 {
+                            options.push((Some((ri, o)), room.weight));
+                        }
+                    }
+                } else {
+                    options.push((Some((ri, 0xff)), room.weight));
+                }
             }
             if options.is_empty() {
                 continue;
+            }
+            if std::env::var("POE_DBG_OVERLAY").is_ok() {
+                eprintln!("OPTIONS pos {pos:?} group {gi} {:?}", options.iter().map(|o| (o.0.map(|(r, ro)| (self.rooms[g.rooms[r].room].0.rsplit('/').next().unwrap().to_string(), ro, g.rooms[r].orientations)), o.1)).collect::<Vec<_>>());
             }
             let mut sum: u32 = options.iter().map(|o| o.1).sum();
             if sum < 100 {
@@ -463,9 +497,10 @@ impl Overlays {
                 self.mark((pos.0, pos.1, pos.0 + w, pos.1 + h), 1);
                 continue;
             };
+            let (ri, o) = ri;
             let room = &g.rooms[ri];
             let v = rng.below(0x348);
-            let o = crate::region::pick(room.orientations, v);
+            let o = if o == 0xff { crate::region::pick(room.orientations, v) } else { o };
             let _ = lcg_index;
             let Some(height) = room_height(&self.rooms[room.room].1, map, pos, o)? else {
                 if std::env::var("POE_DBG_OVERLAY").is_ok() {
@@ -505,7 +540,7 @@ impl Overlays {
                 }
             }
             if std::env::var("POE_DBG_OVERLAY").is_ok() {
-                eprintln!("PLACE {} at {pos:?} o{o} height {height}", self.rooms[room.room].0);
+                eprintln!("ROOMPLACE {} at {pos:?} o{o} height {height}", self.rooms[room.room].0);
             }
             room_pass_oriented(map, master, &self.rooms[room.room].1, pos, o, true, height, rng)?;
             self.mark((pos.0, pos.1, pos.0 + w, pos.1 + h), 1);
@@ -520,6 +555,56 @@ impl Overlays {
 }
 
 impl Overlays {
+    /// `0x141fa3470` (a toy entry's `!Name` arguments): the tiles that start inside the rectangle
+    /// and carry a feature name include every listed name, each tile counting for one.
+    fn has_features(&self, names: &[String], (x0, y0, x1, y1): (i32, i32, i32, i32), map: &TileMap, master: &mut Master, files: &dyn Files) -> Result<bool, GenError> {
+        let mut want: Vec<String> = names.to_vec();
+        for y in y0..y1 {
+            for x in x0..x1 {
+                let Some(i) = map.index(x, y) else { continue };
+                let Some(cell) = &map.cells[i] else { continue };
+                if cell.offset != (0, 0) {
+                    continue;
+                }
+                let tdt = master.header(files, &cell.path)?;
+                let Some(f) = tdt.feature.as_deref().filter(|f| !f.is_empty()) else { continue };
+                if let Some(k) = want.iter().position(|n| n == f) {
+                    want.remove(k);
+                }
+            }
+        }
+        Ok(want.is_empty())
+    }
+
+    /// `0x141fa3780` (`MatchAllTileKeys`): every `k` slot of the room, turned by `o` and laid at
+    /// `pos`, sits on a tile that starts there with the same feature name and the same key.
+    fn matches_all_keys(&self, room: &Room, pos: (i32, i32), o: u8, map: &TileMap, master: &mut Master, files: &dyn Files) -> Result<bool, GenError> {
+        let (w, h) = (room.width() as i32, room.height() as i32);
+        for y in 0..h {
+            for x in 0..w {
+                let poe_data_tools::file_parsers::arm::types::Slot::K(k) = &room.arm.grid[y as usize][x as usize] else { continue };
+                let key = slot_key(k);
+                let (sw, sh) = (key.size.0.max(1) as i32, key.size.1.max(1) as i32);
+                let (ax, ay) = crate::tileset::orient_cell(o, w, h, x, y);
+                let (bx, by) = crate::tileset::orient_cell(o, w, h, x + sw - 1, y + sh - 1);
+                let (mx, my) = (pos.0 + ax.min(bx), pos.1 + ay.min(by));
+                let Some(i) = map.index(mx, my) else { return Ok(false) };
+                let Some(cell) = &map.cells[i] else { return Ok(false) };
+                if cell.offset != (0, 0) {
+                    return Ok(false);
+                }
+                let tdt = master.header(files, &cell.path)?;
+                if tdt.feature.clone().unwrap_or_default() != k.slot_tag.clone().unwrap_or_default() {
+                    return Ok(false);
+                }
+                if TileKey::from_tdt(tdt).oriented(cell.orientation) != key.oriented(o) {
+                    return Ok(false);
+                }
+            }
+        }
+        Ok(true)
+    }
+
     /// Phase 2, after an overlay room went in (`0x141fa23e0`): every cell the removed tiles
     /// covered, in x then y order, that is empty again is filled like the fill pass does
     /// (ground of its corner; the fill is walkable when that ground is none or has `.gt` flag 4).
@@ -546,7 +631,7 @@ impl Overlays {
             }
             let ground = map.point_index(x, y).and_then(|k| map.lattice[k].ground.clone());
             let walkable = ground.as_ref().is_none_or(|g| map.gt_flags(g) & 4 != 0);
-            let placed = crate::fill::fill_cell(map, master, files, (x, y), ground, walkable, rng)?;
+            let placed = crate::fill::fill_cell(map, master, files, (x, y), ground, walkable, self.dungeon.then_some(&mut self.wiggle), rng)?;
             self.fill_rooms.extend(placed);
         }
         Ok(())
@@ -661,12 +746,18 @@ pub fn room_fits(map: &TileMap, pos: (i32, i32), key: &TileKey, wild: bool, marg
     }
     let mut diffs: Vec<i32> = Vec::new();
     for (s, &(cx, cy)) in corners.iter().enumerate() {
-        let (a, ah) = corner(map, cx, cy);
-        let b = key_ground(s);
+        // Raw grounds here (`0x141f9d200` reads the lattice and key grounds without the
+        // `.gt` flag 0x10 filter).
+        let (_, ah) = corner(map, cx, cy);
+        let a = map.point_index(cx, cy).and_then(|i| map.lattice[i].ground.clone());
+        let b = key.grounds[s].clone();
         let takes = |g: &Option<String>| g.as_ref().is_none_or(|g| map.gt_flags(g) & 1 != 0);
         if takes(&b) && takes(&a) {
             diffs.push(key.heights[s] as i8 as i32 - ah);
         }
+    }
+    if std::env::var("POE_DBG_FITH").is_ok() && pos == (65, 53) {
+        eprintln!("FITH {pos:?} key {:?} corners {:?}", key.heights, corners.iter().map(|&(cx, cy)| (corner(map, cx, cy), map.point_index(cx, cy).map(|i| (map.lattice[i].ground.clone(), map.lattice[i].flags)))).collect::<Vec<_>>());
     }
     diffs.sort();
     diffs.dedup();

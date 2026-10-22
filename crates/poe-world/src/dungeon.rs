@@ -961,7 +961,7 @@ fn corridors(
         }
         let t = graph.edges[e].edge_type.to_ascii_lowercase();
         let n_sizes = sizes.iter().find(|s| s.0 == t).map_or(0, |s| s.1.len());
-        let container = if t.is_empty() { 2 } else if n_sizes == 1 { 0 } else { 1 };
+        let container = if t.is_empty() || t == "metadata/terrain/dungeon/rooms.et" { 2 } else if n_sizes == 1 { 0 } else { 1 };
         let hc = types.edge(files, &t)?.height_change;
         let impen = fields[e].impenetrable.eq_ignore_ascii_case("I");
         keys.push((priority(e), container, (impen, fields[e].impenetrability, hc, t), e));

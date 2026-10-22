@@ -588,7 +588,7 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
     }
     let edge_types = master.edge_type_table(files)?;
     let flag = |k: &str| tsi.get(k).is_some_and(|v| v.trim() != "0");
-    let pass = crate::dungeon_tiles::TilePass { master: &master, ecf: &ecf, unit, overlap: grid.overlap, edge_types: &edge_types, overlap_fixes: flag("AllowInteriorOverlapFixes"), doors_disabled: flag("DisableDoors"), grounds: graph.ground_types.clone().map(|g| (!g.is_empty()).then_some(g)) };
+    let pass = crate::dungeon_tiles::TilePass { master: &master, ecf: &ecf, unit, overlap: grid.overlap, edge_types: &edge_types, overlap_fixes: flag("AllowInteriorOverlapFixes"), doors_disabled: flag("DisableDoors"), grounds: [1, 2, 0].map(|i| (!graph.ground_types[i].is_empty()).then(|| graph.ground_types[i].clone())) };
     let (cells, moved) = pass.run(&grid, &rooms, &mut map, rng)?;
     if let Ok(path) = std::env::var("POE_DUMP_PIECES") {
         let mut out = String::new();
@@ -608,7 +608,7 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
                 }
             }
         }
-        std::fs::write(path, out).ok();
+        std::fs::write(format!("{path}.{}x{}", map.width, map.height), out).ok();
     }
     // Overlays around the fill (`0x14209c4c0`: the context `0x141fa0ac0`, phase 1, the fill of
     // the listed cells, phase 2). The generator's room list (`+0x58`) is empty for `.dgr`.
@@ -642,7 +642,7 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
     if let Some(o) = &mut overlays {
         o.run(2, &mut map, &mut master, &mut types, files, rng)?;
     }
-    let wiggle = [moved, wiggle].concat();
+    let wiggle = [moved, overlays.as_ref().map(|o| o.wiggle.clone()).unwrap_or_default(), wiggle].concat();
     crate::dungeon_tiles::wiggle(&mut master, files, &mut map, wiggle, rng)?;
     // De-repetition over the rooms and fill rooms, then the outer buffer.
     let mut placements: Vec<RoomPlacement> = grid

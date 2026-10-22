@@ -436,8 +436,11 @@ pub fn fill_pass(
 /// (the overlays' second phase): `ground` is the cell's corner ground and `walkable` whether fill
 /// rooms with points of interest may go there. Returns the fill rooms it placed.
 #[allow(clippy::too_many_arguments)]
-pub fn fill_cell(map: &mut TileMap, master: &mut Master, files: &dyn Files, pos: (i32, i32), ground: Option<String>, walkable: bool, rng: &mut TerrainRng) -> Result<Vec<PlacedFillRoom>, GenError> {
-    let mut f = Fill { map, master, files, rooms: HashMap::new(), placed: Vec::new(), height: None, wiggle: None };
+pub fn fill_cell(map: &mut TileMap, master: &mut Master, files: &dyn Files, pos: (i32, i32), ground: Option<String>, walkable: bool, wiggle: Option<&mut Vec<(i32, i32)>>, rng: &mut TerrainRng) -> Result<Vec<PlacedFillRoom>, GenError> {
+    let mut f = Fill { map, master, files, rooms: HashMap::new(), placed: Vec::new(), height: None, wiggle: wiggle.as_ref().map(|_| (Vec::new(), Default::default())) };
     f.cell(pos.0, pos.1, ground, walkable, rng)?;
+    if let (Some(out), Some(w)) = (wiggle, f.wiggle.take()) {
+        out.extend(w.0);
+    }
     Ok(f.placed)
 }
