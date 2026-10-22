@@ -319,12 +319,6 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
         }
     }
     let fields: Vec<EdgeFields> = graph.edges.iter().map(|e| EdgeFields::parse(&e.extra)).collect::<Result<_, _>>()?;
-    for e in &graph.edges {
-        let t = types.edge(files, &e.edge_type)?;
-        if t.height_change != 0 || t.virtual_edge {
-            return Err(unsupported(format!("dungeon edge type {} (chirality not ported)", e.edge_type)));
-        }
-    }
     // A node's side slots: its edges by edge index (`0x141d1c580`).
     let slots: Vec<Vec<usize>> = (0..graph.nodes.len())
         .map(|n| (0..graph.edges.len()).filter(|&e| !removed[e] && (graph.edges[e].from as usize == n || graph.edges[e].to as usize == n)).collect())
@@ -1927,10 +1921,10 @@ fn place_special(files: &dyn Files, rooms: &[DungeonRoom], entries: &[usize], gr
         if s.tag.to_ascii_lowercase().contains("injector") {
             return Err(unsupported(format!("dungeon: injector special room {}", s.path)));
         }
-        let blank = s.exits.iter().all(|e| e.door.is_none());
-        if blank {
-            return Err(unsupported(format!("dungeon: blank special room {} (ground match not ported)", s.path)));
-        }
+        // `0x1420a7da0` has a branch for a special room whose flag +9 is set (no tag, one ground
+        // on all corners, no doors): its candidates must be such rooms of the same ground. A
+        // special room always carries its `special` tag, so the flag (`0x141f982b0`: tag length
+        // 0 and ...) is never set for one and the branch is not reachable.
         let variants: Vec<Option<((u32, u32), Vec<Exit>)>> = (0..8u8)
             .map(|o| {
                 (s.mask == 0 || s.mask >> o & 1 != 0).then(|| {
