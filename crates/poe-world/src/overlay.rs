@@ -160,6 +160,9 @@ pub struct Overlays {
     occupied: Vec<u8>,
     width: i32,
     height: i32,
+    /// A `.dgr` graph: candidate positions are scanned cell by cell (the generator flag
+    /// `+0x90` bit 0 turns the 3-tile stride off, `0x141fa1e60`).
+    pub dungeon: bool,
     /// Overlays placed per room (for `limit=`).
     counts: HashMap<usize, u32>,
     /// Rooms placed so far (room index, origin, orientation): rooms like any other for the
@@ -179,6 +182,9 @@ pub struct RoomRect {
     pub rect: (i32, i32, i32, i32),
     pub feature: bool,
     pub described: bool,
+    /// Feature rooms whose `.arm` overlap equals the master's mark bit 4 on the rectangle
+    /// shrunk by this many cells per side (`0x141fa0ac0`); 0 marks the whole rectangle.
+    pub inset: i32,
 }
 
 impl Overlays {
@@ -237,7 +243,7 @@ impl Overlays {
             built.push((pass, groups));
         }
         let (width, height) = (map.width as i32, map.height as i32);
-        let mut s = Self { passes: built, rooms, occupied: vec![0; (width * height) as usize], width, height, counts: HashMap::new(), placed: Vec::new(), fill_rooms: Vec::new(), overlay_blank: overlay_blank.map(|p| p.to_ascii_lowercase()) };
+        let mut s = Self { passes: built, rooms, occupied: vec![0; (width * height) as usize], width, height, dungeon: false, counts: HashMap::new(), placed: Vec::new(), fill_rooms: Vec::new(), overlay_blank: overlay_blank.map(|p| p.to_ascii_lowercase()) };
         if s.passes.iter().any(|p| p.0.phases & 3 != 0) {
             for r in rooms_placed {
                 if r.described {
@@ -246,7 +252,8 @@ impl Overlays {
             }
             for r in rooms_placed {
                 if r.feature {
-                    s.mark(r.rect, 4);
+                    let (x0, y0, x1, y1) = r.rect;
+                    s.mark((x0 + r.inset, y0 + r.inset, (x1 - r.inset).max(x0 + r.inset), (y1 - r.inset).max(y0 + r.inset)), 4);
                     s.mark(r.rect, 8);
                 }
             }
@@ -261,6 +268,17 @@ impl Overlays {
                     }
                 }
             }
+        }
+        if let Ok(path) = std::env::var("POE_DBG_OCC") {
+            let mut out = String::new();
+            for y in 0..s.height {
+                for x in 0..s.width {
+                    let v = s.occupied[(y * s.width + x) as usize];
+                    out.push(if v == 0 { '.' } else { char::from_digit(v as u32, 16).unwrap_or('?') });
+                }
+                out.push('\n');
+            }
+            std::fs::write(path, out).ok();
         }
         Ok(s)
     }
@@ -311,7 +329,7 @@ impl Overlays {
                 stride3 = true;
             }
         }
-        if stride3 {
+        if stride3 && !self.dungeon {
             let mut y = 0;
             while y <= self.height - 3 {
                 let mut x = 0;
@@ -350,16 +368,32 @@ impl Overlays {
             }
         }
         if !covers_whole_pieces(map, (x, y, x + w, y + h)) {
+            if std::env::var("POE_DBG_OVERLAY").is_ok() { eprintln!("FIT {w}x{h} ({x},{y}) pieces"); }
             return Ok(false);
         }
-        Ok(room_fits(map, (x, y), &g.key, false, 1, master, types, files)? == 0)
+        let code = room_fits(map, (x, y), &g.key, false, 1, master, types, files)?;
+        if std::env::var("POE_DBG_OVERLAY").is_ok() { eprintln!("FIT {w}x{h} ({x},{y}) code {code}"); }
+        Ok(code == 0)
     }
 
     /// `0x141fa23e0`: draws positions until none are left; at each, a group that still fits,
     /// then a room of it (or nothing, padded to 100), its orientation and its height.
     #[allow(clippy::too_many_arguments)]
     fn place(&mut self, phase: u8, groups: &[Group], mut cands: Candidates, map: &mut TileMap, master: &mut Master, types: &mut TerrainTypes, files: &dyn Files, rng: &mut TerrainRng) -> Result<(), GenError> {
+        // Phase 2 passes the refill flag (`0x141fa23e0` param 3); the `.dgr` tile pass calls
+        // phase 1 without it, so the flag is whatever the register held (set in the traces).
+        let refill = phase == 2 || self.dungeon;
         let mut total: u32 = cands.0.values().map(|c| c.0).sum();
+        if std::env::var("POE_DBG_OVERLAY").is_ok() {
+            eprintln!("OVERLAY phase {phase} candidates {} total {total} groups {}", cands.0.len(), groups.len());
+            for (k, c) in cands.0.iter() {
+                eprintln!("  cand ({},{}) weight {} groups {:?}", k >> 16, k & 0xffff, c.0, c.1.iter().map(|x| (x.0, groups[x.0].key.size)).collect::<Vec<_>>());
+            }
+            for (gi, g) in groups.iter().enumerate() {
+                let n = cands.0.values().filter(|c| c.1.iter().any(|x| x.0 == gi)).count();
+                eprintln!("  group {gi} size {:?} flags {:#x} total {} positions {n} key {:?}", g.key.size, g.flags, g.total, g.key);
+            }
+        }
         while !cands.0.is_empty() {
             let mut r = rng.below(total);
             let mut pick = None;
@@ -443,7 +477,7 @@ impl Overlays {
             let mut taken: BTreeMap<(i32, i32), (String, u8, i16, bool)> = BTreeMap::new();
             for yy in pos.1..pos.1 + h {
                 for xx in pos.0..pos.0 + w {
-                    if phase == 2 {
+                    if refill {
                         if let Some(i) = map.index(xx, yy) {
                             if let (Some(cell), Some(p)) = (map.cells[i].clone(), map.piece_at[i]) {
                                 let piece = map.pieces[p].clone();
@@ -472,7 +506,7 @@ impl Overlays {
             self.mark((pos.0, pos.1, pos.0 + w, pos.1 + h), 1);
             *self.counts.entry(room.room).or_default() += 1;
             self.placed.push((room.room, pos, o));
-            if phase == 2 {
+            if refill {
                 self.refill(taken, map, master, files, rng)?;
             }
         }

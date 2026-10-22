@@ -24,6 +24,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             s => format!("{s:?}"),
         }
     );
+    println!("string1 {:?} bools {:?} numbers1 {:?} strings {:?}", arm.string1, arm.bools, arm.numbers1, arm.strings);
     for (y, row) in arm.grid.iter().enumerate() {
         let line: String = row
             .iter()
