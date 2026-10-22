@@ -1,6 +1,8 @@
 //! Loads the SDK's real `hello-server` example library (a cdylib built by the SDK, as a mod
 //! author would) and runs its `!hello` command through the host. Skipped, with a note, when the
-//! SDK has not been built (`cd third_party/Poe2ModSDK && cargo build --release`).
+//! SDK has not been built (`cargo build --release` in the SDK checkout: `POE2_MOD_SDK`, else
+//! `third_party/Poe2ModSDK` of this repository, else `modules/mod-sdk` of the hub that has this
+//! repository as `modules/server`).
 
 use std::path::PathBuf;
 
@@ -11,7 +13,14 @@ use poe_mod_host::{
 };
 
 fn sdk() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../third_party/Poe2ModSDK")
+    if let Some(p) = std::env::var_os("POE2_MOD_SDK") {
+        return PathBuf::from(p);
+    }
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    [root.join("third_party/Poe2ModSDK"), root.join("../mod-sdk")]
+        .into_iter()
+        .find(|p| p.join("Cargo.toml").is_file())
+        .unwrap_or_else(|| root.join("third_party/Poe2ModSDK"))
 }
 
 #[test]
