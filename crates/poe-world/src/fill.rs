@@ -325,7 +325,7 @@ impl Fill<'_> {
                 }
                 let c = chosen.ok_or_else(|| GenError::Unsupported(format!("no tile fits at ({mx},{my}) for fill room {path}")))?;
                 let def = self.master.tiles.tiles[c.tile].clone();
-                self.map.place(mx, my, &def.path, &def.tdt, c.orientation, low as i16, Some(c.tile));
+                self.map.place(mx, my, &def.path, &def.tdt, c.orientation, low as i16 + self.height.unwrap_or(0), Some(c.tile));
                 self.note(mx, my, &def.tdt)?;
             }
         }

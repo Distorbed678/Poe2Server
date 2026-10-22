@@ -21,6 +21,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (mut map, mut n) = (false, 4usize);
     let mut at: Option<(i32, i32, i32)> = None;
     let mut margin: Option<i32> = None;
+    let mut dy = 0i32;
+    let mut lat: Option<Vec<i32>> = None;
     let mut units: Option<(i32, i32, i32)> = None;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -34,6 +36,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let v: Vec<i32> = args.next().ok_or("--units margin,step,size")?.split(',').map(|v| v.parse().unwrap_or(0)).collect();
                 units = Some((v[0], v[1], v[2]));
             }
+            "--lat" => lat = Some(args.next().ok_or("--lat")?.split(',').map(|v| v.parse().unwrap_or(0)).collect()),
+            "--dy" => dy = args.next().ok_or("--dy")?.parse()?,
             "--margin" => margin = Some(args.next().ok_or("--margin M")?.parse()?),
             "--n" => n = args.next().ok_or("--n needs a number")?.parse()?,
             _ => dirs.push(a),
@@ -144,13 +148,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     _ => 0,
                 }
             });
-            let ours: Vec<String> = tm.pieces.iter().map(|p| format!("{} {} o{} {}", p.x - margin, p.y - margin, p.orientation, p.path.to_ascii_lowercase())).collect();
+            let ours: Vec<String> = tm.pieces.iter().map(|p| format!("{} {} o{} {}", p.x - margin, p.y - margin - dy, p.orientation, p.path.to_ascii_lowercase())).collect();
             let same = ours.iter().zip(&theirs).take_while(|(a, b)| **a == b.0).count();
             println!("  placements: ours {}, client {}, first {same} identical", ours.len(), theirs.len());
             if std::env::var("POE_PLACE_SETS").is_ok() {
-                let k1 = theirs.iter().take_while(|t| t.1 == "142098dcc").count();
+                let k1 = theirs.iter().take_while(|t| t.1 == "142098dcc" || t.1 == "14209f9a7" || std::env::var("POE_ALLPLACE").is_ok() && t.1 != "x").count();
                 println!("  pass A placements of the client: {k1}");
-                let a: std::collections::BTreeSet<&String> = ours.iter().take(k1).collect();
+                let a: std::collections::BTreeSet<&String> = ours.iter().filter(|o| !o.starts_with('-') && o.split(' ').nth(1).and_then(|v| v.parse::<i32>().ok()).is_some_and(|y| y >= 0)).take(k1).collect();
                 let b: std::collections::BTreeSet<&String> = theirs.iter().take(k1).map(|t| &t.0).collect();
                 let key = |s: &&String| {
                     let f: Vec<&str> = s.split(' ').collect();
@@ -171,6 +175,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             for k in same..(same + 3).min(ours.len().max(theirs.len())) {
                 println!("    {k}: ours {:?}\n        client {:?}", ours.get(k), theirs.get(k));
+            }
+        }
+        if let Some(l) = &lat {
+            println!("  lattice heights (storeys; ! = no height flag) x {}..{}", l[0], l[2]);
+            for y in l[1]..=l[3] {
+                let row: String = (l[0]..=l[2]).map(|x| match tm.point_index(x, y) { Some(i) => { let p = &tm.lattice[i]; format!("{:>3}{}", p.height, if p.flags & 2 != 0 { ' ' } else { '!' }) } None => "  ? ".into() }).collect();
+                println!("  y{y:4} {row}");
             }
         }
         if let Some((m, step, size)) = units {
