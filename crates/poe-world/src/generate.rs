@@ -148,6 +148,8 @@ pub struct TileMap {
     /// Cells and corners tiles wrote outside the map (a tile may overhang the region by one
     /// cell): the client's region is a window into the full map, so `embed` keeps them.
     spill: Vec<Spill>,
+    /// The doodads of the rooms placed in this map, in cells of this map (`crate::doodads`).
+    pub doodads: Vec<crate::doodads::Doodad>,
 }
 
 #[derive(Debug, Clone)]
@@ -167,6 +169,11 @@ pub struct LatticePoint {
     pub flags: u8,
 }
 
+/// A doodad moved by `offset` tiles.
+fn shifted(d: &crate::doodads::Doodad, offset: (i32, i32)) -> crate::doodads::Doodad {
+    crate::doodads::Doodad { x: d.x + offset.0 * crate::doodads::TILE, y: d.y + offset.1 * crate::doodads::TILE, ..d.clone() }
+}
+
 impl TileMap {
     pub fn new(width: u32, height: u32) -> Self {
         let n = (width * height) as usize;
@@ -181,6 +188,7 @@ impl TileMap {
             ground_flags: HashMap::new(),
             edge_flags: HashMap::new(),
             spill: Vec::new(),
+            doodads: Vec::new(),
         }
     }
 
@@ -195,6 +203,7 @@ impl TileMap {
             .iter()
             .map(|p| Piece { x: p.x + offset.0, y: p.y + offset.1, ..p.clone() })
             .collect();
+        m.doodads = self.doodads.iter().map(|d| shifted(d, offset)).collect();
         for y in 0..self.height as i32 {
             for x in 0..self.width as i32 {
                 let i = self.index(x, y).unwrap();
@@ -270,6 +279,7 @@ impl TileMap {
     /// tiles of this map's set) and corners.
     pub fn paste(&mut self, sub: &TileMap, origin: (i32, i32)) {
         let base = self.pieces.len();
+        self.doodads.extend(sub.doodads.iter().map(|d| shifted(d, origin)));
         self.pieces.extend(sub.pieces.iter().map(|p| Piece { x: p.x + origin.0, y: p.y + origin.1, tile: None, ..p.clone() }));
         for y in 0..sub.height as i32 {
             for x in 0..sub.width as i32 {
@@ -1160,6 +1170,10 @@ impl Derepeat<'_> {
 /// neighbour one tile-size away (same tile, mirror orientation across the shared side; sides
 /// up, right, down, left) is re-picked (`0x141fdfa60`).
 pub fn derepeat_pass(map: &mut TileMap, master: &Master, rooms: &[RoomPlacement], rng: &mut TerrainRng) {
+    // The same placements are the ones the doodad pass walks (`crate::doodads`).
+    for r in rooms {
+        map.doodads.extend(crate::doodads::room_doodads(r.room, r.origin, r.orientation));
+    }
     let mut in_room = vec![false; map.cells.len()];
     let mut overridden = vec![false; map.lattice.len()];
     for r in rooms {

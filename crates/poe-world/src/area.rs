@@ -45,8 +45,21 @@ pub struct Generated {
     /// The topology's graph file.
     pub graph: String,
     pub map: TileMap,
-    /// RNG draws used (the client continues with doodads and entities).
+    /// The doodads of every placed room, in cells of the final map (`map.doodads`, with
+    /// `counted` set); the ones that count make the doodad hash ([`Generated::doodad_hash`]).
+    pub doodads: Vec<crate::doodads::Doodad>,
+    /// RNG draws used by the layout (the client continues with doodads and entities).
     pub draws: u64,
+    /// The bounded draws `(n, result)` of the doodad pass, when the RNG records them
+    /// ([`TerrainRng::log`]); empty otherwise.
+    pub doodad_draws: Vec<(u32, u32)>,
+}
+
+impl Generated {
+    /// The client's doodad hash of this layout.
+    pub fn doodad_hash(&self) -> u32 {
+        crate::doodads::doodad_hash(self.doodads.iter().filter(|d| d.counted))
+    }
 }
 
 /// The topology graphs (`.tgr`/`.dgr`) an area chooses from (`0x141fdfe30`): those whose last
@@ -204,7 +217,11 @@ pub fn generate_probed_files(gd: &GameData, files: &dyn crate::generate::Files, 
     let special: Vec<String> = gd.table("SpecialTiles").ok().map(|t| (0..).map_while(|r| t.row(r)).filter_map(|r| r.str("TDTFile").ok().map(String::from)).collect()).unwrap_or_default();
     let files = WithSpecialTiles { inner: files, special };
     let map = generate_graph_probed(&files, &graph, rng, probe)?;
-    Ok(Generated { graph: dgr, map, draws: rng.draws })
+    let draws = rng.draws;
+    let logged = rng.log.as_ref().map(Vec::len);
+    let doodads = crate::doodads::resolve(gd, &files, rng, map.doodads.clone());
+    let doodad_draws = logged.and_then(|n| rng.log.as_ref().map(|l| l[n..].to_vec())).unwrap_or_default();
+    Ok(Generated { graph: dgr, map, doodads, draws, doodad_draws })
 }
 
 /// Turns a graph into region orientation `o` (edge types decide their mirroring).

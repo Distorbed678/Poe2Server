@@ -8,6 +8,7 @@
 //! - [`export`]: the client DLL's area exports, the reference for comparisons.
 
 pub mod area;
+pub mod doodads;
 pub mod dungeon;
 pub mod dungeon_tiles;
 pub mod edge_tiles;
