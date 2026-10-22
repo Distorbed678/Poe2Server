@@ -39,6 +39,9 @@ pub struct ToyEntry {
     pub exclusions: Vec<String>,
     /// Allowed orientations (bit per orientation).
     pub orientations: u8,
+    /// The entry listed its orientations (`R90 FI ...`); a pick then counts the room once per
+    /// listed orientation that turns the group's key, else once.
+    pub explicit: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -105,6 +108,8 @@ pub fn parse_toy(text: &str) -> Result<Vec<ToyPass>, GenError> {
             }
             if e.orientations == 0 {
                 e.orientations = 0xff;
+            } else {
+                e.explicit = true;
             }
             pass.entries.push(e);
         } else {
@@ -134,6 +139,7 @@ pub fn parse_toy(text: &str) -> Result<Vec<ToyPass>, GenError> {
 /// One room of a group.
 #[derive(Debug, Clone)]
 struct GroupRoom {
+    explicit: bool,
     room: usize,
     limit: u8,
     exclusions: Vec<String>,
@@ -226,7 +232,7 @@ impl Overlays {
                     };
                     match groups[g].rooms.iter_mut().find(|r| r.room == idx) {
                         Some(r) => r.orientations |= 1 << o,
-                        None => groups[g].rooms.push(GroupRoom { room: idx, limit: e.limit, exclusions: e.exclusions.clone(), orientations: 1 << o, weight: e.weight }),
+                        None => groups[g].rooms.push(GroupRoom { explicit: e.explicit, room: idx, limit: e.limit, exclusions: e.exclusions.clone(), orientations: 1 << o, weight: e.weight }),
                     }
                 }
             }
@@ -454,7 +460,7 @@ impl Overlays {
                 }
                 // A position counts a room once, but the pick lists it once per orientation
                 // whose turned root key is the group's (the sums were 200 for a symmetric room).
-                if self.dungeon {
+                if self.dungeon && room.explicit {
                     for o in 0..8u8 {
                         if room.orientations >> o & 1 != 0 {
                             options.push((Some((ri, o)), room.weight));
@@ -466,6 +472,9 @@ impl Overlays {
             }
             if options.is_empty() {
                 continue;
+            }
+            if std::env::var("POE_DBG_OVERLAY").is_ok() {
+                eprintln!("OPTIONS pos {pos:?} group {gi} {:?}", options.iter().map(|o| (o.0.map(|(r, ro)| (self.rooms[g.rooms[r].room].0.rsplit('/').next().unwrap().to_string(), ro, g.rooms[r].orientations)), o.1)).collect::<Vec<_>>());
             }
             let mut sum: u32 = options.iter().map(|o| o.1).sum();
             if sum < 100 {
