@@ -850,7 +850,9 @@ pub fn room_pass_oriented(
             let (sw, sh) = (key.size.0.max(1) as i32, key.size.1.max(1) as i32);
             let mut key = key.oriented(o);
             // Slot +0x72: the lowest corner's height moves into the tile height.
-            let low = key.heights.iter().map(|&v| v as i8).min().unwrap_or(0);
+            // (Only overlay rooms are checked against the client for this; node rooms of
+            // `.tgr` graphs keep the absolute corner heights.)
+            let low = if mark { key.heights.iter().map(|&v| v as i8).min().unwrap_or(0) } else { 0 };
             for v in &mut key.heights {
                 *v = (*v as i8 - low) as u8;
             }
