@@ -169,6 +169,8 @@ pub struct Overlays {
     /// A `.dgr` graph: candidate positions are scanned cell by cell (the generator flag
     /// `+0x90` bit 0 turns the 3-tile stride off, `0x141fa1e60`).
     pub dungeon: bool,
+    /// Dungeon: tiles the refill placed that the exit wiggle may move (the fill listener `0x14209a2c0`).
+    pub wiggle: Vec<(i32, i32)>,
     /// Overlays placed per room (for `limit=`).
     counts: HashMap<usize, u32>,
     /// Rooms placed so far (room index, origin, orientation): rooms like any other for the
@@ -249,7 +251,7 @@ impl Overlays {
             built.push((pass, groups));
         }
         let (width, height) = (map.width as i32, map.height as i32);
-        let mut s = Self { passes: built, rooms, occupied: vec![0; (width * height) as usize], width, height, dungeon: false, counts: HashMap::new(), placed: Vec::new(), fill_rooms: Vec::new(), overlay_blank: overlay_blank.map(|p| p.to_ascii_lowercase()) };
+        let mut s = Self { passes: built, rooms, occupied: vec![0; (width * height) as usize], width, height, dungeon: false, wiggle: Vec::new(), counts: HashMap::new(), placed: Vec::new(), fill_rooms: Vec::new(), overlay_blank: overlay_blank.map(|p| p.to_ascii_lowercase()) };
         if s.passes.iter().any(|p| p.0.phases & 3 != 0) {
             for r in rooms_placed {
                 if r.described {
@@ -626,7 +628,7 @@ impl Overlays {
             }
             let ground = map.point_index(x, y).and_then(|k| map.lattice[k].ground.clone());
             let walkable = ground.as_ref().is_none_or(|g| map.gt_flags(g) & 4 != 0);
-            let placed = crate::fill::fill_cell(map, master, files, (x, y), ground, walkable, rng)?;
+            let placed = crate::fill::fill_cell(map, master, files, (x, y), ground, walkable, self.dungeon.then_some(&mut self.wiggle), rng)?;
             self.fill_rooms.extend(placed);
         }
         Ok(())

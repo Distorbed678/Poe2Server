@@ -642,7 +642,7 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
     if let Some(o) = &mut overlays {
         o.run(2, &mut map, &mut master, &mut types, files, rng)?;
     }
-    let wiggle = [moved, wiggle].concat();
+    let wiggle = [moved, overlays.as_ref().map(|o| o.wiggle.clone()).unwrap_or_default(), wiggle].concat();
     crate::dungeon_tiles::wiggle(&mut master, files, &mut map, wiggle, rng)?;
     // De-repetition over the rooms and fill rooms, then the outer buffer.
     let mut placements: Vec<RoomPlacement> = grid

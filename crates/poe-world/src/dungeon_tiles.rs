@@ -1002,6 +1002,7 @@ pub fn wiggle(master: &mut Master, files: &dyn crate::generate::Files, map: &mut
     // `0x141fff9b0`: a set ordered by x·65536 + y.
     list.sort_by_key(|p| p.0.wrapping_mul(0x10000).wrapping_add(p.1));
     list.dedup();
+    if std::env::var("POE_DBG_WIGGLE").is_ok() { eprintln!("WLIST {:?}", list); }
     rng.below(list.len() as u32);
     let n = list.len();
     for i in 0..n {
