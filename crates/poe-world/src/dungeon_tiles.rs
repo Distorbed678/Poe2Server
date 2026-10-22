@@ -276,7 +276,8 @@ pub struct TilePass<'a> {
     pub overlap_fixes: bool,
     /// `.tsi` `DisableDoors` (master +0x167): no door placement.
     pub doors_disabled: bool,
-    /// The graph's three ground types (pass context +0x20 default, +0x28 lowest, +0x30 highest).
+    /// The graph's ground types as the pass context holds them: +0x20 the default (graph line 2),
+    /// +0x28 the ground of the lowest points (line 3), +0x30 that of the highest (line 1).
     pub grounds: [Option<String>; 3],
 }
 

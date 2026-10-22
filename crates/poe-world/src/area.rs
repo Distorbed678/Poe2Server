@@ -588,7 +588,7 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
     }
     let edge_types = master.edge_type_table(files)?;
     let flag = |k: &str| tsi.get(k).is_some_and(|v| v.trim() != "0");
-    let pass = crate::dungeon_tiles::TilePass { master: &master, ecf: &ecf, unit, overlap: grid.overlap, edge_types: &edge_types, overlap_fixes: flag("AllowInteriorOverlapFixes"), doors_disabled: flag("DisableDoors"), grounds: graph.ground_types.clone().map(|g| (!g.is_empty()).then_some(g)) };
+    let pass = crate::dungeon_tiles::TilePass { master: &master, ecf: &ecf, unit, overlap: grid.overlap, edge_types: &edge_types, overlap_fixes: flag("AllowInteriorOverlapFixes"), doors_disabled: flag("DisableDoors"), grounds: [1, 2, 0].map(|i| (!graph.ground_types[i].is_empty()).then(|| graph.ground_types[i].clone())) };
     let (cells, moved) = pass.run(&grid, &rooms, &mut map, rng)?;
     if let Ok(path) = std::env::var("POE_DUMP_PIECES") {
         let mut out = String::new();

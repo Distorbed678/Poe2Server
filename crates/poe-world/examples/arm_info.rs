@@ -24,6 +24,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             s => format!("{s:?}"),
         }
     );
+    if let Slot::K(k) = &arm.root_slot { println!("root corners {:?} edges {:?} thingies {}", k.corners.iter().map(|c| (c.ground.clone(), c.height)).collect::<Vec<_>>(), k.edges.iter().map(|e| e.edge.clone()).collect::<Vec<_>>(), arm.thingies.len()); }
     println!("string1 {:?} bools {:?} numbers1 {:?} strings {:?}", arm.string1, arm.bools, arm.numbers1, arm.strings);
     for (y, row) in arm.grid.iter().enumerate() {
         let line: String = row
