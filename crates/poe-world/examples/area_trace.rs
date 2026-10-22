@@ -74,7 +74,7 @@ fn compare_lattice(step: &str, map: &TileMap, lines: &[Vec<String>]) {
                 same += 1;
             } else {
                 diff += 1;
-                if diff <= 6 {
+                if diff <= std::env::var("POE_LATTICE_DIFFS").ok().and_then(|v| v.parse().ok()).unwrap_or(6) {
                     println!("  lattice {step} ({x},{y}): ours {og} {} {:#x}, client {tg} {h} {fl:#x}", p.height, p.flags);
                 }
             }

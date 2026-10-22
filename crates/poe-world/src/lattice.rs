@@ -88,6 +88,9 @@ fn flood(map: &mut TileMap, tiles: &TileSet, p: (i32, i32), dir: usize) {
         return;
     }
     let blank = gf & 8 != 0;
+    if std::env::var("POE_FLOOD_DEBUG").is_ok() {
+        eprintln!("FLOOD from {p:?} dir {dir} ground {g} flags {gf:#x}");
+    }
     let mut queue = VecDeque::new();
     let q = (p.0 + DIR[dir].0, p.1 + DIR[dir].1);
     if in_lattice(map, q) && !edge_in_the_way(map, tiles, p, q, dir) {

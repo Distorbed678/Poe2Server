@@ -130,6 +130,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         graph: &graph,
         nodes: nodes.iter().map(|n| n.pos).collect(),
         points: edge_points,
+        ends: vec![[None; 2]; graph.edges.len()],
         removed,
     };
     let mut types = TerrainTypes::default();

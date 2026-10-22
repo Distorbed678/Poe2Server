@@ -319,6 +319,13 @@ impl TileMap {
         }
     }
 
+    /// Adds the `.gt` flags of a room's grounds.
+    pub fn use_room_grounds(&mut self, room: &Room) {
+        for (g, f) in &room.ground_flags {
+            self.ground_flags.entry(g.clone()).or_insert(*f);
+        }
+    }
+
     /// `.gt` flags of a ground (`+0x24`).
     pub fn gt_flags(&self, ground: &str) -> u8 {
         self.ground_flags.get(ground).copied().unwrap_or(0x0f)
@@ -671,6 +678,9 @@ pub struct Room {
     /// indices (1-based, 0 = none). The file's last line; `poe_data_tools` does not parse it
     /// for version 36. Tiles touching an override are not re-picked by the de-repetition pass.
     pub lattice: Vec<u32>,
+    /// `.gt` flags of the grounds the room names (string table), for [`TileMap::ground_flags`]:
+    /// rooms use grounds no tile-set tile has.
+    pub ground_flags: Vec<(String, u8)>,
 }
 
 impl Room {
@@ -713,7 +723,16 @@ pub fn load_room(files: &dyn Files, path: &str) -> Result<Room, GenError> {
         })
         .filter(|v| v.len() == want)
         .unwrap_or_default();
-    Ok(Room { arm, lattice })
+    let mut ground_flags: Vec<(String, u8)> = Vec::new();
+    for g in arm.strings.iter().filter(|s| s.to_ascii_lowercase().ends_with(".gt")) {
+        let key = g.to_ascii_lowercase().replace('\\', "/");
+        if ground_flags.iter().any(|(k, _)| *k == key) {
+            continue;
+        }
+        let f = crate::rooms::ground_flags(&crate::text::decode_utf16(&files.read(&key)?));
+        ground_flags.push((key, f));
+    }
+    Ok(Room { arm, lattice, ground_flags })
 }
 
 /// The key of a `k` slot (also a room's root slot).
@@ -787,6 +806,7 @@ pub fn room_pass_oriented(
 ) -> Result<(), GenError> {
     let (w, h) = (room.width(), room.height());
     let room_full = room;
+    map.use_room_grounds(room_full);
     let room = &room.arm;
     for x in 0..w {
         for y in 0..h {

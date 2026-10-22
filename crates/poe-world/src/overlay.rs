@@ -268,6 +268,9 @@ impl Overlays {
     /// `0x141fa1a70`: the passes of phase `phase` (1 or 2).
     #[allow(clippy::too_many_arguments)]
     pub fn run(&mut self, phase: u8, map: &mut TileMap, master: &mut Master, types: &mut TerrainTypes, files: &dyn Files, rng: &mut TerrainRng) -> Result<(), GenError> {
+        for (_, r) in &self.rooms {
+            map.use_room_grounds(r);
+        }
         for pi in 0..self.passes.len() {
             if self.passes[pi].0.phases & phase == 0 {
                 continue;

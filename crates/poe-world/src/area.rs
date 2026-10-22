@@ -610,7 +610,7 @@ fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng:
     let rel = |k: &str| tsi.get(k).map(|v| format!("{dir}/{v}"));
     let mut master = Master::load(files, &rel("TileSet").ok_or_else(|| data("no TileSet"))?, &rel("FillTiles").ok_or_else(|| data("no FillTiles"))?)?;
     let set = RoomSet::load(files, &rel("RoomSet").ok_or_else(|| data("no RoomSet"))?)?;
-    let mut placed_graph = PlacedGraph { graph, nodes: nodes.iter().map(|n| n.pos).collect(), points: edge_points, removed };
+    let mut placed_graph = PlacedGraph { graph, nodes: nodes.iter().map(|n| n.pos).collect(), ends: vec![[None; 2]; graph.edges.len()], points: edge_points, removed };
     let mut types = TerrainTypes::default();
 
     // `0x1420c7400` sorts the room-less nodes before placement: virtual nodes (touching a
@@ -681,18 +681,6 @@ fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng:
         }
     }
     probe(Stage::Rooms(&map));
-
-    // Exploded nodes (`0x1420cb200`). A virtual node that a tile fits is placed with the rooms
-    // instead (`0x1420caa40`), which is not ported yet.
-    for &n in virtual_nodes.iter().chain(&junctions) {
-        if virtual_nodes.contains(&n) {
-            let (sides, key) = crate::rooms::node_key(&placed_graph, n, &mut types, files)?;
-            if !node_tiles::candidates(&placed_graph, n, 8, "", &key, &sides, &master.tiles, &mut types, files)?.is_empty() {
-                return Err(data(format!("node {n}: virtual node tile at the room stage is not ported")));
-            }
-        }
-        node_tiles::explode(&mut placed_graph, n, tiles, &mut types, files)?;
-    }
 
     // Edge ends at the rooms' exits (`0x1420c5750`, `0x1420c5b50`), then routing.
     let mut route: Vec<RouteEdge> = Vec::new();
@@ -776,12 +764,45 @@ fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng:
             r.offsets[which] = SIDE_DIR[side];
         }
     }
+    // The client has cut the rooms' edges and split the room nodes per exit before it
+    // explodes anything (`0x1420c9970` before `0x1420cb200`): node keys of junctions see the
+    // exits as the other ends.
+    for (i, ri) in route_index.iter().enumerate() {
+        if *ri != usize::MAX {
+            placed_graph.points[i] = route[*ri].points.clone();
+            placed_graph.ends[i] = [Some(route[*ri].ends[0]), Some(route[*ri].ends[1])];
+        }
+    }
+
+    // Exploded nodes (`0x1420cb200`). A virtual node that a tile fits is placed with the rooms
+    // instead (`0x1420caa40`), which is not ported yet.
+    for &n in virtual_nodes.iter().chain(&junctions) {
+        if virtual_nodes.contains(&n) {
+            let (sides, key) = crate::rooms::node_key(&placed_graph, n, &mut types, files)?;
+            if !node_tiles::candidates(&placed_graph, n, 8, "", &key, &sides, &master.tiles, &mut types, files)?.is_empty() {
+                return Err(data(format!("node {n}: virtual node tile at the room stage is not ported")));
+            }
+        }
+        node_tiles::explode(&mut placed_graph, n, tiles, &mut types, files)?;
+    }
+    for (i, ri) in route_index.iter().enumerate() {
+        if *ri != usize::MAX {
+            route[*ri].points = placed_graph.points[i].clone();
+        }
+    }
+
     let mut router = Router::new(tiles.0, tiles.1, &map, rng);
     for e in &route {
         router.reserve(e);
     }
     for (k, r) in route.iter_mut().enumerate() {
-        if !router.route(r, rng) {
+        let before = r.points.clone();
+        let ok = router.route(r, rng);
+        if std::env::var("POE_ROUTE_DEBUG").is_ok() {
+            let f = |v: &[(i32, i32)]| v.iter().map(|p| format!("{},{}", p.0, p.1)).collect::<Vec<_>>().join(" ");
+            eprintln!("ROUTE {k} {},{}->{},{} off {:?} ok={} before [{}]\t{}", r.ends[0].0, r.ends[0].1, r.ends[1].0, r.ends[1].1, r.offsets, ok as u8, f(&before), f(&r.points));
+        }
+        if !ok {
             return Err(data(format!("edge {k} failed to route (retries not ported)")));
         }
     }
@@ -995,6 +1016,7 @@ fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng:
         rooms.extend(o.placed.iter().map(|&(i, origin, orientation)| RoomPlacement { room: o.room(i), origin, orientation }));
     }
     derepeat_pass(&mut map, &master, &rooms, rng);
+    crate::postunique::run(&mut map, &mut master, files, rng)?;
 
     // Outer buffer.
     let edge_types = master.edge_type_table(files)?;

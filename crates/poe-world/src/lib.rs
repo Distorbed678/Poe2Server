@@ -19,6 +19,7 @@ pub mod hash;
 pub mod lattice;
 pub mod outer_buffer;
 pub mod overlay;
+pub mod postunique;
 pub mod region;
 pub mod layout;
 pub mod node_tiles;

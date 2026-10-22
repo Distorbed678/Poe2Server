@@ -513,6 +513,9 @@ pub fn explode(g: &mut crate::rooms::PlacedGraph, node: usize, tiles: (i32, i32)
         }
     }
     let (sides, _) = node_key(&*g, node, types, files)?;
+    if std::env::var("POE_ROUTE_DEBUG").is_ok() {
+        eprintln!("EXPLODE node {node} at {:?} slots {:?} sides {:?} others {:?} pts {:?}", g.nodes[node], slots, sides, g.nodes.iter().enumerate().collect::<Vec<_>>(), slots.iter().flatten().map(|&e| (e, g.graph.edges[e].from, g.graph.edges[e].to, g.points[e].clone())).collect::<Vec<_>>());
+    }
     for (slot, e) in slots.iter().enumerate() {
         let Some(e) = *e else { continue };
         let side = sides[slot];

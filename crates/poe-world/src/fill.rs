@@ -250,6 +250,7 @@ impl Fill<'_> {
     #[allow(clippy::too_many_arguments)]
     fn place_room(&mut self, x: i32, y: i32, path: &str, o: u8, ground: Option<String>, _walkable: bool, rng: &mut TerrainRng) -> Result<(), GenError> {
         let room = load_room(self.files, &path.to_ascii_lowercase())?;
+        self.map.use_room_grounds(&room);
         let (w, h) = (room.width(), room.height());
         for cx in 0..w {
             for cy in 0..h {
