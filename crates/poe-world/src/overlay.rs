@@ -230,7 +230,9 @@ impl Overlays {
             }
             groups.retain(|g| g.total != 0);
             if pass.order == 2 {
-                return Err(GenError::Unsupported("overlay SizeOrder sorting is not ported".into()));
+                // `SizeOrder` (`0x141f9f4c0`, insertion or merge sort `0x141fc45c0`): largest
+                // key first by area, then width, then height; equal ones keep their order.
+                groups.sort_by_key(|g| std::cmp::Reverse((g.key.size.0 as u32 * g.key.size.1 as u32, g.key.size.0, g.key.size.1)));
             }
             built.push((pass, groups));
         }
