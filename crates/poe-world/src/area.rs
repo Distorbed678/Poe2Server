@@ -902,13 +902,22 @@ fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng:
     // end points.
     smoothing::round_corners(&mut lg);
     let mut tile_nodes = Vec::new();
-    for gi in 0..graph.nodes.len() {
+    for n in 0..lg.nodes.len() {
         // Sorted at the start of the tile stage (`0x1420c7400`): virtual nodes are not in the
-        // tile list.
-        if !graph.nodes[gi].room_type.is_empty() || virtual_nodes.contains(&gi) {
-            continue;
+        // tile list. Nodes the splits made (no original) count too unless they are fixed (they
+        // copy the flag of the node they were made from).
+        match lg.nodes[n].orig {
+            Some(gi) => {
+                if !graph.nodes[gi].room_type.is_empty() || virtual_nodes.contains(&gi) {
+                    continue;
+                }
+            }
+            None => {
+                if lg.nodes[n].fixed {
+                    continue;
+                }
+            }
         }
-        let Some(n) = lg.nodes.iter().position(|x| x.orig == Some(gi)) else { continue };
         let edges: Vec<usize> = lg.nodes[n].slots.iter().flatten().copied().collect();
         let mut near = false;
         if let [e] = edges[..] {
