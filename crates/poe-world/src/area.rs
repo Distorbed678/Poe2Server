@@ -124,15 +124,26 @@ pub fn generate_with(gd: &GameData, area_id: &str, rng: &mut TerrainRng, forced:
     generate_probed(gd, area_id, rng, forced, &mut |_| {})
 }
 
+/// [`generate_with`] reading the game files through `files` instead of `gd.files()`: a
+/// [`crate::generate::CachedFiles`] makes repeated and parallel generation (verification tools)
+/// cheap.
+pub fn generate_with_files(gd: &GameData, files: &dyn crate::generate::Files, area_id: &str, rng: &mut TerrainRng, forced: Option<Forced>) -> Result<Generated, GenError> {
+    generate_probed_files(gd, files, area_id, rng, forced, &mut |_| {})
+}
+
 /// [`generate_with`] reporting intermediate [`Stage`]s to `probe`, for comparing with the
 /// client's trace.
 pub fn generate_probed(gd: &GameData, area_id: &str, rng: &mut TerrainRng, forced: Option<Forced>, probe: &mut dyn FnMut(Stage)) -> Result<Generated, GenError> {
+    generate_probed_files(gd, gd.files(), area_id, rng, forced, probe)
+}
+
+/// [`generate_probed`] with the file source given.
+pub fn generate_probed_files(gd: &GameData, files: &dyn crate::generate::Files, area_id: &str, rng: &mut TerrainRng, forced: Option<Forced>, probe: &mut dyn FnMut(Stage)) -> Result<Generated, GenError> {
     let forced = forced.unwrap_or_default();
     let graphs = topology_entries(gd, area_id, 1)?;
     if graphs.is_empty() {
         return Err(data(format!("{area_id}: no topologies")));
     }
-    let files = gd.files();
     let sub = rng.below(u32::MAX);
     let index = match forced.topology {
         Some(f) if f >= 1 && (f as usize) <= graphs.len() => f as usize - 1,
@@ -143,7 +154,7 @@ pub fn generate_probed(gd: &GameData, area_id: &str, rng: &mut TerrainRng, force
     // allowed one, right for the act 1 areas checked). Without a match the client draws it from
     // the topology's list (`0x141ff90f0`: `region::pick(mask, lcg_index(sub, 0x348))`).
     let orientation = forced.orientation.filter(|&o| o < 8).unwrap_or(if mask == 0 || mask == 0xff { 0 } else { mask.trailing_zeros() as u8 });
-    let mut graph = Graph::parse_bytes(&crate::generate::Files::read(files, &dgr)?).map_err(|e| data(format!("{dgr}: {e:?}")))?;
+    let mut graph = Graph::parse_bytes(&files.read(&dgr)?).map_err(|e| data(format!("{dgr}: {e:?}")))?;
     turn(files, &mut graph, orientation)?;
     let map = generate_graph_probed(files, &graph, rng, probe)?;
     Ok(Generated { graph: dgr, map, draws: rng.draws })
@@ -490,7 +501,9 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
     let dir = tsi_path.rsplit_once('/').map_or("", |d| d.0);
     let rel = |k: &str| tsi.get(k).map(|v| format!("{dir}/{v}"));
     let set = RoomSet::load(files, &rel("RoomSet").ok_or_else(|| data("no RoomSet"))?)?;
-    let grid = crate::dungeon::layout(files, graph, removed, &set, rng)?;
+    // `RoomOverlap` is master +0x14b; the parser's default is 1 (constructor `0x14292e190`).
+    let overlap: u32 = tsi.get("RoomOverlap").and_then(|v| v.trim().parse().ok()).unwrap_or(1);
+    let grid = crate::dungeon::layout(files, graph, removed, &set, overlap, rng)?;
     if std::env::var("POE_DBG").is_ok() {
         for (i, r) in grid.rooms.iter().enumerate() {
             eprintln!("DBG room {i} {} o{} origin {:?} size {:?} special {}", r.path, r.orientation, r.origin, r.size, r.special);

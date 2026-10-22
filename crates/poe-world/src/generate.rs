@@ -50,6 +50,34 @@ impl Files for poe_data::GameFiles {
     }
 }
 
+/// Caches what an inner [`Files`] returns (found files only). One generator run reads a few
+/// hundred files and the bundle reader behind `GameFiles` decompresses under a single lock, so
+/// verification tools that generate many layouts (`area_vectors`, `area_probe`,
+/// `forced_verify`) share one of these across their threads; the server keeps using the plain
+/// files.
+pub struct CachedFiles<'a> {
+    inner: &'a (dyn Files + Sync),
+    cache: std::sync::RwLock<std::collections::HashMap<String, std::sync::Arc<Vec<u8>>>>,
+}
+
+impl<'a> CachedFiles<'a> {
+    pub fn new(inner: &'a (dyn Files + Sync)) -> Self {
+        Self { inner, cache: Default::default() }
+    }
+}
+
+impl Files for CachedFiles<'_> {
+    fn read(&self, path: &str) -> Result<Vec<u8>, GenError> {
+        let key = path.to_ascii_lowercase();
+        if let Some(b) = self.cache.read().unwrap_or_else(|e| e.into_inner()).get(&key) {
+            return Ok(b.as_ref().clone());
+        }
+        let bytes = std::sync::Arc::new(self.inner.read(path)?);
+        self.cache.write().unwrap_or_else(|e| e.into_inner()).insert(key, bytes.clone());
+        Ok(bytes.as_ref().clone())
+    }
+}
+
 /// A tile on the map: which `.tdt`, where its corner is, its orientation and which of its
 /// sub-tiles covers this cell (row-major in the tile's own orientation).
 #[derive(Debug, Clone, PartialEq, Eq)]

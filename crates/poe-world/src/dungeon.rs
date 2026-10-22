@@ -281,8 +281,9 @@ impl Grid {
     }
 }
 
-/// The dungeon layout of a pruned `.dgr` graph (`0x1420ac3e0`).
-pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet, rng: &mut TerrainRng) -> Result<Grid, GenError> {
+/// The dungeon layout of a pruned `.dgr` graph (`0x1420ac3e0`); `overlap` is the master's
+/// `RoomOverlap`.
+pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet, overlap: u32, rng: &mut TerrainRng) -> Result<Grid, GenError> {
     let mut types = TerrainTypes::default();
     let mut rooms: Vec<DungeonRoom> = set
         .rooms
@@ -328,8 +329,7 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
     let slots: Vec<Vec<usize>> = (0..graph.nodes.len())
         .map(|n| (0..graph.edges.len()).filter(|&e| !removed[e] && (graph.edges[e].from as usize == n || graph.edges[e].to as usize == n)).collect())
         .collect();
-    // Master +0x14b; the rooms' `.arm` dimensions carry the same overlap.
-    let overlap = set.rooms.first().and_then(|r| r.room.arm.dimensions.uint1).unwrap_or(1);
+    // `overlap` is the master's `RoomOverlap` (master +0x14b, default 1), read by the caller.
     let mut grid = Grid { w: graph.width, h: graph.height, cells: vec![0; (graph.width * graph.height) as usize], rooms: Vec::new(), overlap, chiral: Default::default() };
     // Door types with a chirality: those of the rooms' doors and the graph's edges.
     let mut door_types: Vec<String> = rooms.iter().flat_map(|r| r.exits.iter().filter_map(|e| e.door.clone())).collect();
