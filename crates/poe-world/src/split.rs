@@ -342,6 +342,89 @@ fn split_chain(
     }
 }
 
+/// `0x1420ba340`: a virtual edge ending in a dead end on the map border gets its virtual end
+/// points on the border itself (a random half width `u` either side of the node along the
+/// border; in a corner one on each of the two borders), so its two banks run off the map
+/// instead of meeting in a node. Dead ends inside the map are left alone. Returns false when the
+/// width came out zero (the client throws).
+fn off_map_end(g: &mut LayoutGraph, e: usize, idx: usize, size: Pos, rng: &mut TerrainRng) -> bool {
+    let node = g.endpoint(e, idx);
+    let live = g.nodes[node].slots.iter().flatten().count();
+    if live != 1 || g.edges[e].vends[idx].is_some() {
+        return true;
+    }
+    let (nx, ny) = g.nodes[node].pos;
+    let (tx, ty) = (nx / 23, ny / 23);
+    let (wc, hc) = size;
+    let (wt, ht) = (wc / 23, hc / 23);
+    let (wmin, wmax) = g.edges[e].width;
+    let u = rng.below((wmax - wmin + 1) as u32) as i32 + wmin;
+    if u == 0 {
+        return false;
+    }
+    let (mut a, mut b);
+    let t = |v: i32| v / 23;
+    if tx == 0 {
+        if ty == 0 {
+            a = (u, 0);
+            b = (0, u);
+            let (d1, d2) = (t(u).abs(), (t(a.1) - t(u)).abs());
+            if d1 < 2 && d2 < 2 {
+                a.0 = (2 - d1) * 23 + u;
+                b.1 += (2 - d2) * 23;
+            }
+        } else if ty == ht - 1 {
+            a = (0, hc - u - 1);
+            b = (u, hc - 1);
+            let d1 = t(u).abs();
+            let d2 = (t(a.1) - t(b.1)).abs();
+            if d1 < 2 && d2 < 2 {
+                a.1 = (d2 - 2) * 23 + a.1;
+                b.0 += (2 - d1) * 23;
+            }
+        } else {
+            a = (0, ny - u);
+            b = (0, ny + u);
+        }
+    } else if tx == wt - 1 {
+        if ty == 0 {
+            a = (wc - 1, u);
+            let u2 = wc - u - 1;
+            b = (u2, 0);
+            let d1 = (t(wc - 1) - t(u2)).abs();
+            let d2 = t(a.1).abs();
+            if d1 < 2 && d2 < 2 {
+                a.1 = (2 - d2) * 23 + a.1;
+                b.0 += (d1 - 2) * 23;
+            }
+        } else if ty == ht - 1 {
+            let x2 = wc - u - 1;
+            a = (x2, hc - 1);
+            b = (wc - 1, hc - u - 1);
+            let d1 = (t(x2) - t(wc - 1)).abs();
+            let d2 = (t(a.1) - t(b.1)).abs();
+            if d1 < 2 && d2 < 2 {
+                a.0 = (d1 - 2) * 23 + x2;
+                b.1 += (d2 - 2) * 23;
+            }
+        } else {
+            a = (wc - 1, ny + u);
+            b = (wc - 1, ny - u);
+        }
+    } else if ty == 0 {
+        a = (nx + u, 0);
+        b = (nx - u, 0);
+    } else if ty == ht - 1 {
+        a = (nx - u, hc - 1);
+        b = (nx + u, hc - 1);
+    } else {
+        return true;
+    }
+    g.edges[e].vends[idx] = Some([a, b]);
+    g.nodes[node].virtual_end = false;
+    true
+}
+
 /// `0x1420bc400`: splits every virtual edge (those with virtual end points first).
 pub fn split_virtual(
     g: &mut LayoutGraph,
@@ -349,6 +432,13 @@ pub fn split_virtual(
     size: Pos,
     rng: &mut TerrainRng,
 ) {
+    // The first pass over the edges (`0x1420da240`): off-map ends of virtual dead ends.
+    for e in 0..g.edges.len() {
+        if g.edges[e].virtual_edge {
+            off_map_end(g, e, 0, size, rng);
+            off_map_end(g, e, 1, size, rng);
+        }
+    }
     let mut first = Vec::new();
     let mut second = Vec::new();
     for e in 0..g.edges.len() {

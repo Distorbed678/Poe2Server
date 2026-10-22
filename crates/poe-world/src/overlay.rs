@@ -165,6 +165,12 @@ pub struct Overlays {
     /// Rooms placed so far (room index, origin, orientation): rooms like any other for the
     /// de-repetition pass.
     pub placed: Vec<(usize, (i32, i32), u8)>,
+    /// Fill rooms the second phase placed where an overlay took tiles away (for the
+    /// de-repetition pass's ground overrides).
+    pub fill_rooms: Vec<crate::fill::PlacedFillRoom>,
+    /// `SpecialTiles` row 2 (`OverlayBlank`): the tile an overlay room leaves where it covers
+    /// nothing of its own; the second phase puts the old tile back under it.
+    overlay_blank: Option<String>,
 }
 
 /// A placed room as the overlay grid sees it: rectangle (tiles, end exclusive), whether its
@@ -182,7 +188,7 @@ impl Overlays {
         &self.rooms[i].1
     }
 
-    pub fn new(files: &dyn Files, toy: &str, map: &TileMap, master: &mut Master, rooms_placed: &[RoomRect]) -> Result<Self, GenError> {
+    pub fn new(files: &dyn Files, toy: &str, map: &TileMap, master: &mut Master, rooms_placed: &[RoomRect], overlay_blank: Option<String>) -> Result<Self, GenError> {
         let passes = parse_toy(&crate::text::decode_utf16(&files.read(toy)?))?;
         let mut rooms: Vec<(String, Room)> = Vec::new();
         let mut built = Vec::new();
@@ -224,12 +230,14 @@ impl Overlays {
             }
             groups.retain(|g| g.total != 0);
             if pass.order == 2 {
-                return Err(GenError::Unsupported("overlay SizeOrder sorting is not ported".into()));
+                // `SizeOrder` (`0x141f9f4c0`, insertion or merge sort `0x141fc45c0`): largest
+                // key first by area, then width, then height; equal ones keep their order.
+                groups.sort_by_key(|g| std::cmp::Reverse((g.key.size.0 as u32 * g.key.size.1 as u32, g.key.size.0, g.key.size.1)));
             }
             built.push((pass, groups));
         }
         let (width, height) = (map.width as i32, map.height as i32);
-        let mut s = Self { passes: built, rooms, occupied: vec![0; (width * height) as usize], width, height, counts: HashMap::new(), placed: Vec::new() };
+        let mut s = Self { passes: built, rooms, occupied: vec![0; (width * height) as usize], width, height, counts: HashMap::new(), placed: Vec::new(), fill_rooms: Vec::new(), overlay_blank: overlay_blank.map(|p| p.to_ascii_lowercase()) };
         if s.passes.iter().any(|p| p.0.phases & 3 != 0) {
             for r in rooms_placed {
                 if r.described {
@@ -268,6 +276,9 @@ impl Overlays {
     /// `0x141fa1a70`: the passes of phase `phase` (1 or 2).
     #[allow(clippy::too_many_arguments)]
     pub fn run(&mut self, phase: u8, map: &mut TileMap, master: &mut Master, types: &mut TerrainTypes, files: &dyn Files, rng: &mut TerrainRng) -> Result<(), GenError> {
+        for (_, r) in &self.rooms {
+            map.use_room_grounds(r);
+        }
         for pi in 0..self.passes.len() {
             if self.passes[pi].0.phases & phase == 0 {
                 continue;
@@ -278,14 +289,12 @@ impl Overlays {
                 for (gi, g) in groups.iter().enumerate() {
                     self.collect(g, gi, map, master, types, files, &mut cands)?;
                 }
-                after_fill(phase, &cands)?;
-                self.place(&groups, cands, map, master, types, files, rng)?;
+                self.place(phase, &groups, cands, map, master, types, files, rng)?;
             } else {
                 for (gi, g) in groups.iter().enumerate() {
                     let mut cands = Candidates::default();
                     self.collect(g, gi, map, master, types, files, &mut cands)?;
-                    after_fill(phase, &cands)?;
-                    self.place(&groups, cands, map, master, types, files, rng)?;
+                    self.place(phase, &groups, cands, map, master, types, files, rng)?;
                 }
             }
         }
@@ -349,7 +358,7 @@ impl Overlays {
     /// `0x141fa23e0`: draws positions until none are left; at each, a group that still fits,
     /// then a room of it (or nothing, padded to 100), its orientation and its height.
     #[allow(clippy::too_many_arguments)]
-    fn place(&mut self, groups: &[Group], mut cands: Candidates, map: &mut TileMap, master: &mut Master, types: &mut TerrainTypes, files: &dyn Files, rng: &mut TerrainRng) -> Result<(), GenError> {
+    fn place(&mut self, phase: u8, groups: &[Group], mut cands: Candidates, map: &mut TileMap, master: &mut Master, types: &mut TerrainTypes, files: &dyn Files, rng: &mut TerrainRng) -> Result<(), GenError> {
         let mut total: u32 = cands.0.values().map(|c| c.0).sum();
         while !cands.0.is_empty() {
             let mut r = rng.below(total);
@@ -428,10 +437,26 @@ impl Overlays {
             if height != 0 {
                 return Err(GenError::Unsupported("overlay with a height offset".into()));
             }
-            // Phase 1: the tiles under it go, its corner points are cleared, and the room is
-            // placed like any room (`0x141f8e6c0`).
+            // The tiles under it go (phase 2 keeps a list of every cell they covered, sorted by
+            // x then y, to fill again afterwards), its corner points are cleared, and the room
+            // is placed like any room (`0x141f8e6c0`).
+            let mut taken: BTreeMap<(i32, i32), (String, u8, i16, bool)> = BTreeMap::new();
             for yy in pos.1..pos.1 + h {
                 for xx in pos.0..pos.0 + w {
+                    if phase == 2 {
+                        if let Some(i) = map.index(xx, yy) {
+                            if let (Some(cell), Some(p)) = (map.cells[i].clone(), map.piece_at[i]) {
+                                let piece = map.pieces[p].clone();
+                                let (pw, ph) = TileMap::oriented_size(piece.size, piece.orientation);
+                                let one_by_one = piece.size == (1, 1);
+                                for fy in piece.y..piece.y + ph {
+                                    for fx in piece.x..piece.x + pw {
+                                        taken.insert((fx, fy), (piece.path.clone(), piece.orientation, cell.height, one_by_one));
+                                    }
+                                }
+                            }
+                        }
+                    }
                     map.remove_piece_at(xx, yy);
                 }
             }
@@ -447,6 +472,43 @@ impl Overlays {
             self.mark((pos.0, pos.1, pos.0 + w, pos.1 + h), 1);
             *self.counts.entry(room.room).or_default() += 1;
             self.placed.push((room.room, pos, o));
+            if phase == 2 {
+                self.refill(taken, map, master, files, rng)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Overlays {
+    /// Phase 2, after an overlay room went in (`0x141fa23e0`): every cell the removed tiles
+    /// covered, in x then y order, that is empty again is filled like the fill pass does
+    /// (ground of its corner; the fill is walkable when that ground is none or has `.gt` flag 4).
+    /// A cell that holds the `OverlayBlank` tile gets its old tile back when that was 1x1 and
+    /// has no edge other than wildcards; otherwise the blank goes and the cell is filled.
+    fn refill(&mut self, taken: BTreeMap<(i32, i32), (String, u8, i16, bool)>, map: &mut TileMap, master: &mut Master, files: &dyn Files, rng: &mut TerrainRng) -> Result<(), GenError> {
+        for ((x, y), (path, orientation, height, one_by_one)) in taken {
+            let Some(i) = map.index(x, y) else { continue };
+            if map.cells[i].is_some() {
+                let blank = map.cells[i].as_ref().is_some_and(|c| self.overlay_blank.as_deref().is_some_and(|b| c.path.eq_ignore_ascii_case(b)));
+                if !blank {
+                    continue;
+                }
+                let tdt = master.header(files, &path)?.clone();
+                let key = TileKey::from_tdt(&tdt);
+                let plain = key.edges.iter().flatten().all(|e| map.edge_flags.get(&e.to_ascii_lowercase()).is_some_and(|f| f & 0x80 != 0));
+                if one_by_one && plain {
+                    let tile = master.tiles.tiles.iter().position(|t| t.path.eq_ignore_ascii_case(&path));
+                    map.remove_piece_at(x, y);
+                    map.place(x, y, &path, &tdt, orientation, height, tile);
+                    continue;
+                }
+                map.remove_piece_at(x, y);
+            }
+            let ground = map.point_index(x, y).and_then(|k| map.lattice[k].ground.clone());
+            let walkable = ground.as_ref().is_none_or(|g| map.gt_flags(g) & 4 != 0);
+            let placed = crate::fill::fill_cell(map, master, files, (x, y), ground, walkable, rng)?;
+            self.fill_rooms.extend(placed);
         }
         Ok(())
     }
@@ -748,14 +810,4 @@ fn room_height(room: &Room, map: &TileMap, pos: (i32, i32), o: u8) -> Result<Opt
     // Rooms in act 1 overlays have flat corners; a full port needs the slots' corner heights.
     let _ = (room, map, pos, o);
     Ok(Some(0))
-}
-
-/// Phase 2 placement (`0x141fa23e0` with `param_3` set) takes the pieces under the overlay out
-/// and fills what the room leaves free again (`0x141f8f930`, `0x141f9e2e0`); not ported. With no
-/// candidates it draws nothing, as in phase 1.
-fn after_fill(phase: u8, cands: &Candidates) -> Result<(), GenError> {
-    if phase == 2 && !cands.0.is_empty() {
-        return Err(GenError::Unsupported("overlay placement after the fill (phase 2) is not ported".into()));
-    }
-    Ok(())
 }

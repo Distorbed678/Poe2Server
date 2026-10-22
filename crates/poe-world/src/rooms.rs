@@ -214,6 +214,9 @@ pub struct PlacedGraph<'a> {
     pub nodes: Vec<(i32, i32)>,
     /// Internal points per edge.
     pub points: Vec<Vec<(i32, i32)>>,
+    /// Where each edge ends once its rooms have cut it at their exits (set after the room
+    /// stage; `None` before).
+    pub ends: Vec<[Option<(i32, i32)>; 2]>,
     /// Edges removed by their existence roll.
     pub removed: Vec<bool>,
 }
@@ -236,9 +239,9 @@ impl PlacedGraph<'_> {
         let edge = &self.graph.edges[e];
         let pts = &self.points[e];
         if edge.from as usize == node {
-            pts.first().copied().unwrap_or(self.nodes[edge.to as usize])
+            pts.first().copied().unwrap_or(self.ends[e][1].unwrap_or(self.nodes[edge.to as usize]))
         } else {
-            pts.last().copied().unwrap_or(self.nodes[edge.from as usize])
+            pts.last().copied().unwrap_or(self.ends[e][0].unwrap_or(self.nodes[edge.from as usize]))
         }
     }
 }

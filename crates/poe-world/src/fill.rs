@@ -250,6 +250,7 @@ impl Fill<'_> {
     #[allow(clippy::too_many_arguments)]
     fn place_room(&mut self, x: i32, y: i32, path: &str, o: u8, ground: Option<String>, _walkable: bool, rng: &mut TerrainRng) -> Result<(), GenError> {
         let room = load_room(self.files, &path.to_ascii_lowercase())?;
+        self.map.use_room_grounds(&room);
         let (w, h) = (room.width(), room.height());
         for cx in 0..w {
             for cy in 0..h {
@@ -273,6 +274,11 @@ impl Fill<'_> {
                     };
                     let (mut list, _) = self.groups(g.as_deref())?;
                     let mut total: u32 = list.iter().map(|e| e.weight).sum();
+                    if std::env::var("POE_FILL_DEBUG").is_ok() {
+                        let sl = match &room.arm.grid[cy][cx] { poe_data_tools::file_parsers::arm::types::Slot::K(k) => format!("{:?} h{} w{} {:?}", k.corners.iter().map(|c| (c.ground.clone().map(|g| g.rsplit('/').next().unwrap().to_string()), c.height)).collect::<Vec<_>>(), k.height, k.width, k.slot_tag), _ => "S".into() };
+                        eprintln!("FILLROOM {path} ({x},{y}) o{o} cell {cx},{cy} ground {g:?} total {total} slot {sl}");
+                    }
+                    let mut placed = false;
                     while !list.is_empty() {
                         let e = pick_entry(&list, rng.below(total)).clone();
                         let tdt = self.master.header(self.files, &e.path)?.clone();
@@ -284,13 +290,19 @@ impl Fill<'_> {
                         if to != 8 {
                             let (mx, my) = at(&tdt, to);
                             self.place_tile(mx, my, &e.path, compose(to, o))?;
+                            placed = true;
                             break;
                         }
                         let k = list.iter().position(|f| f.path == e.path && f.o == e.o).unwrap();
                         total -= list[k].weight;
                         list.remove(k);
                     }
-                    continue;
+                    // A `k` slot whose fill group has nothing that fits is placed from the
+                    // tile set by its key like any other slot (`G1_4` 1003: a 3x3 inside_woods
+                    // slot takes `Fill_01` after two failed fill picks); `s` slots stay empty.
+                    if placed || matches!(&room.arm.grid[cy][cx], poe_data_tools::file_parsers::arm::types::Slot::S) {
+                        continue;
+                    }
                 }
                 let Some((key, feature)) = cell_key(&room.arm.grid[cy][cx]) else { continue };
                 let (sw, sh) = (key.size.0.max(1) as i32, key.size.1.max(1) as i32);
@@ -303,9 +315,6 @@ impl Fill<'_> {
                 let (ax, ay) = orient_cell(o, w as i32, h as i32, cx as i32, cy as i32);
                 let (bx, by) = orient_cell(o, w as i32, h as i32, cx as i32 + sw - 1, cy as i32 + sh - 1);
                 let (mx, my) = (x + ax.min(bx), y + ay.min(by));
-                if uniform_ground(&key, &feature) {
-                    return Err(GenError::Unsupported(format!("fill room {path}: uniform-ground cell")));
-                }
                 let list = self.master.tiles.candidates(&feature, &key).to_vec();
                 if list.is_empty() {
                     return Err(GenError::Unsupported(format!("fill room {path}: no tile for cell ({cx},{cy})")));
@@ -420,5 +429,15 @@ pub fn fill_pass(
             x += 1;
         }
     }
+    Ok(f.placed)
+}
+
+/// Fills one empty cell the way the fill pass does (`0x141f8f930`), for callers outside the pass
+/// (the overlays' second phase): `ground` is the cell's corner ground and `walkable` whether fill
+/// rooms with points of interest may go there. Returns the fill rooms it placed.
+#[allow(clippy::too_many_arguments)]
+pub fn fill_cell(map: &mut TileMap, master: &mut Master, files: &dyn Files, pos: (i32, i32), ground: Option<String>, walkable: bool, rng: &mut TerrainRng) -> Result<Vec<PlacedFillRoom>, GenError> {
+    let mut f = Fill { map, master, files, rooms: HashMap::new(), placed: Vec::new(), height: None, wiggle: None };
+    f.cell(pos.0, pos.1, ground, walkable, rng)?;
     Ok(f.placed)
 }

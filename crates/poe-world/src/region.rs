@@ -116,6 +116,10 @@ pub fn turn_graph(g: &mut Graph, o: u8, symmetric: &dyn Fn(&str) -> bool) {
             n.values[7] = xmax;
             n.values[8] = ymax;
         }
+        // The axis constraint flags (node values 9 and 10) turn with the axes.
+        if o & 1 == 1 && n.values.len() > 10 {
+            n.values.swap(9, 10);
+        }
         let no = crate::rooms::node_orientation(&n.orientation);
         if no < 8 {
             n.orientation = ORIENTATION_NAMES[compose(no, o) as usize].to_string();

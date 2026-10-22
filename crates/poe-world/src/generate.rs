@@ -55,6 +55,11 @@ pub fn normalize_path(path: &str) -> String {
 /// Reads game files (the generator's only input besides the seed).
 pub trait Files {
     fn read(&self, path: &str) -> Result<Vec<u8>, GenError>;
+    /// Row `row` of `SpecialTiles.dat` (`TDTFile`), when the source knows the table
+    /// ([`crate::area::generate_probed_files`] wraps its files with it).
+    fn special_tile(&self, _row: usize) -> Option<String> {
+        None
+    }
 }
 
 impl Files for poe_data::GameFiles {
@@ -82,6 +87,10 @@ impl<'a> CachedFiles<'a> {
 }
 
 impl Files for CachedFiles<'_> {
+    fn special_tile(&self, row: usize) -> Option<String> {
+        self.inner.special_tile(row)
+    }
+
     fn read(&self, path: &str) -> Result<Vec<u8>, GenError> {
         let key = normalize_path(path);
         if let Some(b) = self.cache.read().unwrap_or_else(|e| e.into_inner()).get(&key) {
@@ -331,6 +340,13 @@ impl TileMap {
                 let g = g.clone();
                 self.set_ground(origin.0 + dx, origin.1 + dy, &g);
             }
+        }
+    }
+
+    /// Adds the `.gt` flags of a room's grounds.
+    pub fn use_room_grounds(&mut self, room: &Room) {
+        for (g, f) in &room.ground_flags {
+            self.ground_flags.entry(g.clone()).or_insert(*f);
         }
     }
 
@@ -691,6 +707,9 @@ pub struct Room {
     /// indices (1-based, 0 = none). The file's last line; `poe_data_tools` does not parse it
     /// for version 36. Tiles touching an override are not re-picked by the de-repetition pass.
     pub lattice: Vec<u32>,
+    /// `.gt` flags of the grounds the room names (string table), for [`TileMap::ground_flags`]:
+    /// rooms use grounds no tile-set tile has.
+    pub ground_flags: Vec<(String, u8)>,
 }
 
 impl Room {
@@ -733,7 +752,16 @@ pub fn load_room(files: &dyn Files, path: &str) -> Result<Room, GenError> {
         })
         .filter(|v| v.len() == want)
         .unwrap_or_default();
-    Ok(Room { arm, lattice })
+    let mut ground_flags: Vec<(String, u8)> = Vec::new();
+    for g in arm.strings.iter().filter(|s| s.to_ascii_lowercase().ends_with(".gt")) {
+        let key = g.to_ascii_lowercase().replace('\\', "/");
+        if ground_flags.iter().any(|(k, _)| *k == key) {
+            continue;
+        }
+        let f = crate::rooms::ground_flags(&crate::text::decode_utf16(&files.read(&key)?));
+        ground_flags.push((key, f));
+    }
+    Ok(Room { arm, lattice, ground_flags })
 }
 
 /// The key of a `k` slot (also a room's root slot).
@@ -807,6 +835,7 @@ pub fn room_pass_oriented(
 ) -> Result<(), GenError> {
     let (w, h) = (room.width(), room.height());
     let room_full = room;
+    map.use_room_grounds(room_full);
     let room = &room.arm;
     for x in 0..w {
         for y in 0..h {
