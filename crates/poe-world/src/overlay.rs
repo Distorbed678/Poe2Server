@@ -303,7 +303,9 @@ impl Overlays {
     #[allow(clippy::too_many_arguments)]
     pub fn run(&mut self, phase: u8, map: &mut TileMap, master: &mut Master, types: &mut TerrainTypes, files: &dyn Files, rng: &mut TerrainRng) -> Result<(), GenError> {
         for (_, r) in &self.rooms {
-            map.use_room_grounds(r);
+            if !self.dungeon || std::env::var("POE_OV_UGR").is_ok() {
+                map.use_room_grounds(r);
+            }
         }
         for pi in 0..self.passes.len() {
             if self.passes[pi].0.phases & phase == 0 {

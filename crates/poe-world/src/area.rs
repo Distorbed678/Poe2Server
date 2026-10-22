@@ -613,7 +613,7 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
     // Overlays around the fill (`0x14209c4c0`: the context `0x141fa0ac0`, phase 1, the fill of
     // the listed cells, phase 2). The generator's room list (`+0x58`) is empty for `.dgr`.
     let mut types = TerrainTypes::default();
-    let mut overlays = match rel("Overlays") {
+    let mut overlays = match rel("Overlays").filter(|_| std::env::var("POE_NO_DOV").is_err()) {
         Some(toy) => {
             // The generator's room list (`+0x58`): a feature room per placed room whose `.arm`
             // has a tag; its inner rectangle (shrunk by the shared border when the room's own
