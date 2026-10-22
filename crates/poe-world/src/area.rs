@@ -812,17 +812,9 @@ fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng:
     for e in &route {
         router.reserve(e);
     }
-    for (k, r) in route.iter_mut().enumerate() {
-        let before = r.points.clone();
-        let ok = router.route(r, rng);
-        if std::env::var("POE_ROUTE_DEBUG").is_ok() {
-            let f = |v: &[(i32, i32)]| v.iter().map(|p| format!("{},{}", p.0, p.1)).collect::<Vec<_>>().join(" ");
-            eprintln!("ROUTE {k} {},{}->{},{} off {:?} ok={} before [{}]\t{}", r.ends[0].0, r.ends[0].1, r.ends[1].0, r.ends[1].1, r.offsets, ok as u8, f(&before), f(&r.points));
-        }
-        if !ok {
-            return Err(data(format!("edge {k} failed to route (retries not ported)")));
-        }
-    }
+    // `0x1420cdc30`: edges that fail keep their reservation and are retried after the others
+    // (the client gives up when a whole round routes none).
+    crate::routing::route_reserved(&mut router, &mut route, rng).map_err(|e| data(format!("could not route edges: {e}")))?;
 
     // The layout graph in the client's numbering (`0x141ef2800` splits room nodes per exit).
     let mut lg = LayoutGraph::default();
