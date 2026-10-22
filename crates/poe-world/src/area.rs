@@ -159,6 +159,8 @@ pub fn generate_probed_files(gd: &GameData, files: &dyn crate::generate::Files, 
     if graphs.is_empty() {
         return Err(data(format!("{area_id}: no topologies")));
     }
+    // `phase_cad0`: league mechanic rolls come before the topology choice.
+    crate::league::roll_area(gd, area_id, rng);
     let sub = rng.below(u32::MAX);
     let index = match forced.topology {
         Some(f) if f >= 1 && (f as usize) <= graphs.len() => f as usize - 1,

@@ -22,6 +22,7 @@ pub mod overlay;
 pub mod postunique;
 pub mod region;
 pub mod layout;
+pub mod league;
 pub mod node_tiles;
 pub mod rng;
 pub mod rooms;
