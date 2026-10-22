@@ -414,6 +414,9 @@ impl Overlays {
                     live.push((gi, w));
                 }
             }
+            if std::env::var("POE_DBG_OVERLAY").is_ok() {
+                eprintln!("PLACE phase {phase} pos {pos:?} live {:?} of {:?}", live, list);
+            }
             if live.is_empty() {
                 continue;
             }
@@ -429,18 +432,37 @@ impl Overlays {
             }
             let g = &groups[gi];
             let (w, h) = (g.key.size.0 as i32, g.key.size.1 as i32);
-            let mut options: Vec<(Option<usize>, u32)> = Vec::new();
+            let mut options: Vec<(Option<(usize, u8)>, u32)> = Vec::new();
             for (ri, room) in g.rooms.iter().enumerate() {
                 if room.limit != 0 && self.counts.get(&room.room).copied().unwrap_or(0) >= room.limit as u32 {
                     continue;
                 }
-                if !room.exclusions.is_empty() {
-                    return Err(GenError::Unsupported("overlay exclusions (0x141fa3470) are not ported".into()));
+                if !room.exclusions.is_empty() && !self.has_features(&room.exclusions, (pos.0, pos.1, pos.0 + w, pos.1 + h), map, master, files)? {
+                    continue;
                 }
                 if g.flags & 0x40 != 0 {
-                    return Err(GenError::Unsupported("MatchAllTileKeys overlays (0x141fa3780) are not ported".into()));
+                    let mut any = false;
+                    for o in 0..8u8 {
+                        if room.orientations >> o & 1 != 0 && self.matches_all_keys(&self.rooms[room.room].1, pos, o, map, master, files)? {
+                            any = true;
+                            break;
+                        }
+                    }
+                    if !any {
+                        continue;
+                    }
                 }
-                options.push((Some(ri), room.weight));
+                // A position counts a room once, but the pick lists it once per orientation
+                // whose turned root key is the group's (the sums were 200 for a symmetric room).
+                if self.dungeon {
+                    for o in 0..8u8 {
+                        if room.orientations >> o & 1 != 0 {
+                            options.push((Some((ri, o)), room.weight));
+                        }
+                    }
+                } else {
+                    options.push((Some((ri, 0xff)), room.weight));
+                }
             }
             if options.is_empty() {
                 continue;
@@ -463,9 +485,10 @@ impl Overlays {
                 self.mark((pos.0, pos.1, pos.0 + w, pos.1 + h), 1);
                 continue;
             };
+            let (ri, o) = ri;
             let room = &g.rooms[ri];
             let v = rng.below(0x348);
-            let o = crate::region::pick(room.orientations, v);
+            let o = if o == 0xff { crate::region::pick(room.orientations, v) } else { o };
             let _ = lcg_index;
             let Some(height) = room_height(&self.rooms[room.room].1, map, pos, o)? else { continue };
             if height != 0 {
@@ -502,6 +525,9 @@ impl Overlays {
                     }
                 }
             }
+            if std::env::var("POE_DBG_OVERLAY").is_ok() {
+                eprintln!("ROOMPLACE {} at {pos:?} o{o}", self.rooms[room.room].0);
+            }
             room_pass_oriented(map, master, &self.rooms[room.room].1, pos, o, true, rng)?;
             self.mark((pos.0, pos.1, pos.0 + w, pos.1 + h), 1);
             *self.counts.entry(room.room).or_default() += 1;
@@ -515,6 +541,56 @@ impl Overlays {
 }
 
 impl Overlays {
+    /// `0x141fa3470` (a toy entry's `!Name` arguments): the tiles that start inside the rectangle
+    /// and carry a feature name include every listed name, each tile counting for one.
+    fn has_features(&self, names: &[String], (x0, y0, x1, y1): (i32, i32, i32, i32), map: &TileMap, master: &mut Master, files: &dyn Files) -> Result<bool, GenError> {
+        let mut want: Vec<String> = names.to_vec();
+        for y in y0..y1 {
+            for x in x0..x1 {
+                let Some(i) = map.index(x, y) else { continue };
+                let Some(cell) = &map.cells[i] else { continue };
+                if cell.offset != (0, 0) {
+                    continue;
+                }
+                let tdt = master.header(files, &cell.path)?;
+                let Some(f) = tdt.feature.as_deref().filter(|f| !f.is_empty()) else { continue };
+                if let Some(k) = want.iter().position(|n| n == f) {
+                    want.remove(k);
+                }
+            }
+        }
+        Ok(want.is_empty())
+    }
+
+    /// `0x141fa3780` (`MatchAllTileKeys`): every `k` slot of the room, turned by `o` and laid at
+    /// `pos`, sits on a tile that starts there with the same feature name and the same key.
+    fn matches_all_keys(&self, room: &Room, pos: (i32, i32), o: u8, map: &TileMap, master: &mut Master, files: &dyn Files) -> Result<bool, GenError> {
+        let (w, h) = (room.width() as i32, room.height() as i32);
+        for y in 0..h {
+            for x in 0..w {
+                let poe_data_tools::file_parsers::arm::types::Slot::K(k) = &room.arm.grid[y as usize][x as usize] else { continue };
+                let key = slot_key(k);
+                let (sw, sh) = (key.size.0.max(1) as i32, key.size.1.max(1) as i32);
+                let (ax, ay) = crate::tileset::orient_cell(o, w, h, x, y);
+                let (bx, by) = crate::tileset::orient_cell(o, w, h, x + sw - 1, y + sh - 1);
+                let (mx, my) = (pos.0 + ax.min(bx), pos.1 + ay.min(by));
+                let Some(i) = map.index(mx, my) else { return Ok(false) };
+                let Some(cell) = &map.cells[i] else { return Ok(false) };
+                if cell.offset != (0, 0) {
+                    return Ok(false);
+                }
+                let tdt = master.header(files, &cell.path)?;
+                if tdt.feature.clone().unwrap_or_default() != k.slot_tag.clone().unwrap_or_default() {
+                    return Ok(false);
+                }
+                if TileKey::from_tdt(tdt).oriented(cell.orientation) != key.oriented(o) {
+                    return Ok(false);
+                }
+            }
+        }
+        Ok(true)
+    }
+
     /// Phase 2, after an overlay room went in (`0x141fa23e0`): every cell the removed tiles
     /// covered, in x then y order, that is empty again is filled like the fill pass does
     /// (ground of its corner; the fill is walkable when that ground is none or has `.gt` flag 4).
