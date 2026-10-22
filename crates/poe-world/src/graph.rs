@@ -40,6 +40,8 @@ pub struct Graph {
     pub dungeon_defaults: Option<[i32; 3]>,
     /// `.dgr` (version > 22): the `open_extra_doors_into_impenetrable_rooms` line.
     pub extra_header: Option<String>,
+    /// The `EnvironmentOverride` id some graph versions name before the ground types.
+    pub environment_override: Option<String>,
     /// Region orientation the graph was turned by ([`crate::region::turn_graph`]; 0 = none).
     pub region: u8,
 }
@@ -114,25 +116,29 @@ impl Graph {
         let master_file = field(2, "MasterFile:")?.remove(0);
         let n = int(3, &field(3, "Nodes:")?[0])? as usize;
         let m = int(4, &field(4, "Edges:")?[0])? as usize;
-        let ground_types = [5, 6, 7].map(|i| {
+        // From some version on, an `EnvironmentOverride: "<id>"` line precedes the ground types.
+        let environment_override = lines.get(5).and_then(|l| l.strip_prefix("EnvironmentOverride:")).map(|r| r.trim().trim_matches('"').to_string());
+        let g0 = if environment_override.is_some() { 6 } else { 5 };
+        let ground_types = [g0, g0 + 1, g0 + 2].map(|i| {
             lines
                 .get(i)
                 .map(|l| l.trim_matches('"').to_string())
                 .unwrap_or_default()
         });
-        let mut first = 8;
+        let h = g0 + 3;
+        let mut first = h;
         let mut dungeon_defaults = None;
         let mut extra_header = None;
-        if let Some(rest) = lines.get(8).and_then(|l| l.strip_prefix("Default%:")) {
+        if let Some(rest) = lines.get(h).and_then(|l| l.strip_prefix("Default%:")) {
             let t = tokens(rest);
             let mut d = [0; 3];
             for (k, v) in d.iter_mut().enumerate() {
-                *v = int(8, t.get(k).map_or("", String::as_str))?;
+                *v = int(h, t.get(k).map_or("", String::as_str))?;
             }
             dungeon_defaults = Some(d);
-            first = if version > 22 { 10 } else { 9 };
+            first = if version > 22 { h + 2 } else { h + 1 };
             if version > 22 {
-                extra_header = lines.get(9).map(|l| l.trim().to_string());
+                extra_header = lines.get(h + 1).map(|l| l.trim().to_string());
             }
         }
         let mut nodes = Vec::with_capacity(n);
@@ -212,6 +218,7 @@ impl Graph {
             edges,
             dungeon_defaults,
             extra_header,
+            environment_override,
             region: 0,
         })
     }
@@ -257,6 +264,18 @@ mod tests {
         assert_eq!(e.tail, vec![0, 0]);
         assert_eq!(e.values, vec![100, 0, 0]);
         assert_eq!(e.edge_type, "Metadata/a.et");
+    }
+
+    #[test]
+    fn environment_override_line() {
+        let g = Graph::parse(
+            "version 25\nSize: 5 6\nMasterFile: \"m.tsi\"\nNodes: 1\nEdges: 0\nEnvironmentOverride: \"G2_3_EW\"\n\"\"\n\"g.gt\"\n\"\"\nDefault%: 0 0 0\n0\n104 104 0 \"entrance\" FR270 0 100 0 0 0 0 0 0 0 0 N 0\n",
+        )
+        .unwrap();
+        assert_eq!(g.environment_override.as_deref(), Some("G2_3_EW"));
+        assert_eq!(g.ground_types[1], "g.gt");
+        assert_eq!(g.dungeon_defaults, Some([0, 0, 0]));
+        assert_eq!(g.nodes.len(), 1);
     }
 
     #[test]
