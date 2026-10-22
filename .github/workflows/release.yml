@@ -4,7 +4,7 @@ name: Release server
 # Windows, packages it with the example config and the web admin, and attaches the archives and
 # their SHA-256 checksums to a GitHub release. Running the workflow by hand (workflow_dispatch)
 # does the same build and keeps the archives as workflow artifacts, without a release.
-# How to cut a release and which secrets this needs: docs/guides/releasing-server.md.
+# How to cut a release and which secrets this needs: docs/releasing.md.
 on:
   push:
     tags:
@@ -80,23 +80,26 @@ jobs:
     name: Data schema
     runs-on: ubuntu-latest
     steps:
+      # The version file with the schema pin is in the submodule modules/protocol.
       - uses: actions/checkout@v4
+        with:
+          submodules: true
       # The server reads the community .datc64 schema (poe-tool-dev/dat-schema, MIT) at run time.
       # Upstream only keeps a rolling "latest", so the exact file the version file pins
       # (data.schema_sha256) is kept as an asset of this repo's release `dat-schema-<game>`
-      # (docs/guides/releasing-server.md); the checksum is still checked.
+      # (docs/releasing.md); the checksum is still checked.
       - name: Download and verify the dat schema
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           game=$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' config/server.example.toml | head -n 1)
-          want=$(sed -n 's/^schema_sha256 *= *"\([0-9a-f]*\)".*/\1/p' "versions/$game.toml")
-          [ -n "$want" ] || { echo "::error::versions/$game.toml has no data.schema_sha256"; exit 1; }
+          want=$(sed -n 's/^schema_sha256 *= *"\([0-9a-f]*\)".*/\1/p' "modules/protocol/versions/$game.toml")
+          [ -n "$want" ] || { echo "::error::modules/protocol/versions/$game.toml has no data.schema_sha256"; exit 1; }
           mkdir -p schema
           gh release download "dat-schema-$game" -R "$GITHUB_REPOSITORY" -p schema-poe2.min.json -D schema --clobber
           got=$(sha256sum schema/schema-poe2.min.json | cut -d' ' -f1)
           if [ "$got" != "$want" ]; then
-            echo "::error::the schema of release dat-schema-$game has sha256 $got, versions/$game.toml pins $want. Upload the pinned file to that release (docs/guides/releasing-server.md)."
+            echo "::error::the schema of release dat-schema-$game has sha256 $got, modules/protocol/versions/$game.toml pins $want. Upload the pinned file to that release (docs/releasing.md)."
             exit 1
           fi
       - uses: actions/upload-artifact@v4
@@ -193,7 +196,7 @@ jobs:
         working-directory: dist
         run: |
           game=$(grep -ho 'game-[0-9][0-9a-z.]*' -m1 SHA256SUMS | head -n 1 | sed 's/^game-//; s/-.*//')
-          notes=$(printf 'Server %s for Path of Exile 2 client %s.\n\nUnpack the archive for your system and follow HOSTING.md (docs/guides/hosting.md): copy config/server.example.toml to config/server.toml, point game_dir at your own game install and start poe-server. Verify a download with `sha256sum -c <archive>.sha256`.\n' "$VERSION" "$game")
+          notes=$(printf 'Server %s for Path of Exile 2 client %s.\n\nUnpack the archive for your system and follow HOSTING.md (docs/hosting.md): copy config/server.example.toml to config/server.toml, point game_dir at your own game install and start poe-server. Verify a download with `sha256sum -c <archive>.sha256`.\n' "$VERSION" "$game")
           pre=()
           case "$VERSION" in *-*) pre=(--prerelease) ;; esac
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then

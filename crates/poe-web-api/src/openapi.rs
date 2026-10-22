@@ -1,5 +1,5 @@
 //! The OpenAPI document (`GET /api/v1/openapi.json`; `cargo xtask openapi` writes it to
-//! `docs/architecture/openapi.json` for the web admin and the launcher to generate types).
+//! `docs/openapi.json` for the web admin and the launcher to generate types).
 
 use axum::Json;
 use utoipa::{

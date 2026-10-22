@@ -1,8 +1,8 @@
 name: CI
 
-# Checks on every push to main and every pull request: the docs' links, the server workspace
-# (build and tests) and a scan of the working tree for secrets. What contributors should run
-# locally before a PR: CONTRIBUTING.md. The release workflow is release.yml.
+# Checks on every push to main and every pull request: the server workspace (build, tests, the
+# committed OpenAPI document) and a scan of the working tree for secrets. What contributors
+# should run locally before a PR: CONTRIBUTING.md. The release workflow is release.yml.
 on:
   push:
     branches: [main]
@@ -19,18 +19,12 @@ defaults:
     shell: bash
 
 jobs:
-  docs:
-    name: Docs
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: python3 scripts/check-links.py
-
   server:
     name: Server workspace
     runs-on: ubuntu-latest
     steps:
-      # Path dependencies in modules/protocol and modules/client-hook (public repositories).
+      # Path dependencies in modules/protocol and modules/client-hook (public repositories); the
+      # version files are in modules/protocol/versions.
       - uses: actions/checkout@v4
         with:
           submodules: true
@@ -42,7 +36,7 @@ jobs:
       # Tests that read the game files (poe-data) skip themselves when GameFiles/ is absent.
       - run: cargo test --locked
       - name: The committed OpenAPI document is current
-        run: cargo run --locked -q -p xtask -- openapi --check
+        run: cargo xtask openapi --check
 
   secrets:
     name: Secret scan
@@ -50,7 +44,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       # gitleaks over the checked-out files (the history is scanned before a repository goes
-      # public, docs/plans/public-release-audit.md). Version and checksum are pinned; the
+      # public, docs/plans/public-release-audit.md of the hub). Version and checksum are pinned; the
       # checksum file comes from the same release.
       - name: Scan the working tree
         env:

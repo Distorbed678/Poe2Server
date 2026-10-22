@@ -1,5 +1,5 @@
-# gitleaks configuration (audit finding D-01, docs/plans/public-release-audit.md).
-title = "Poe2ModdingProject"
+# gitleaks configuration (audit finding D-01, docs/plans/public-release-audit.md of the hub, Poe2ModdingProject).
+title = "Poe2Server"
 
 [extend]
 useDefault = true

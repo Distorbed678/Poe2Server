@@ -80,7 +80,7 @@ pub enum ConfigError {
         path: PathBuf,
         source: toml::de::Error,
     },
-    /// `[game] version` names no supported build (`versions/<version>.toml`).
+    /// `[game] version` names no supported build (`modules/protocol/versions/<version>.toml`).
     #[error("{path}: {source}")]
     Version {
         path: PathBuf,
@@ -142,7 +142,7 @@ pub struct Config {
     /// Server mods and the client mod check (`crates/poe-mod-host`).
     #[serde(default)]
     pub mods: ModsConfig,
-    /// The build `[game] version` selects (`versions/<version>.toml`). Filled by
+    /// The build `[game] version` selects (`modules/protocol/versions/<version>.toml`). Filled by
     /// [`Config::load`]; `None` for a config made with [`Config::parse`] (tests), which turns
     /// the client version check off.
     #[serde(skip)]
@@ -180,7 +180,7 @@ pub struct SecurityConfig {
     #[serde(default)]
     pub trust_forwarded_for: bool,
     /// Accept a client whose `client_hash` (a SHA-256 of its exe, `0x0003`/`0x0005`) is not a
-    /// known value of `[game] version` (`versions/<version>.toml`, `[client] hashes`). Off by
+    /// known value of `[game] version` (`modules/protocol/versions/<version>.toml`, `[client] hashes`). Off by
     /// default: such a client is refused with the "you need to update" popup
     /// (`BackendErrors.InvalidProtocolVersion`), because a build the server does not know
     /// speaks messages it may misread. Turn it on to try an unlisted build.
@@ -732,7 +732,7 @@ impl InventoriesConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct GameConfig {
-    /// The supported client build: names `versions/<version>.toml` at the repository root
+    /// The supported client build: names `modules/protocol/versions/<version>.toml` at the repository root
     /// (`cargo xtask check-build`, docs/guides/new-game-version.md). `{version}` in other path
     /// settings of this file is replaced by it.
     pub version: String,
@@ -1297,7 +1297,7 @@ impl Config {
     }
 
     /// Judges a client's `client_hash` against the version's known values
-    /// (`versions/<version>.toml`): `Known`, `Unverified` (the version cannot judge yet) and
+    /// (`modules/protocol/versions/<version>.toml`): `Known`, `Unverified` (the version cannot judge yet) and
     /// `UnknownAllowed` (`[security] allow_unknown_client`) are accepted, `Unknown` is refused. A config without a version file
     /// (`Config::parse`, tests) accepts every hash.
     pub fn client_check(&self, hash: &[u8; 32]) -> ClientCheck {

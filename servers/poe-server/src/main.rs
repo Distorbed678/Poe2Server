@@ -39,7 +39,7 @@ async fn main() -> anyhow::Result<()> {
             client_hashes = v.client.hashes.len(),
             hashes_confirmed = v.client.hashes_confirmed,
             allow_unknown_client = config.security.allow_unknown_client,
-            "client build (versions/{}.toml)",
+            "client build (modules/protocol/versions/{}.toml)",
             v.version
         );
         if v.status != poe_config::versions::Status::Supported {

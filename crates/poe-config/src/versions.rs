@@ -1,18 +1,20 @@
-//! The supported client builds: `versions/<version>.toml` at the repository root.
+//! The supported client builds: `modules/protocol/versions/<version>.toml` (the file lives in
+//! the Poe2Protocol repository, next to `opcodes/<version>/`; the root is the working directory
+//! of the server, a checkout that has Poe2Protocol at `modules/protocol`).
 //!
 //! One file per build is the single definition of what a supported build is: its depots and
 //! manifests, the exe's checksum, size and PE fingerprint, the key-file sizes, the opcode
 //! folder, the signature table, the client hashes the login server accepts and the data
-//! anchors `cargo xtask check-build` verifies. The servers, `cargo xtask` and (through a
+//! anchors `cargo xtask check-build` verifies. The servers, the hub's `cargo xtask` and (through a
 //! byte-identical copy kept by `cargo xtask versions`) the launcher read the same file.
-//! Procedure for a new build: `docs/guides/new-game-version.md`.
+//! Procedure for a new build: `docs/guides/new-game-version.md` of the hub (Poe2ModdingProject).
 
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
-/// Folder of the version files, relative to the repository root (the working directory).
-pub const DIR: &str = "versions";
+/// Folder of the version files, relative to the root (the working directory).
+pub const DIR: &str = "modules/protocol/versions";
 
 /// What `[client] hashes` says about the `client_hash` a client sent at login.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -176,7 +178,7 @@ impl VersionFile {
         Ok(v)
     }
 
-    /// `<root>/versions/<version>.toml`.
+    /// `<root>/modules/protocol/versions/<version>.toml`.
     pub fn path(root: &Path, version: &str) -> PathBuf {
         root.join(DIR).join(format!("{version}.toml"))
     }
@@ -327,7 +329,7 @@ pub fn hex32(hash: &[u8; 32]) -> String {
     hash.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-/// Versions that have a file in `<root>/versions/`, sorted by name.
+/// Versions that have a file in `<root>/modules/protocol/versions/`, sorted by name.
 pub fn known_versions(root: &Path) -> Vec<String> {
     let mut out: Vec<String> = std::fs::read_dir(root.join(DIR))
         .into_iter()

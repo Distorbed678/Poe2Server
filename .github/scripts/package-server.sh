@@ -6,12 +6,12 @@
 #                     <dat-schema json> <out dir>
 #
 # The package mirrors the repository layout the server expects, because every path in
-# config/server.toml is relative to the working directory and the server reads versions/ and
-# the opcode tables from there:
+# config/server.toml is relative to the working directory and the server reads the version
+# files and the opcode tables of Poe2Protocol from there:
 #
-#   poe-server[.exe]  config/server.example.toml  versions/  modules/protocol/opcodes/
-#   third_party/dat-schema/schema-poe2.min.json  web-admin/  README.md  LICENSE*  HOSTING.md
-#   release.json
+#   poe-server[.exe]  config/server.example.toml  modules/protocol/versions/
+#   modules/protocol/opcodes/  third_party/dat-schema/schema-poe2.min.json  web-admin/
+#   README.md  LICENSE*  HOSTING.md  release.json
 #
 # Writes <out dir>/<name>.tar.gz (linux) or <name>.zip (windows) and <name>.sha256 (the line
 # `sha256sum` prints, so `sha256sum -c` verifies it).
@@ -34,7 +34,7 @@ cd "$root"
 # The game build this server speaks: [game] version of the example config.
 game=$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' config/server.example.toml | head -n 1)
 [ -n "$game" ] || { echo "no [game] version in config/server.example.toml" >&2; exit 1; }
-[ -f "versions/$game.toml" ] || { echo "versions/$game.toml is missing" >&2; exit 1; }
+[ -f "modules/protocol/versions/$game.toml" ] || { echo "modules/protocol/versions/$game.toml is missing (git submodule update --init modules/protocol)" >&2; exit 1; }
 [ -x "$binary" ] || [ -f "$binary" ] || { echo "binary $binary not found" >&2; exit 1; }
 [ -f "$dist/index.html" ] || { echo "web admin build $dist has no index.html" >&2; exit 1; }
 [ -f "$schema" ] || { echo "dat schema $schema not found" >&2; exit 1; }
@@ -50,12 +50,12 @@ mkdir -p "$stage/config" "$stage/modules/protocol" "$stage/third_party/dat-schem
 cp "$binary" "$stage/$exe"
 chmod 755 "$stage/$exe"
 cp config/server.example.toml "$stage/config/"
-cp -r versions "$stage/versions"
+cp -r modules/protocol/versions "$stage/modules/protocol/versions"
 cp -r modules/protocol/opcodes "$stage/modules/protocol/opcodes"
 cp "$schema" "$stage/third_party/dat-schema/schema-poe2.min.json"
 cp -r "$dist" "$stage/web-admin"
 cp README.md "$stage/README.md"
-cp docs/guides/hosting.md "$stage/HOSTING.md"
+cp docs/hosting.md "$stage/HOSTING.md"
 found=0
 for f in LICENSE*; do
     [ -f "$f" ] && { cp "$f" "$stage/"; found=1; }

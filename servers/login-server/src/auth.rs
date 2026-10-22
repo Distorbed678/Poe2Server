@@ -89,7 +89,7 @@ fn map_error(e: AccountError, token_login: bool) -> Verdict {
 }
 
 /// Judges the `client_hash` of a `0x0003`/`0x0005` against the version the server speaks
-/// (`versions/<version>.toml` `[client] hashes`; `[security] allow_unknown_client`). Returns
+/// (`modules/protocol/versions/<version>.toml` `[client] hashes`; `[security] allow_unknown_client`). Returns
 /// the refusal for a build the server does not know; accepted and not-yet-judgeable clients
 /// give `None` (the latter is logged: the hash is what `[client] hashes` must record).
 pub fn check_client(config: &poe_config::Config, client_hash: &[u8; 32]) -> Option<Verdict> {
@@ -98,7 +98,7 @@ pub fn check_client(config: &poe_config::Config, client_hash: &[u8; 32]) -> Opti
     match config.client_check(client_hash) {
         ClientCheck::Known => None,
         ClientCheck::Unverified => {
-            tracing::info!(client_hash = %hash, "client_hash cannot be checked yet (versions/<version>.toml [client] hashes_confirmed is false)");
+            tracing::info!(client_hash = %hash, "client_hash cannot be checked yet (modules/protocol/versions/<version>.toml [client] hashes_confirmed is false)");
             None
         }
         ClientCheck::UnknownAllowed => {

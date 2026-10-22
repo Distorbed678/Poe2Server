@@ -36,7 +36,7 @@ pub(crate) const ROLL_SKILL: u32 = 0x8000_0040;
 pub(crate) const ROLL_ACTION_TYPE: u16 = 60748;
 
 /// The build the official captures of these tests come from (history, not configuration: the
-/// tests replay those captures). Its opcode folder comes from `versions/<version>.toml`.
+/// tests replay those captures). Its opcode folder comes from `modules/protocol/versions/<version>.toml`.
 pub(crate) const CAPTURE_VERSION: &str = "0.5.5e";
 
 /// The opcode folder of [`CAPTURE_VERSION`].

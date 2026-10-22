@@ -1,6 +1,6 @@
 //! The tables and columns the server and the dev tools read: the list `cargo xtask check-build`
 //! verifies against a build's `Bundles2` (the column exists in the schema, the schema row width
-//! equals the file's, the values decode) and the anchors of `versions/<version>.toml`.
+//! equals the file's, the values decode) and the anchors of `modules/protocol/versions/<version>.toml`.
 //!
 //! Keep it in step with [`crate::views`], `poe-game` (`Stats`), `poe-world` (`WorldAreas`,
 //! `Topologies`), the login server (`BackendErrors`) and `xtask` (the DLL name tables): a new

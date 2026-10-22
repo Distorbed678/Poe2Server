@@ -18,6 +18,7 @@ mod metrics;
 pub mod motd;
 mod mods;
 mod openapi;
+pub mod webadmin;
 mod public;
 pub mod scheduler;
 mod webtoken;
@@ -78,8 +79,8 @@ pub struct WebState {
     pub motd: Arc<Motd>,
     /// The server's mods: the client mods it offers and the admin's list.
     pub mods: Arc<dyn ModDirectory>,
-    /// The directory `versions/<version>.toml` is read from when the config editor checks a
-    /// text (the working directory; the repository root in a checkout).
+    /// The directory `modules/protocol/versions/<version>.toml` is read from when the config editor
+    /// checks a text (the working directory; the repository root in a checkout).
     pub config_root: PathBuf,
     pub started: Instant,
 }
@@ -162,7 +163,7 @@ pub fn router(state: WebState) -> Router {
             let index = web.static_dir.join("index.html");
             let files = ServeDir::new(&web.static_dir).fallback(ServeFile::new(index));
             app = app.fallback_service(files);
-            info!(dir = %web.static_dir.display(), "serving the web admin");
+            webadmin::log_served(&web.static_dir);
         } else {
             warn!(dir = %web.static_dir.display(), "[web] static_dir is not a directory: not serving the web admin");
         }

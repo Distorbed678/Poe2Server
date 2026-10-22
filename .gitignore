@@ -1,0 +1,22 @@
+# Build output
+/target/
+**/target/
+
+# Local runtime data (a server started here writes its database and logs next to it)
+/runtime/
+/GameFiles/
+/dumps/
+/third_party/
+*.log
+*.sqlite
+*.sqlite-*
+*.db
+
+# Python bytecode
+__pycache__/
+
+# Secrets and keys never belong in the repository
+.env
+.env.*
+*.pem
+*.key

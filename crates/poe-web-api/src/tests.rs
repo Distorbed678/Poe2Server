@@ -151,7 +151,7 @@ pub(crate) fn fixture_with(config: &str) -> Fixture {
     fixture_at(config, None)
 }
 
-/// The repository root (where `versions/` is).
+/// The repository root (where `modules/protocol/versions/` is).
 pub(crate) fn repo_root() -> std::path::PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
@@ -1469,10 +1469,10 @@ async fn log_websocket_streams_filtered_events() {
     assert_eq!(next(&mut ws).await["type"], "error");
 }
 
-/// `docs/architecture/openapi.json` is what `cargo xtask openapi` writes.
+/// `docs/openapi.json` is what `cargo xtask openapi` writes.
 #[test]
 fn committed_openapi_document_is_current() {
-    let committed = include_str!("../../../docs/architecture/openapi.json");
+    let committed = include_str!("../../../docs/openapi.json");
     assert_eq!(
         committed,
         crate::openapi_json() + "\n",
