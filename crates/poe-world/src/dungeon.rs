@@ -609,6 +609,11 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
         }
     }
     filler_rooms(&rooms, &mut grid, &mut types, files, rng)?;
+    if std::env::var("POE_DUMP_ROOMS").is_ok() {
+        for (i, r) in grid.rooms.iter().enumerate() {
+            eprintln!("ROOM {i} {} {} {} {} {} o{}", if r.path.is_empty() { "-" } else { &r.path }, r.origin.0, r.origin.1, r.size.0, r.size.1, r.orientation);
+        }
+    }
     Ok(grid)
 }
 
@@ -1595,6 +1600,9 @@ fn search(grid: &Grid, records: &mut [Record], start: usize, goal: usize, height
     loop {
         let Some(k) = (0..open.len()).min_by_key(|&k| key(records, open[k])) else { return false };
         let cur = open.remove(k);
+        if std::env::var("POE_DBG_ASTAR").is_ok() {
+            eprintln!("ASTAR pop {cur} at {:?} g {} h {} f {} (open {})", grid.rooms[cur].origin, records[cur].g, records[cur].h, records[cur].g + records[cur].h, open.len());
+        }
         if cur == goal {
             return true;
         }
@@ -1621,6 +1629,9 @@ fn search(grid: &Grid, records: &mut [Record], start: usize, goal: usize, height
                 records[n].h = ((dg >> 1) as i32).wrapping_mul(100 - fuzzy) + (((records[n].impval << 7) as u32) / 100) as i32 + fuzzy.wrapping_mul(records[n].cost as i32);
             }
             records[n].g = g;
+            if std::env::var("POE_DBG_ASTAR").is_ok() {
+                eprintln!("ASTAR   push {n} at {:?} g {g} h {} used {} cost {}", grid.rooms[n].origin, records[n].h, records[n].used, records[n].cost);
+            }
             open.push(n);
             records[n].pred = Some(cur);
         }

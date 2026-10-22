@@ -99,6 +99,23 @@ pub fn turn_graph(g: &mut Graph, o: u8, symmetric: &dyn Fn(&str) -> bool) {
     let (w, h) = (g.width as i32 * 23, g.height as i32 * 23);
     for n in &mut g.nodes {
         (n.x, n.y) = turn_point(o, w, h, n.x, n.y);
+        // The random offset ranges (values 5..9: x min, y min, x max, y max; node +0x78..+0x84)
+        // turn with the position as vectors (`0x141d14b30`), then each axis' pair is put in order.
+        if n.values.len() > 8 {
+            let [a, b, c] = TABLE[o.min(8) as usize];
+            let turn_vec = |x: i32, y: i32| {
+                let v = [-x, x, -y, y];
+                (v[(b + a * 2) as usize], v[((if a == 0 { 2 } else { 0 }) + c) as usize])
+            };
+            let (xmin, ymin) = turn_vec(n.values[5], n.values[6]);
+            let (xmax, ymax) = turn_vec(n.values[7], n.values[8]);
+            let (xmin, xmax) = if xmax < xmin { (xmax, xmin) } else { (xmin, xmax) };
+            let (ymin, ymax) = if ymax < ymin { (ymax, ymin) } else { (ymin, ymax) };
+            n.values[5] = xmin;
+            n.values[6] = ymin;
+            n.values[7] = xmax;
+            n.values[8] = ymax;
+        }
         let no = crate::rooms::node_orientation(&n.orientation);
         if no < 8 {
             n.orientation = ORIENTATION_NAMES[compose(no, o) as usize].to_string();
