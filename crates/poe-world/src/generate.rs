@@ -37,6 +37,21 @@ fn data_err(path: &str, e: impl std::fmt::Debug) -> GenError {
     GenError::Data(path.to_string(), format!("{e:?}"))
 }
 
+/// The key game files are looked up by: lower case with repeated `/` collapsed (graph and
+/// tile-set files name some directories with a trailing `/` that is joined with another `/`, e.g.
+/// `.../Shipwrecks//OceanLedge_...tdt`, `.../3_14//Subarea/...`; the client's path handling
+/// resolves them).
+pub fn normalize_path(path: &str) -> String {
+    let mut out = String::with_capacity(path.len());
+    for c in path.chars() {
+        if c == '/' && out.ends_with('/') {
+            continue;
+        }
+        out.push(c.to_ascii_lowercase());
+    }
+    out
+}
+
 /// Reads game files (the generator's only input besides the seed).
 pub trait Files {
     fn read(&self, path: &str) -> Result<Vec<u8>, GenError>;
@@ -49,7 +64,7 @@ pub trait Files {
 
 impl Files for poe_data::GameFiles {
     fn read(&self, path: &str) -> Result<Vec<u8>, GenError> {
-        poe_data::GameFiles::read(self, &path.to_lowercase())
+        poe_data::GameFiles::read(self, &normalize_path(path))
             .map(|b| b.to_vec())
             .map_err(|e| data_err(path, e))
     }
@@ -77,7 +92,7 @@ impl Files for CachedFiles<'_> {
     }
 
     fn read(&self, path: &str) -> Result<Vec<u8>, GenError> {
-        let key = path.to_ascii_lowercase();
+        let key = normalize_path(path);
         if let Some(b) = self.cache.read().unwrap_or_else(|e| e.into_inner()).get(&key) {
             return Ok(b.as_ref().clone());
         }
@@ -545,6 +560,11 @@ pub fn load_tdt(files: &dyn Files, path: &str) -> Result<Tdt, GenError> {
 }
 
 impl Master {
+    /// A master without tile set or fill tiles (container graphs, whose `.tsi` names neither).
+    pub fn empty() -> Self {
+        Self { tiles: TileSet::new(Vec::new()), fills: HashMap::new(), headers: HashMap::new(), ground_names: HashMap::new() }
+    }
+
     pub fn load(files: &dyn Files, tst: &str, gft: &str) -> Result<Self, GenError> {
         let parsed = TSTParser
             .parse(&files.read(tst)?)

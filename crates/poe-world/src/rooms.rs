@@ -183,13 +183,14 @@ impl RoomSet {
         let mut rooms = Vec::new();
         for r in &rs.rooms {
             let room = load_room(files, &r.arm_file)?;
-            let Slot::K(k) = &room.arm.root_slot else {
-                return Err(GenError::Unsupported(format!("room {} has no root key", r.arm_file)));
+            let key = match &room.arm.root_slot {
+                Slot::K(k) => slot_key(k),
+                _ => TileKey::default(),
             };
             rooms.push(RoomDef {
                 path: r.arm_file.clone(),
                 tag: room.arm.tag.clone(),
-                key: slot_key(k),
+                key,
                 weight: r.weight.unwrap_or(1),
                 orientations: orientation_mask(&r.rotations),
                 room,

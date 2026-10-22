@@ -60,9 +60,12 @@ pub fn topologies_for(gd: &GameData, area_id: &str, mode: i64) -> Result<Vec<Str
     Ok(topology_entries(gd, area_id, mode)?.into_iter().map(|t| t.0).collect())
 }
 
-/// [`topologies_for`] with each topology's allowed region orientations (bit per orientation,
-/// Topologies list column 6 at topology +0x34; 8 = all).
-pub fn topology_entries(gd: &GameData, area_id: &str, mode: i64) -> Result<Vec<(String, u8)>, GenError> {
+/// Every `WorldAreas.Topologies` entry of an area in table order whatever its league mode:
+/// `(graph path, orientation mask, mode)`. This is the list `map_force_topology` indexes
+/// (`0x141ff9280` checks the stat against row `+0x60` and `0x141ff90f0` takes entry `stat - 1`
+/// of row `+0x68`, no mode filter); [`topology_entries`] is the mode-filtered list the client
+/// draws from when nothing is forced.
+pub fn raw_topology_entries(gd: &GameData, area_id: &str) -> Result<Vec<(String, u8, i64)>, GenError> {
     let areas = gd.table("WorldAreas").map_err(data)?;
     let area = areas.find_by_str("Id", area_id).map_err(data)?.ok_or_else(|| data(format!("no area {area_id}")))?;
     let topologies = gd.table("Topologies").map_err(data)?;
@@ -71,7 +74,7 @@ pub fn topology_entries(gd: &GameData, area_id: &str, mode: i64) -> Result<Vec<(
         _ => Vec::new(),
     };
     let last = topologies.schema().columns.len() - 1;
-    let (mut exact, mut any) = (Vec::new(), Vec::new());
+    let mut out = Vec::new();
     for &r in &rows {
         let row = topologies.row(r).ok_or_else(|| data("bad topology row"))?;
         let path = row.str("DGRFile").map_err(data)?;
@@ -83,10 +86,29 @@ pub fn topology_entries(gd: &GameData, area_id: &str, mode: i64) -> Result<Vec<(
                 }
             }
         }
-        let path = (path, mask);
-        match row.get_index(last).map_err(data)? {
-            Value::Int(v) if v == mode => exact.push(path),
-            Value::Int(0x39) => any.push(path),
+        let mode = match row.get_index(last).map_err(data)? {
+            Value::Int(v) => v,
+            _ => -1,
+        };
+        out.push((path, mask, mode));
+    }
+    Ok(out)
+}
+
+/// [`topologies_for`] with each topology's allowed region orientations (bit per orientation,
+/// Topologies list column 6 at topology +0x34; 8 = all).
+///
+/// The mode-1 entries of every area come first in the raw list ([`raw_topology_entries`]), so a
+/// 1-based index into this list is the same index into the raw one (`map_force_topology`); the
+/// areas that also list other-mode entries (G1_2, G1_6, G1_11, G1_13_1, G2_4_1, G2_5_2, G2_8,
+/// G3_2_1, G3_3, G3_4, G3_7: mode 54 after the mode 1 ones) have more raw entries than this
+/// returns.
+pub fn topology_entries(gd: &GameData, area_id: &str, mode: i64) -> Result<Vec<(String, u8)>, GenError> {
+    let (mut exact, mut any) = (Vec::new(), Vec::new());
+    for (path, mask, m) in raw_topology_entries(gd, area_id)? {
+        match m {
+            v if v == mode => exact.push((path, mask)),
+            0x39 => any.push((path, mask)),
             _ => {}
         }
     }
@@ -162,11 +184,17 @@ pub fn generate_probed_files(gd: &GameData, files: &dyn crate::generate::Files, 
     // `phase_cad0`: league mechanic rolls come before the topology choice.
     crate::league::roll_area(gd, area_id, rng);
     let sub = rng.below(u32::MAX);
-    let index = match forced.topology {
-        Some(f) if f >= 1 && (f as usize) <= graphs.len() => f as usize - 1,
-        _ => lcg_index(sub, graphs.len() as u32) as usize,
+    // A forced topology indexes the raw list (all league modes, `0x141ff9280`); the client
+    // throws for an index past its end ("Cannot force graph"). Without one it draws from the
+    // mode-filtered list.
+    let (dgr, mask) = match forced.topology {
+        Some(f) if f >= 1 => {
+            let raw = raw_topology_entries(gd, area_id)?;
+            let e = raw.get(f as usize - 1).ok_or_else(|| data(format!("{area_id}: cannot force topology {f}: only {} topologies", raw.len())))?;
+            (e.0.clone(), e.1)
+        }
+        _ => graphs[lcg_index(sub, graphs.len() as u32) as usize].clone(),
     };
-    let (dgr, mask) = graphs[index].clone();
     // Region orientation: forced, else what the world-map match gives (not ported: the lowest
     // allowed one, right for the act 1 areas checked). Without a match the client draws it from
     // the topology's list (`0x141ff90f0`: `region::pick(mask, lcg_index(sub, 0x348))`).
@@ -493,7 +521,9 @@ fn generate_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: 
     let Built { map, mut master, tsi_bytes, tsi, .. } = built;
     let margins = Margins::parse(&crate::text::decode_utf16(&tsi_bytes));
     let edge_types = master.edge_type_table(files)?;
-    let mut map = outer_buffer(&map, margins, tsi.get("OuterGroundType").map(String::as_str), true, &mut master, files, &edge_types, rng)?;
+    // A container graph has no fill tiles to fill with (its subgraphs fill their own rectangles).
+    let outer_ground = tsi.get("OuterGroundType").map(String::as_str).filter(|_| !master.fills.is_empty());
+    let mut map = outer_buffer(&map, margins, outer_ground, true, &mut master, files, &edge_types, rng)?;
     // Tile records keep heights in world units (`StoreyHeight` per storey).
     let storey: i16 = tsi.get("StoreyHeight").and_then(|v| v.trim().parse().ok()).unwrap_or(16);
     for c in map.cells.iter_mut().flatten() {
@@ -519,7 +549,12 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
     let tsi = tsi_entries(&tsi_bytes);
     let dir = tsi_path.rsplit_once('/').map_or("", |d| d.0);
     let rel = |k: &str| tsi.get(k).map(|v| format!("{dir}/{v}"));
-    let set = RoomSet::load(files, &rel("RoomSet").ok_or_else(|| data("no RoomSet"))?)?;
+    // Container graphs (`master_container.tsi` of MapKarst, MapDerelictMansion, P1_6,
+    // HideoutVampireManor: nodes that only hold subgraphs) name no `RoomSet`.
+    let set = match rel("RoomSet") {
+        Some(p) => RoomSet::load(files, &p)?,
+        None => RoomSet { rooms: Vec::new() },
+    };
     // `RoomOverlap` is master +0x14b; the parser's default is 1 (constructor `0x14292e190`).
     let overlap: u32 = tsi.get("RoomOverlap").and_then(|v| v.trim().parse().ok()).unwrap_or(1);
     let grid = crate::dungeon::layout(files, graph, removed, &set, overlap, rng)?;
@@ -528,7 +563,11 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
             eprintln!("DBG room {i} {} o{} origin {:?} size {:?} special {}", r.path, r.orientation, r.origin, r.size, r.special);
         }
     }
-    let mut master = Master::load(files, &rel("TileSet").ok_or_else(|| data("no TileSet"))?, &rel("FillTiles").ok_or_else(|| data("no FillTiles"))?)?;
+    let mut master = match (rel("TileSet"), rel("FillTiles")) {
+        (Some(t), Some(f)) => Master::load(files, &t, &f)?,
+        (None, None) => Master::empty(),
+        _ => return Err(data("master names a TileSet without FillTiles or the reverse")),
+    };
     let ecf = match rel("EdgeCombination") {
         Some(p) => crate::dungeon_tiles::Ecf::parse(&crate::text::decode_utf16(&files.read(&p)?)),
         None => Default::default(),
@@ -627,8 +666,17 @@ fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng:
     let margins = Margins::parse(&crate::text::decode_utf16(&tsi_bytes));
     let dir = tsi_path.rsplit_once('/').map_or("", |d| d.0);
     let rel = |k: &str| tsi.get(k).map(|v| format!("{dir}/{v}"));
-    let mut master = Master::load(files, &rel("TileSet").ok_or_else(|| data("no TileSet"))?, &rel("FillTiles").ok_or_else(|| data("no FillTiles"))?)?;
-    let set = RoomSet::load(files, &rel("RoomSet").ok_or_else(|| data("no RoomSet"))?)?;
+    let mut master = match (rel("TileSet"), rel("FillTiles")) {
+        (Some(t), Some(f)) => Master::load(files, &t, &f)?,
+        (None, None) => Master::empty(),
+        _ => return Err(data("master names a TileSet without FillTiles or the reverse")),
+    };
+    // Container graphs (`master_container.tsi` of MapKarst, MapDerelictMansion, P1_6,
+    // HideoutVampireManor: nodes that only hold subgraphs) name no `RoomSet`.
+    let set = match rel("RoomSet") {
+        Some(p) => RoomSet::load(files, &p)?,
+        None => RoomSet { rooms: Vec::new() },
+    };
     let mut placed_graph = PlacedGraph { graph, nodes: nodes.iter().map(|n| n.pos).collect(), ends: vec![[None; 2]; graph.edges.len()], points: edge_points, removed };
     let mut types = TerrainTypes::default();
 
