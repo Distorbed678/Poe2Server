@@ -791,7 +791,7 @@ fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng:
                 let def = &master.tiles.tiles[t];
                 map.place(p.pos.0, p.pos.1, &def.path, &def.tdt, p.orientation, 0, Some(t));
             }
-            None => room_pass_oriented(&mut map, &master, &set.rooms[p.room].room, p.pos, p.orientation, false, rng)?,
+            None => room_pass_oriented(&mut map, &master, &set.rooms[p.room].room, p.pos, p.orientation, false, 0, rng)?,
         }
     }
     probe(Stage::Rooms(&map));
