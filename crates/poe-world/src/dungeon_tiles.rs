@@ -937,10 +937,28 @@ impl TilePass<'_> {
             let height = map.index(pos.0, pos.1).and_then(|i| map.cells[i].as_ref()).map_or(0, |c| c.height);
             map.place(pos.0, pos.1, &def.path, &def.tdt, c.orientation, height, Some(c.tile));
         }
+        // `0x14209dc90`: per 3x3 spot whose cell holds the corner (offset 0, 0) of a tile without
+        // a feature, a `door` tile for the tile's own oriented key replaces it (`below(total)`),
+        // at the cell's height.
         for &p in &doors.large {
-            if self.key_at(map, p).is_some_and(|k| !k.1 && self.master.tiles.candidates("door", &k.0).iter().next().is_some()) {
-                return Err(unsupported(format!("dungeon: door tile at {p:?} (0x14209dc90 not ported)")));
+            let Some(idx) = map.index(p.0, p.1) else { continue };
+            let Some(cell) = map.cells[idx].as_ref() else { continue };
+            if cell.offset != (0, 0) {
+                continue;
             }
+            let Some((key, is_door)) = self.key_at(map, p) else { continue };
+            if is_door {
+                continue;
+            }
+            let list = self.master.tiles.candidates("door", &key);
+            if list.is_empty() {
+                continue;
+            }
+            let height = cell.height;
+            let total = list.iter().map(|c| c.weight).sum();
+            let c = pick(list, rng.below(total)).expect("non-empty list");
+            let def = &self.master.tiles.tiles[c.tile];
+            map.place(p.0, p.1, &def.path, &def.tdt, c.orientation, height, Some(c.tile));
         }
         Ok(())
     }

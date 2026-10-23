@@ -214,14 +214,55 @@ pub fn generate_probed_files(gd: &GameData, files: &dyn crate::generate::Files, 
     let orientation = forced.orientation.filter(|&o| o < 8).unwrap_or(if mask == 0 || mask == 0xff { 0 } else { mask.trailing_zeros() as u8 });
     let mut graph = Graph::parse_bytes(&files.read(&dgr)?).map_err(|e| data(format!("{dgr}: {e:?}")))?;
     turn(files, &mut graph, orientation)?;
+    // `ShipPlugin` (`0x141f03c40` via `0x141ff9860` / `0x141ff89e0`): the plugin adds the `G4_ship`
+    // area as a second graph job: a topology draw among its topologies, then its region
+    // orientation draw (`below(0x348)` among the topology's allowed ones). It is generated after
+    // the main graph and sits beside the finished map.
+    let ship = if area_plugin(gd, area_id).as_deref() == Some(SHIP_PLUGIN) {
+        let entries = topology_entries(gd, SHIP_AREA, 1)?;
+        if entries.is_empty() {
+            return Err(data(format!("{SHIP_AREA}: no topologies")));
+        }
+        let (path, mask) = entries[rng.below(entries.len() as u32) as usize].clone();
+        let o = crate::region::pick(mask, rng.below(0x348));
+        let mut g = Graph::parse_bytes(&files.read(&path)?).map_err(|e| data(format!("{path}: {e:?}")))?;
+        turn(files, &mut g, o)?;
+        Some(g)
+    } else {
+        None
+    };
     let special: Vec<String> = gd.table("SpecialTiles").ok().map(|t| (0..).map_while(|r| t.row(r)).filter_map(|r| r.str("TDTFile").ok().map(String::from)).collect()).unwrap_or_default();
     let files = WithSpecialTiles { inner: files, special };
-    let map = generate_graph_probed(&files, &graph, rng, probe)?;
+    let map = generate_graph_probed(&files, &graph, rng, probe, ship.as_ref())?;
     let draws = rng.draws;
     let logged = rng.log.as_ref().map(Vec::len);
     let doodads = crate::doodads::resolve(gd, &files, rng, map.doodads.clone());
     let doodad_draws = logged.and_then(|n| rng.log.as_ref().map(|l| l[n..].to_vec())).unwrap_or_default();
     Ok(Generated { graph: dgr, map, doodads, draws, doodad_draws })
+}
+
+/// The `TerrainPlugins` row name of a `WorldAreas` row (`0x141d04820` registers the plugins by
+/// name).
+fn area_plugin(gd: &GameData, area_id: &str) -> Option<String> {
+    let areas = gd.table("WorldAreas").ok()?;
+    let area = areas.find_by_str("Id", area_id).ok()??;
+    let row = area.get("TerrainPlugins").ok()?.as_row()?;
+    gd.table("TerrainPlugins").ok()?.row(row)?.str("Id").ok().map(String::from)
+}
+
+/// The plugin whose hook adds a second area to the generation, and that area (the client's
+/// hook, `0x141f03c40`, looks `G4_ship` up in `WorldAreas` by this literal).
+const SHIP_PLUGIN: &str = "ShipPlugin";
+const SHIP_AREA: &str = "G4_ship";
+
+/// A second graph job's map beside the finished first one with a one-tile gap: to its right
+/// for a map at least as wide as tall, else below it, from the far edge on the other axis's 0.
+fn append_job(main: TileMap, job: &TileMap) -> TileMap {
+    let (w, h) = (main.width, main.height);
+    let (at, size) = if w >= h { ((w as i32 + 1, 0), (w + 1 + job.width, h.max(job.height))) } else { ((0, h as i32 + 1), (w.max(job.width), h + 1 + job.height)) };
+    let mut m = main.embed((0, 0), size.0, size.1);
+    m.paste(job, at);
+    m
 }
 
 /// Turns a graph into region orientation `o` (edge types decide their mirroring).
@@ -493,7 +534,7 @@ fn edge_symmetric(types: &mut TerrainTypes, files: &dyn crate::generate::Files, 
 
 /// A `.dgr` graph: the dungeon layout (`crate::dungeon`), then its tile pass
 /// (`crate::dungeon_tiles`).
-fn generate_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[bool], rng: &mut TerrainRng) -> Result<TileMap, GenError> {
+fn generate_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[bool], rng: &mut TerrainRng, extra: Option<&Graph>) -> Result<TileMap, GenError> {
     let mut built = build_dungeon(files, graph, removed, rng, None)?;
     // `0x141ff7e00` / `0x141ff05f0`: each `graph` node's subgraph is generated after the main
     // graph's fill and de-repetition, straight into its reserved rectangle of the map.
@@ -517,24 +558,75 @@ fn generate_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: 
         built.map.paste(&inner.map, at);
         done.push((inner, origin, m));
     }
+    // The plugin's second job (`ShipPlugin`) runs its pipeline after the main graph's and its
+    // subgraphs', before any outer pass; its outer passes come first (last graph first).
+    let ship_built = match extra {
+        Some(g) => {
+            let mut g = g.clone();
+            random_offsets(&mut g, rng);
+            let (g, rem) = prune(&g, rng)?;
+            Some(build_dungeon(files, &g, &rem, rng, None)?)
+        }
+        None => None,
+    };
+    let ship_map = match ship_built {
+        Some(b) => Some(finish_dungeon(files, b, &[], rng)?),
+        None => None,
+    };
     // `0x141ff7a10`: the outer fill and outer buffer per graph, the last subgraph first, then the
     // main graph's below.
+    // `StoreyHeight` (tile records keep heights in world units): each cell takes the one of the
+    // graph that placed it (a subgraph's own cells and the outer fill and buffer cells it added,
+    // else the main graph's), so a cell is scaled exactly once.
+    let storey_of = |tsi: &std::collections::HashMap<String, String>| -> i16 { tsi.get("StoreyHeight").and_then(|v| v.trim().parse().ok()).unwrap_or(16) };
+    let mut owner: Vec<Option<i16>> = vec![None; built.map.cells.len()];
+    for (inner, origin, m) in &done {
+        let st = storey_of(&inner.tsi);
+        let at = (origin.0 + m.left as i32, origin.1 + m.top as i32);
+        for y in 0..inner.map.height as i32 {
+            for x in 0..inner.map.width as i32 {
+                if inner.map.index(x, y).is_some_and(|i| inner.map.cells[i].is_some()) {
+                    if let Some(j) = built.map.index(x + at.0, y + at.1) {
+                        owner[j] = Some(st);
+                    }
+                }
+            }
+        }
+    }
     for (mut inner, origin, m) in done.into_iter().rev() {
         let g = inner.tsi.get("OuterGroundType").cloned();
         let (w, h) = (inner.map.width, inner.map.height);
+        let st = storey_of(&inner.tsi);
+        let before: Vec<bool> = built.map.cells.iter().map(Option::is_some).collect();
         if m.top + m.right + m.bottom + m.left == 0 {
             if let Some(g) = g {
                 let rect = (origin.0, origin.1, origin.0 + w as i32, origin.1 + h as i32);
                 crate::outer_buffer::outer_fill(&mut built.map, rect, &g, true, &mut inner.master, files)?;
             }
-            continue;
+        } else {
+            let mut window = built.map.window(origin, w + m.left + m.right, h + m.top + m.bottom);
+            let rect = (m.left as i32, m.top as i32, (m.left + w) as i32, (m.top + h) as i32);
+            let edges = inner.master.edge_type_table(files)?;
+            crate::outer_buffer::outer_buffer_window(&mut window, rect, g.as_deref(), true, &mut inner.master, files, &edges, rng)?;
+            built.map.paste(&window, origin);
         }
-        let mut window = built.map.window(origin, w + m.left + m.right, h + m.top + m.bottom);
-        let rect = (m.left as i32, m.top as i32, (m.left + w) as i32, (m.top + h) as i32);
-        let edges = inner.master.edge_type_table(files)?;
-        crate::outer_buffer::outer_buffer_window(&mut window, rect, g.as_deref(), true, &mut inner.master, files, &edges, rng)?;
-        built.map.paste(&window, origin);
+        for (i, was) in before.iter().enumerate() {
+            if !was && built.map.cells[i].is_some() {
+                owner[i] = Some(st);
+            }
+        }
     }
+    let main = finish_dungeon(files, built, &owner, rng)?;
+    Ok(match ship_map {
+        Some(boat) => append_job(main, &boat),
+        None => main,
+    })
+}
+
+/// The tail of a dungeon graph: the outer buffer of its own master, then tile heights in world
+/// units (`owner`: the storey of the subgraph that placed a cell, by cell of the unbuffered map).
+fn finish_dungeon(files: &dyn crate::generate::Files, built: Built, owner: &[Option<i16>], rng: &mut TerrainRng) -> Result<TileMap, GenError> {
+    let storey_of = |tsi: &std::collections::HashMap<String, String>| -> i16 { tsi.get("StoreyHeight").and_then(|v| v.trim().parse().ok()).unwrap_or(16) };
     let Built { map, mut master, tsi_bytes, tsi, .. } = built;
     let margins = Margins::parse(&crate::text::decode_utf16(&tsi_bytes));
     let edge_types = master.edge_type_table(files)?;
@@ -542,9 +634,19 @@ fn generate_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: 
     let outer_ground = tsi.get("OuterGroundType").map(String::as_str).filter(|_| !master.fills.is_empty());
     let mut map = outer_buffer(&map, margins, outer_ground, true, &mut master, files, &edge_types, rng)?;
     // Tile records keep heights in world units (`StoreyHeight` per storey).
-    let storey: i16 = tsi.get("StoreyHeight").and_then(|v| v.trim().parse().ok()).unwrap_or(16);
-    for c in map.cells.iter_mut().flatten() {
-        c.height *= storey;
+    let storey: i16 = storey_of(&tsi);
+    let (dx, dy) = (margins.left as i32, margins.top as i32);
+    let src_w = map.width as i32 - (margins.left + margins.right) as i32;
+    for y in 0..map.height as i32 {
+        for x in 0..map.width as i32 {
+            let (sx, sy) = (x - dx, y - dy);
+            let st = if sx >= 0 && sy >= 0 && sx < src_w { owner.get((sy * src_w + sx) as usize).copied().flatten() } else { None };
+            if let Some(i) = map.index(x, y) {
+                if let Some(c) = map.cells[i].as_mut() {
+                    c.height *= st.unwrap_or(storey);
+                }
+            }
+        }
     }
     Ok(map)
 }
@@ -576,7 +678,14 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
     let overlap: u32 = tsi.get("RoomOverlap").and_then(|v| v.trim().parse().ok()).unwrap_or(1);
     // `DungeonFillRoomHeightOverride` is master +0x14d (a byte), present flag +0x159.
     let fill_height: Option<i32> = tsi.get("DungeonFillRoomHeightOverride").and_then(|v| v.trim().parse::<i32>().ok()).map(|v| v as u8 as i32);
-    let grid = crate::dungeon::layout(files, graph, removed, &set, overlap, fill_height, rng)?;
+    let file_groups = match rel("FileGroups") {
+        Some(p) => {
+            let fdir = p.rsplit_once('/').map_or("", |d| d.0).to_string();
+            crate::dungeon::FileGroups::parse(&crate::text::decode_utf16(&files.read(&p)?), &fdir)
+        }
+        None => Default::default(),
+    };
+    let grid = crate::dungeon::layout(files, graph, removed, &set, overlap, fill_height, &file_groups, rng)?;
     if std::env::var("POE_DBG").is_ok() {
         for (i, r) in grid.rooms.iter().enumerate() {
             eprintln!("DBG room {i} {} o{} origin {:?} size {:?} special {}", r.path, r.orientation, r.origin, r.size, r.special);
@@ -587,6 +696,8 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
         (None, None) => Master::empty(),
         _ => return Err(data("master names a TileSet without FillTiles or the reverse")),
     };
+    // `OuterFillHeightOverride` (master +0x161 set, value +0x153): the outer fill places plain.
+    master.outer_fill_height = tsi.get("OuterFillHeightOverride").and_then(|v| v.trim().parse::<i8>().ok()).or_else(|| tsi.contains_key("OverrideSpawns").then_some(0));
     let ecf = match rel("EdgeCombination") {
         Some(p) => crate::dungeon_tiles::Ecf::parse(&crate::text::decode_utf16(&files.read(&p)?)),
         None => Default::default(),
@@ -709,7 +820,7 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
 
 /// Everything after the topology choice, for one graph.
 pub fn generate_graph(files: &dyn crate::generate::Files, graph: &Graph, rng: &mut TerrainRng) -> Result<TileMap, GenError> {
-    generate_graph_probed(files, graph, rng, &mut |_| {})
+    generate_graph_probed(files, graph, rng, &mut |_| {}, None)
 }
 
 fn dbg_cell(map: &TileMap, stage: &str) {
@@ -722,7 +833,7 @@ fn dbg_cell(map: &TileMap, stage: &str) {
     }
 }
 
-fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng: &mut TerrainRng, probe: &mut dyn FnMut(Stage)) -> Result<TileMap, GenError> {
+fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng: &mut TerrainRng, probe: &mut dyn FnMut(Stage), extra: Option<&Graph>) -> Result<TileMap, GenError> {
     let mut moved;
     let graph = if graph.dungeon_defaults.is_some() {
         moved = graph.clone();
@@ -734,7 +845,7 @@ fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng:
     let (pruned, removed) = prune(graph, rng)?;
     let graph = &pruned;
     if graph.dungeon_defaults.is_some() {
-        return generate_dungeon(files, graph, &removed, rng);
+        return generate_dungeon(files, graph, &removed, rng, extra);
     }
     let mut nodes: Vec<JitterNode> = graph
         .nodes
@@ -774,6 +885,8 @@ fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng:
         (None, None) => Master::empty(),
         _ => return Err(data("master names a TileSet without FillTiles or the reverse")),
     };
+    // `OuterFillHeightOverride` (master +0x161 set, value +0x153): the outer fill places plain.
+    master.outer_fill_height = tsi.get("OuterFillHeightOverride").and_then(|v| v.trim().parse::<i8>().ok()).or_else(|| tsi.contains_key("OverrideSpawns").then_some(0));
     // Container graphs (`master_container.tsi` of MapKarst, MapDerelictMansion, P1_6,
     // HideoutVampireManor: nodes that only hold subgraphs) name no `RoomSet`.
     let set = match rel("RoomSet") {

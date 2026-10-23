@@ -550,6 +550,13 @@ pub(crate) fn middle(hs: &[i32]) -> Option<i32> {
     Some(hi - (hi - lo) / 2)
 }
 
+/// The orientation of a `.gft` fill line as a one-bit mask: the line's last rotation wins (the
+/// client's entry holds one orientation byte; `I FR270` places only `FR270`, and the line counts
+/// once in the group's weight total), no rotation means any.
+fn fill_orientation(rotations: &[String]) -> u8 {
+    rotations.iter().rev().find_map(|r| crate::tileset::ORIENTATION_NAMES.iter().position(|n| n.eq_ignore_ascii_case(r))).map_or_else(|| orientation_mask(rotations), |o| 1 << o)
+}
+
 /// One `.gft` fill group: `(weight, path, orientation mask)`.
 type FillGroup = Vec<(u32, String, u8)>;
 
@@ -562,6 +569,9 @@ pub struct Master {
     headers: HashMap<String, Tdt>,
     /// Ground type file (lower case) -> its name (first line of the `.gt`).
     ground_names: HashMap<String, String>,
+    /// `.tsi` `OuterFillHeightOverride`: the height of the outer fill's plain placement, which
+    /// also replaces the height repair (master +0x153 / +0x161).
+    pub outer_fill_height: Option<i8>,
 }
 
 /// Reads a `.tdt`, applying an inheriting tile's overrides to its parent chain.
@@ -589,7 +599,7 @@ pub fn load_tdt(files: &dyn Files, path: &str) -> Result<Tdt, GenError> {
 impl Master {
     /// A master without tile set or fill tiles (container graphs, whose `.tsi` names neither).
     pub fn empty() -> Self {
-        Self { tiles: TileSet::new(Vec::new()), fills: HashMap::new(), headers: HashMap::new(), ground_names: HashMap::new() }
+        Self { tiles: TileSet::new(Vec::new()), fills: HashMap::new(), headers: HashMap::new(), ground_names: HashMap::new(), outer_fill_height: None }
     }
 
     pub fn load(files: &dyn Files, tst: &str, gft: &str) -> Result<Self, GenError> {
@@ -632,7 +642,7 @@ impl Master {
                 let group = s
                     .files
                     .iter()
-                    .map(|f| (f.weight, f.path.clone(), orientation_mask(&f.rotations)))
+                    .map(|f| (f.weight, f.path.clone(), fill_orientation(&f.rotations)))
                     .collect();
                 (s.name.to_ascii_lowercase(), group)
             })
@@ -642,6 +652,7 @@ impl Master {
             fills,
             headers,
             ground_names: HashMap::new(),
+            outer_fill_height: None,
         })
     }
 
