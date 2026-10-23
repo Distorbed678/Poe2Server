@@ -197,6 +197,9 @@ impl Fill<'_> {
         let tdt = self.master.header(self.files, path)?.clone();
         let (w, h) = oriented(tdt.size, o);
         let height = self.corner_height(x, y, w, h);
+        if std::env::var("POE_DBG_FILLCELL").is_ok() {
+            eprintln!("PLACETILE ({x},{y}) o{o} h{height} {path}");
+        }
         self.map.place(x, y, path, &tdt, o, height, None);
         self.note(x, y, &tdt)?;
         Ok(w - 1)
@@ -334,6 +337,9 @@ impl Fill<'_> {
                 }
                 let c = chosen.ok_or_else(|| GenError::Unsupported(format!("no tile fits at ({mx},{my}) for fill room {path}")))?;
                 let def = self.master.tiles.tiles[c.tile].clone();
+                if std::env::var("POE_DBG_FILLCELL").is_ok() {
+                    eprintln!("PLACEROOMTILE {path} room@({x},{y}) cell {cx},{cy} -> ({mx},{my}) {} feature {feature:?}", def.path);
+                }
                 self.map.place(mx, my, &def.path, &def.tdt, c.orientation, low as i16 + self.height.unwrap_or(0), Some(c.tile));
                 self.note(mx, my, &def.tdt)?;
             }
@@ -404,6 +410,10 @@ pub fn fill_cells(
             (p.flags & 1 != 0).then(|| p.ground.clone()).flatten()
         });
         f.height = Some(c.height as i16);
+        if std::env::var("POE_DBG_FILLCELL").is_ok() {
+            let lg = f.map.point_index(x, y).map(|i| (f.map.lattice[i].ground.clone(), f.map.lattice[i].flags));
+            eprintln!("FILLCELL ({x},{y}) cg {:?} lat {:?} -> {:?} h{} acc {} flags {:?} fills {:?}", c.ground, lg, ground, c.height, c.accessible, ground.as_deref().map(|g| f.map.gt_flags(g)), ground.as_deref().and_then(|g| f.master.ground_name(f.files, g).ok()).map(|n| (n.clone(), f.master.fills.get(&n).map(|v| v.len()))));
+        }
         f.cell(x, y, ground, c.accessible, rng)?;
     }
     let wiggle = f.wiggle.take().map(|w| w.0).unwrap_or_default();
@@ -436,8 +446,11 @@ pub fn fill_pass(
 /// (the overlays' second phase): `ground` is the cell's corner ground and `walkable` whether fill
 /// rooms with points of interest may go there. Returns the fill rooms it placed.
 #[allow(clippy::too_many_arguments)]
-pub fn fill_cell(map: &mut TileMap, master: &mut Master, files: &dyn Files, pos: (i32, i32), ground: Option<String>, walkable: bool, rng: &mut TerrainRng) -> Result<Vec<PlacedFillRoom>, GenError> {
-    let mut f = Fill { map, master, files, rooms: HashMap::new(), placed: Vec::new(), height: None, wiggle: None };
+pub fn fill_cell(map: &mut TileMap, master: &mut Master, files: &dyn Files, pos: (i32, i32), ground: Option<String>, walkable: bool, wiggle: Option<&mut Vec<(i32, i32)>>, rng: &mut TerrainRng) -> Result<Vec<PlacedFillRoom>, GenError> {
+    let mut f = Fill { map, master, files, rooms: HashMap::new(), placed: Vec::new(), height: None, wiggle: wiggle.as_ref().map(|_| (Vec::new(), Default::default())) };
     f.cell(pos.0, pos.1, ground, walkable, rng)?;
+    if let (Some(out), Some(w)) = (wiggle, f.wiggle.take()) {
+        out.extend(w.0);
+    }
     Ok(f.placed)
 }

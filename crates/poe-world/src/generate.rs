@@ -826,14 +826,18 @@ pub fn room_pass(
     origin: (i32, i32),
     rng: &mut TerrainRng,
 ) -> Result<(), GenError> {
-    room_pass_oriented(map, master, room, origin, 0, false, rng)
+    room_pass_oriented(map, master, room, origin, 0, false, 0, rng)
 }
 
 /// Room pass (`0x141f8e6c0`): every cell of the room grid, x outer, y inner; a slot's key is
 /// seen with the room's orientation `o` and lands where its cells land when the room is
 /// turned (`origin` is the turned room's corner). With `mark` (its eighth argument; overlays set
 /// it, node rooms do not), uniform-ground slots also give their ground to the corners x in
-/// `0..w`, y in `0..=h` (`0x141d0e130`).
+/// `0..w`, y in `0..=h` (`0x141d0e130`). `base` is the room's height in storeys (an overlay
+/// room sits where its border corners meet the terrain, `overlay::room_height`); a slot's tile
+/// goes at `base` plus the slot's lowest corner height, and the key's corner heights are taken
+/// relative to that corner.
+#[allow(clippy::too_many_arguments)]
 pub fn room_pass_oriented(
     map: &mut TileMap,
     master: &Master,
@@ -841,6 +845,7 @@ pub fn room_pass_oriented(
     origin: (i32, i32),
     o: u8,
     mark: bool,
+    base: i32,
     rng: &mut TerrainRng,
 ) -> Result<(), GenError> {
     let (w, h) = (room.width(), room.height());
@@ -853,7 +858,15 @@ pub fn room_pass_oriented(
                 continue;
             };
             let (sw, sh) = (key.size.0.max(1) as i32, key.size.1.max(1) as i32);
-            let key = key.oriented(o);
+            let mut key = key.oriented(o);
+            // Slot +0x72: the lowest corner's height moves into the tile height.
+            // (Only overlay rooms are checked against the client for this; node rooms of
+            // `.tgr` graphs keep the absolute corner heights.)
+            let low = if mark { key.heights.iter().map(|&v| v as i8).min().unwrap_or(0) } else { 0 };
+            for v in &mut key.heights {
+                *v = (*v as i8 - low) as u8;
+            }
+            let height = base + low as i32;
             let (ax, ay) = orient_cell(o, w as i32, h as i32, x as i32, y as i32);
             let (bx, by) = orient_cell(o, w as i32, h as i32, x as i32 + sw - 1, y as i32 + sh - 1);
             let (mx, my) = (origin.0 + ax.min(bx), origin.1 + ay.min(by));
@@ -890,9 +903,12 @@ pub fn room_pass_oriented(
                 &def.path,
                 &def.tdt,
                 c.orientation,
-                0,
+                height as i16,
                 Some(c.tile),
             );
+            if height != 0 {
+                map.set_heights(mx, my, &def.tdt, height as i16);
+            }
         }
     }
     map.room_overrides(room_full, origin, o);

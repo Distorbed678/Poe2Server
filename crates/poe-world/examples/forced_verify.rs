@@ -149,6 +149,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let Some((area, seed, topology, orientation)) = keys.get(i).cloned() else { break };
                     let key = (area.clone(), seed, topology, orientation);
                     let (tx, rx) = mpsc::channel();
+                    let area_c = area.clone();
                     std::thread::spawn(move || {
                         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                             let mut rng = TerrainRng::new(seed);

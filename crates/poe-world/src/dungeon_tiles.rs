@@ -276,6 +276,9 @@ pub struct TilePass<'a> {
     pub overlap_fixes: bool,
     /// `.tsi` `DisableDoors` (master +0x167): no door placement.
     pub doors_disabled: bool,
+    /// The graph's ground types as the pass context holds them: +0x20 the default (graph line 2),
+    /// +0x28 the ground of the lowest points (line 3), +0x30 that of the highest (line 1).
+    pub grounds: [Option<String>; 3],
 }
 
 impl TilePass<'_> {
@@ -308,8 +311,80 @@ impl TilePass<'_> {
                 map.room_overrides(room, (p.origin.0 * step, p.origin.1 * step), p.orientation);
             }
         }
+        if std::env::var("POE_NO_SETTLE").is_err() {
+            self.settle_rooms(grid, rooms, map);
+        }
         cells.sort_by_key(|c| c.pos);
         Ok((cells, moved))
+    }
+
+    /// `0x142099e90` per room (after the ground overrides): lattice points of the room that have
+    /// no ground (never set, or set to none) take its ground, `Some` for a blank room (its one
+    /// ground), else the graph's default; a point at the lowest or highest height takes the
+    /// graph's low or high ground instead (unless the ground is `impassable_ground.gt`). The
+    /// point is set either way. A room leaves out its first row/column when it is not on the
+    /// grid's first unit and its last when its origin is not on the last unit (overlap only).
+    fn settle_rooms(&self, grid: &crate::dungeon::Grid, rooms: &HashMap<String, Room>, map: &mut TileMap) {
+        let step = (self.unit - self.overlap) as i32;
+        let height_of = |map: &TileMap, x: i32, y: i32| -> i32 {
+            map.point_index(x, y).map_or(0, |i| {
+                let h = map.lattice[i].height as i32;
+                if h < -0x78 { h + 0x100 } else { h }
+            })
+        };
+        let (mut max_h, mut min_h) = (height_of(map, 0, 0), height_of(map, 0, 0));
+        for y in 0..=map.height as i32 {
+            for x in 0..=map.width as i32 {
+                let h = height_of(map, x, y);
+                max_h = max_h.max(h);
+                min_h = min_h.min(h);
+            }
+        }
+        for p in &grid.rooms {
+            let Some(room) = rooms.get(&p.path) else { continue };
+            let (w, h) = (room.width() as i32, room.height() as i32);
+            let (w, h) = if p.orientation & 1 == 1 && p.orientation < 8 { (h, w) } else { (w, h) };
+            let (mut x0, mut y0, mut x1, mut y1) = (0, 0, w + 1, h + 1);
+            if self.overlap != 0 {
+                x0 = (p.origin.0 != 0) as i32;
+                y0 = (p.origin.1 != 0) as i32;
+                x1 -= (p.origin.0 < grid.w as i32 - 1) as i32;
+                y1 -= (p.origin.1 < grid.h as i32 - 1) as i32;
+            }
+            // A blank room (no tag, doors or second ground) carries its ground.
+            let own = match &room.arm.root_slot {
+                poe_data_tools::file_parsers::arm::types::Slot::K(k) if room.arm.tag.is_empty() && room.arm.thingies.iter().all(|t| t.et_file.is_none()) && k.corners.iter().all(|c| c.ground == k.corners[0].ground) && uniform_walk(room) => k.corners[0].ground.clone(),
+                _ => None,
+            };
+            let base = self.grounds[0].clone();
+            if let Ok(v) = std::env::var("POE_DBG_SETTLE") {
+                let xy: Vec<i32> = v.split(',').filter_map(|t| t.parse().ok()).collect();
+                if xy.len() == 2 && (x0..x1).contains(&(xy[0] - p.origin.0 * step)) && (y0..y1).contains(&(xy[1] - p.origin.1 * step)) {
+                    eprintln!("SETTLE room {} origin {:?} o{} own {:?} base {:?} tag {:?} slot {:?} thingies {}", p.path, p.origin, p.orientation, own, base, room.arm.tag, room.arm.root_slot, room.arm.thingies.len());
+                }
+            }
+            let ground = own.or(base).map(|g| g.to_ascii_lowercase().replace('\\', "/"));
+            for y in y0..y1 {
+                for x in x0..x1 {
+                    let (px, py) = (p.origin.0 * step + x, p.origin.1 * step + y);
+                    let Some(i) = map.point_index(px, py) else { continue };
+                    if map.lattice[i].flags & 1 != 0 && map.lattice[i].ground.is_some() {
+                        continue;
+                    }
+                    let mut g = ground.clone();
+                    if g.as_deref() != Some("metadata/terrain/impassable_ground.gt") {
+                        let hh = height_of(map, px, py);
+                        if self.grounds[2].is_some() && hh == max_h {
+                            g = self.grounds[2].clone();
+                        } else if self.grounds[1].is_some() && hh == min_h {
+                            g = self.grounds[1].clone();
+                        }
+                    }
+                    map.lattice[i].ground = g.map(|g| g.to_ascii_lowercase().replace('\\', "/"));
+                    map.lattice[i].flags |= 1;
+                }
+            }
+        }
     }
 
     /// `0x1420983d0`: a room's slots row by row.
@@ -935,6 +1010,7 @@ pub fn wiggle(master: &mut Master, files: &dyn crate::generate::Files, map: &mut
     // `0x141fff9b0`: a set ordered by x·65536 + y.
     list.sort_by_key(|p| p.0.wrapping_mul(0x10000).wrapping_add(p.1));
     list.dedup();
+    if std::env::var("POE_DBG_WIGGLE").is_ok() { eprintln!("WLIST {:?}", list); }
     rng.below(list.len() as u32);
     let n = list.len();
     for i in 0..n {
@@ -1030,3 +1106,26 @@ pub fn wiggle(master: &mut Master, files: &dyn crate::generate::Files, map: &mut
     Ok(())
 }
 
+
+/// Room data +10 (`0x141f982b0`): a blank room whose slots' corner grounds are all as walkable
+/// (none, or `.gt` flag 4) as the room's own ground; only then the settle (`0x142099e90`) uses
+/// the room's ground instead of the graph's default.
+fn uniform_walk(room: &Room) -> bool {
+    use poe_data_tools::file_parsers::arm::types::Slot;
+    if std::env::var("POE_NO_UNIFORM_WALK").is_ok() {
+        return true;
+    }
+    let walk = |g: &Option<String>| match g {
+        None => true,
+        Some(g) => {
+            let key = g.to_ascii_lowercase().replace('\\', "/");
+            room.ground_flags.iter().find(|(k, _)| *k == key).is_none_or(|(_, f)| f & 4 != 0)
+        }
+    };
+    let Slot::K(root) = &room.arm.root_slot else { return false };
+    let want = walk(&root.corners[0].ground);
+    room.arm.grid.iter().flatten().all(|slot| match slot {
+        Slot::K(k) => k.corners.iter().all(|c| walk(&c.ground) == want),
+        _ => true,
+    })
+}

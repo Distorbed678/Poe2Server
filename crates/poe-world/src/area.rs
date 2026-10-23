@@ -605,7 +605,17 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
     }
     let edge_types = master.edge_type_table(files)?;
     let flag = |k: &str| tsi.get(k).is_some_and(|v| v.trim() != "0");
-    let pass = crate::dungeon_tiles::TilePass { master: &master, ecf: &ecf, unit, overlap: grid.overlap, edge_types: &edge_types, overlap_fixes: flag("AllowInteriorOverlapFixes"), doors_disabled: flag("DisableDoors") };
+    let pass = crate::dungeon_tiles::TilePass { master: &master, ecf: &ecf, unit, overlap: grid.overlap, edge_types: &edge_types, overlap_fixes: flag("AllowInteriorOverlapFixes"), doors_disabled: flag("DisableDoors"), grounds: [1, 2, 0].map(|i| (!graph.ground_types[i].is_empty()).then(|| graph.ground_types[i].clone())) };
+    // The graph's own grounds reach the lattice through the per-room settle; their `.gt` flags
+    // (for example `CarverUpperGround`: 0x1f, which makes the fill treat it as none) are not in
+    // the tile set's table unless a tile uses them.
+    for g in pass.grounds.iter().flatten().filter(|_| std::env::var("POE_NO_GRFLAGS").is_err()) {
+        let key = g.to_ascii_lowercase().replace('\\', "/");
+        if !map.ground_flags.contains_key(&key) {
+            let f = crate::rooms::ground_flags(&crate::text::decode_utf16(&files.read(&key)?));
+            map.ground_flags.insert(key, f);
+        }
+    }
     let (cells, moved) = pass.run(&grid, &rooms, &mut map, rng)?;
     if let Ok(path) = std::env::var("POE_DUMP_PIECES") {
         let mut out = String::new();
@@ -615,9 +625,57 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
         }
         std::fs::write(path, out).ok();
     }
+    if let Ok(path) = std::env::var("POE_DUMP_LATTICE") {
+        let mut out = String::new();
+        for y in 0..=map.height as i32 {
+            for x in 0..=map.width as i32 {
+                if let Some(i) = map.point_index(x, y) {
+                    let p = &map.lattice[i];
+                    out += &format!("{x} {y} {} {} {}\n", p.ground.as_deref().map(|g| g.rsplit('/').next().unwrap().to_ascii_lowercase()).unwrap_or("-".into()), p.height, p.flags);
+                }
+            }
+        }
+        std::fs::write(format!("{path}.{}x{}", map.width, map.height), out).ok();
+    }
+    // Overlays around the fill (`0x14209c4c0`: the context `0x141fa0ac0`, phase 1, the fill of
+    // the listed cells, phase 2). The generator's room list (`+0x58`) is empty for `.dgr`.
+    let mut types = TerrainTypes::default();
+    let mut overlays = match rel("Overlays").filter(|_| std::env::var("POE_NO_DOV").is_err()) {
+        Some(toy) => {
+            // The generator's room list (`+0x58`): a feature room per placed room whose `.arm`
+            // has a tag; its inner rectangle (shrunk by the shared border when the room's own
+            // overlap equals the master's) and the whole one are marked, nodes with tags too.
+            let rects: Vec<crate::overlay::RoomRect> = grid
+                .rooms
+                .iter()
+                .filter_map(|r| {
+                    let room = rooms.get(&r.path)?;
+                    let (x0, y0) = (r.origin.0 * step as i32, r.origin.1 * step as i32);
+                    let rect = (x0, y0, x0 + (r.size.0 * step + grid.overlap) as i32, y0 + (r.size.1 * step + grid.overlap) as i32);
+                    let inset = if room.arm.dimensions.uint1.unwrap_or(1) == grid.overlap { grid.overlap as i32 } else { 0 };
+                    Some(crate::overlay::RoomRect { rect, feature: !room.arm.tag.is_empty(), described: r.node.is_some_and(|n| !graph.nodes[n].tags.is_empty()), inset })
+                })
+                .collect();
+            let mut o = crate::overlay::Overlays::new(files, &toy, &map, &mut master, &rects, files.special_tile(2))?;
+            o.dungeon = true;
+            Some(o)
+        }
+        None => None,
+    };
+    dbg_cell(&map, "pre-overlay1");
+    if let Some(o) = &mut overlays {
+        o.run(1, &mut map, &mut master, &mut types, files, rng)?;
+    }
+    dbg_cell(&map, "post-overlay1");
     let (fill_rooms, wiggle) = crate::fill::fill_cells(&mut map, &mut master, files, &cells, rng)?;
-    let wiggle = [moved, wiggle].concat();
+    dbg_cell(&map, "post-fill");
+    if let Some(o) = &mut overlays {
+        o.run(2, &mut map, &mut master, &mut types, files, rng)?;
+    }
+    dbg_cell(&map, "post-overlay2");
+    let wiggle = [moved, overlays.as_ref().map(|o| o.wiggle.clone()).unwrap_or_default(), wiggle].concat();
     crate::dungeon_tiles::wiggle(&mut master, files, &mut map, wiggle, rng)?;
+    dbg_cell(&map, "post-wiggle");
     // De-repetition over the rooms and fill rooms, then the outer buffer.
     let mut placements: Vec<RoomPlacement> = grid
         .rooms
@@ -625,7 +683,12 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
         .filter_map(|r| Some(RoomPlacement { room: rooms.get(&r.path)?, origin: (r.origin.0 * step as i32, r.origin.1 * step as i32), orientation: r.orientation }))
         .collect();
     placements.extend(fill_rooms.iter().map(|r| RoomPlacement { room: &r.room, origin: r.origin, orientation: r.orientation }));
+    if let Some(o) = &overlays {
+        placements.extend(o.placed.iter().map(|&(i, origin, orientation)| RoomPlacement { room: o.room(i), origin, orientation }));
+        placements.extend(o.fill_rooms.iter().map(|r| RoomPlacement { room: &r.room, origin: r.origin, orientation: r.orientation }));
+    }
     derepeat_pass(&mut map, &master, &placements, rng);
+    dbg_cell(&map, "post-derepeat");
     let subgraphs = grid.rooms.iter().filter_map(|r| Some((r.subgraph.clone()?, (r.origin.0 * step as i32, r.origin.1 * step as i32)))).collect();
     drop(placements);
     Ok(Built { map, master, tsi_bytes, tsi, subgraphs })
@@ -634,6 +697,16 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
 /// Everything after the topology choice, for one graph.
 pub fn generate_graph(files: &dyn crate::generate::Files, graph: &Graph, rng: &mut TerrainRng) -> Result<TileMap, GenError> {
     generate_graph_probed(files, graph, rng, &mut |_| {})
+}
+
+fn dbg_cell(map: &TileMap, stage: &str) {
+    if let Ok(v) = std::env::var("POE_DBG_CELL") {
+        let xy: Vec<i32> = v.split(',').filter_map(|t| t.parse().ok()).collect();
+        if xy.len() == 2 {
+            let c = map.index(xy[0], xy[1]).and_then(|i| map.cells[i].as_ref());
+            eprintln!("CELL {stage}: {:?}", c.map(|c| (c.path.rsplit('/').next().unwrap_or("").to_string(), c.orientation)));
+        }
+    }
 }
 
 fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng: &mut TerrainRng, probe: &mut dyn FnMut(Stage)) -> Result<TileMap, GenError> {
@@ -761,7 +834,7 @@ fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng:
                 let def = &master.tiles.tiles[t];
                 map.place(p.pos.0, p.pos.1, &def.path, &def.tdt, p.orientation, 0, Some(t));
             }
-            None => room_pass_oriented(&mut map, &master, &set.rooms[p.room].room, p.pos, p.orientation, false, rng)?,
+            None => room_pass_oriented(&mut map, &master, &set.rooms[p.room].room, p.pos, p.orientation, false, 0, rng)?,
         }
     }
     probe(Stage::Rooms(&map));
@@ -1077,6 +1150,7 @@ fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng:
                         rect: (p.pos.0, p.pos.1, p.pos.0 + p.size.0 as i32, p.pos.1 + p.size.1 as i32),
                         feature,
                         described: !graph.nodes[p.node].tags.is_empty(),
+                        inset: 0,
                     }
                 })
                 .collect();
