@@ -38,6 +38,10 @@ pub struct Tdt {
     /// Orientations the tile may be used in (data +0x171, bit per orientation; 0 or 0xff:
     /// all), intersected with the `.tst` rotation list by the tile-set index (`0x141d09ab0`).
     pub orientation_mask: u8,
+    /// Data `+0x16f` bit 1 (`0x141d053a0`): the tile's model data (`.tmd` next to its `.tgt`) has an
+    /// object whose type path contains `Spawner`. Only filled by `load_tdt` for tiles without a
+    /// real edge (the only ones `place_tile` asks).
+    pub spawner: bool,
     /// Override flags of an inheriting tile (see the module docs).
     pub inherit_flags: u8,
     /// Sub-tiles (row-major in the tile's own orientation, `size.0 × size.1`) with their cell

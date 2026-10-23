@@ -440,6 +440,10 @@ impl TileMap {
         height: i16,
         tile: Option<usize>,
     ) {
+        // `0x141f9e2e0`: a tile with a spawner object and no edge of a real type (edge flag 0x80
+        // is the wildcard) is placed without the mirror bit.
+        let real_edge = tdt.edges.iter().flatten().any(|e| self.edge_flags.get(&e.to_ascii_lowercase()).copied().unwrap_or(0) & 0x80 == 0);
+        let o = if tdt.spawner && !real_edge && std::env::var("POE_NO_PLACE_MASK").is_err() { o & 3 } else { o };
         let size = tdt.size;
         let piece = self.pieces.len();
         self.pieces.push(Piece {
@@ -563,10 +567,23 @@ pub struct Master {
 /// Reads a `.tdt`, applying an inheriting tile's overrides to its parent chain.
 pub fn load_tdt(files: &dyn Files, path: &str) -> Result<Tdt, GenError> {
     let tdt = Tdt::parse(&files.read(path)?).map_err(|e| data_err(path, e))?;
-    match &tdt.inherits {
-        Some(parent) => Ok(tdt.resolve(&load_tdt(files, parent)?)),
-        None => Ok(tdt),
+    let mut tdt = match &tdt.inherits {
+        Some(parent) => tdt.resolve(&load_tdt(files, parent)?),
+        None => tdt,
+    };
+    // `0x141d053a0`: data +0x16f bit 1, asked by `place_tile` (`0x141f9e2e0`) for tiles without a
+    // real edge: an object of the tile's model data (`.tmd`) with `Spawner` in its type path.
+    let wild = |e: &str| e.to_ascii_lowercase().contains("wildcard");
+    if tdt.edges.iter().flatten().all(|e| wild(e)) {
+        if let Some(tgt) = &tdt.tgt {
+            let tmd = format!("{}.tmd", tgt.trim_end_matches(".tgt").trim_end_matches(".TGT"));
+            if let Ok(bytes) = files.read(&tmd.to_ascii_lowercase()) {
+                let text = crate::text::decode_utf16(&bytes);
+                tdt.spawner = text.lines().any(|l| l.rsplit('"').nth(1).is_some_and(|t| t.contains("Spawner")));
+            }
+        }
     }
+    Ok(tdt)
 }
 
 impl Master {
