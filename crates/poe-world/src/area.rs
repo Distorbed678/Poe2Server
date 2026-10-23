@@ -233,11 +233,7 @@ pub fn generate_probed_files(gd: &GameData, files: &dyn crate::generate::Files, 
     };
     let special: Vec<String> = gd.table("SpecialTiles").ok().map(|t| (0..).map_while(|r| t.row(r)).filter_map(|r| r.str("TDTFile").ok().map(String::from)).collect()).unwrap_or_default();
     let files = WithSpecialTiles { inner: files, special };
-    let mut map = generate_graph_probed(&files, &graph, rng, probe)?;
-    if let Some(g) = ship {
-        let boat = generate_graph_probed(&files, &g, rng, probe)?;
-        map = append_job(map, &boat);
-    }
+    let map = generate_graph_probed(&files, &graph, rng, probe, ship.as_ref())?;
     let draws = rng.draws;
     let logged = rng.log.as_ref().map(Vec::len);
     let doodads = crate::doodads::resolve(gd, &files, rng, map.doodads.clone());
@@ -538,7 +534,7 @@ fn edge_symmetric(types: &mut TerrainTypes, files: &dyn crate::generate::Files, 
 
 /// A `.dgr` graph: the dungeon layout (`crate::dungeon`), then its tile pass
 /// (`crate::dungeon_tiles`).
-fn generate_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[bool], rng: &mut TerrainRng) -> Result<TileMap, GenError> {
+fn generate_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[bool], rng: &mut TerrainRng, extra: Option<&Graph>) -> Result<TileMap, GenError> {
     let mut built = build_dungeon(files, graph, removed, rng, None)?;
     // `0x141ff7e00` / `0x141ff05f0`: each `graph` node's subgraph is generated after the main
     // graph's fill and de-repetition, straight into its reserved rectangle of the map.
@@ -562,41 +558,75 @@ fn generate_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: 
         built.map.paste(&inner.map, at);
         done.push((inner, origin, m));
     }
+    // The plugin's second job (`ShipPlugin`) runs its pipeline after the main graph's and its
+    // subgraphs', before any outer pass; its outer passes come first (last graph first).
+    let ship_built = match extra {
+        Some(g) => {
+            let mut g = g.clone();
+            random_offsets(&mut g, rng);
+            let (g, rem) = prune(&g, rng)?;
+            Some(build_dungeon(files, &g, &rem, rng, None)?)
+        }
+        None => None,
+    };
+    let ship_map = match ship_built {
+        Some(b) => Some(finish_dungeon(files, b, &[], rng)?),
+        None => None,
+    };
     // `0x141ff7a10`: the outer fill and outer buffer per graph, the last subgraph first, then the
     // main graph's below.
-    // Each graph's tile heights are in its own master's `StoreyHeight` (a subgraph's cells,
-    // margins included, are scaled by its own; the main graph's scaling skips them).
-    let mut scaled: Vec<(i32, i32, i32, i32)> = Vec::new();
+    // `StoreyHeight` (tile records keep heights in world units): each cell takes the one of the
+    // graph that placed it (a subgraph's own cells and the outer fill and buffer cells it added,
+    // else the main graph's), so a cell is scaled exactly once.
     let storey_of = |tsi: &std::collections::HashMap<String, String>| -> i16 { tsi.get("StoreyHeight").and_then(|v| v.trim().parse().ok()).unwrap_or(16) };
+    let mut owner: Vec<Option<i16>> = vec![None; built.map.cells.len()];
+    for (inner, origin, m) in &done {
+        let st = storey_of(&inner.tsi);
+        let at = (origin.0 + m.left as i32, origin.1 + m.top as i32);
+        for y in 0..inner.map.height as i32 {
+            for x in 0..inner.map.width as i32 {
+                if inner.map.index(x, y).is_some_and(|i| inner.map.cells[i].is_some()) {
+                    if let Some(j) = built.map.index(x + at.0, y + at.1) {
+                        owner[j] = Some(st);
+                    }
+                }
+            }
+        }
+    }
     for (mut inner, origin, m) in done.into_iter().rev() {
         let g = inner.tsi.get("OuterGroundType").cloned();
         let (w, h) = (inner.map.width, inner.map.height);
-        let sub_storey = storey_of(&inner.tsi);
-        let rect = if m.top + m.right + m.bottom + m.left == 0 {
+        let st = storey_of(&inner.tsi);
+        let before: Vec<bool> = built.map.cells.iter().map(Option::is_some).collect();
+        if m.top + m.right + m.bottom + m.left == 0 {
             if let Some(g) = g {
                 let rect = (origin.0, origin.1, origin.0 + w as i32, origin.1 + h as i32);
                 crate::outer_buffer::outer_fill(&mut built.map, rect, &g, true, &mut inner.master, files)?;
             }
-            (origin.0, origin.1, origin.0 + w as i32, origin.1 + h as i32)
         } else {
             let mut window = built.map.window(origin, w + m.left + m.right, h + m.top + m.bottom);
             let rect = (m.left as i32, m.top as i32, (m.left + w) as i32, (m.top + h) as i32);
             let edges = inner.master.edge_type_table(files)?;
             crate::outer_buffer::outer_buffer_window(&mut window, rect, g.as_deref(), true, &mut inner.master, files, &edges, rng)?;
             built.map.paste(&window, origin);
-            (origin.0, origin.1, origin.0 + (w + m.left + m.right) as i32, origin.1 + (h + m.top + m.bottom) as i32)
-        };
-        for y in rect.1..rect.3 {
-            for x in rect.0..rect.2 {
-                if let Some(i) = built.map.index(x, y) {
-                    if let Some(c) = built.map.cells[i].as_mut() {
-                        c.height *= sub_storey;
-                    }
-                }
+        }
+        for (i, was) in before.iter().enumerate() {
+            if !was && built.map.cells[i].is_some() {
+                owner[i] = Some(st);
             }
         }
-        scaled.push(rect);
     }
+    let main = finish_dungeon(files, built, &owner, rng)?;
+    Ok(match ship_map {
+        Some(boat) => append_job(main, &boat),
+        None => main,
+    })
+}
+
+/// The tail of a dungeon graph: the outer buffer of its own master, then tile heights in world
+/// units (`owner`: the storey of the subgraph that placed a cell, by cell of the unbuffered map).
+fn finish_dungeon(files: &dyn crate::generate::Files, built: Built, owner: &[Option<i16>], rng: &mut TerrainRng) -> Result<TileMap, GenError> {
+    let storey_of = |tsi: &std::collections::HashMap<String, String>| -> i16 { tsi.get("StoreyHeight").and_then(|v| v.trim().parse().ok()).unwrap_or(16) };
     let Built { map, mut master, tsi_bytes, tsi, .. } = built;
     let margins = Margins::parse(&crate::text::decode_utf16(&tsi_bytes));
     let edge_types = master.edge_type_table(files)?;
@@ -606,15 +636,14 @@ fn generate_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: 
     // Tile records keep heights in world units (`StoreyHeight` per storey).
     let storey: i16 = storey_of(&tsi);
     let (dx, dy) = (margins.left as i32, margins.top as i32);
+    let src_w = map.width as i32 - (margins.left + margins.right) as i32;
     for y in 0..map.height as i32 {
         for x in 0..map.width as i32 {
-            let inside = scaled.iter().any(|r| (r.0 + dx..r.2 + dx).contains(&x) && (r.1 + dy..r.3 + dy).contains(&y));
-            if inside {
-                continue;
-            }
+            let (sx, sy) = (x - dx, y - dy);
+            let st = if sx >= 0 && sy >= 0 && sx < src_w { owner.get((sy * src_w + sx) as usize).copied().flatten() } else { None };
             if let Some(i) = map.index(x, y) {
                 if let Some(c) = map.cells[i].as_mut() {
-                    c.height *= storey;
+                    c.height *= st.unwrap_or(storey);
                 }
             }
         }
@@ -666,7 +695,7 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
         _ => return Err(data("master names a TileSet without FillTiles or the reverse")),
     };
     // `OuterFillHeightOverride` (master +0x161 set, value +0x153): the outer fill places plain.
-    master.outer_fill_height = tsi.get("OuterFillHeightOverride").and_then(|v| v.trim().parse::<i8>().ok());
+    master.outer_fill_height = tsi.get("OuterFillHeightOverride").and_then(|v| v.trim().parse::<i8>().ok()).or_else(|| tsi.contains_key("OverrideSpawns").then_some(0));
     let ecf = match rel("EdgeCombination") {
         Some(p) => crate::dungeon_tiles::Ecf::parse(&crate::text::decode_utf16(&files.read(&p)?)),
         None => Default::default(),
@@ -778,7 +807,7 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
 
 /// Everything after the topology choice, for one graph.
 pub fn generate_graph(files: &dyn crate::generate::Files, graph: &Graph, rng: &mut TerrainRng) -> Result<TileMap, GenError> {
-    generate_graph_probed(files, graph, rng, &mut |_| {})
+    generate_graph_probed(files, graph, rng, &mut |_| {}, None)
 }
 
 fn dbg_cell(map: &TileMap, stage: &str) {
@@ -791,7 +820,7 @@ fn dbg_cell(map: &TileMap, stage: &str) {
     }
 }
 
-fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng: &mut TerrainRng, probe: &mut dyn FnMut(Stage)) -> Result<TileMap, GenError> {
+fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng: &mut TerrainRng, probe: &mut dyn FnMut(Stage), extra: Option<&Graph>) -> Result<TileMap, GenError> {
     let mut moved;
     let graph = if graph.dungeon_defaults.is_some() {
         moved = graph.clone();
@@ -803,7 +832,7 @@ fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng:
     let (pruned, removed) = prune(graph, rng)?;
     let graph = &pruned;
     if graph.dungeon_defaults.is_some() {
-        return generate_dungeon(files, graph, &removed, rng);
+        return generate_dungeon(files, graph, &removed, rng, extra);
     }
     let mut nodes: Vec<JitterNode> = graph
         .nodes
@@ -844,7 +873,7 @@ fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng:
         _ => return Err(data("master names a TileSet without FillTiles or the reverse")),
     };
     // `OuterFillHeightOverride` (master +0x161 set, value +0x153): the outer fill places plain.
-    master.outer_fill_height = tsi.get("OuterFillHeightOverride").and_then(|v| v.trim().parse::<i8>().ok());
+    master.outer_fill_height = tsi.get("OuterFillHeightOverride").and_then(|v| v.trim().parse::<i8>().ok()).or_else(|| tsi.contains_key("OverrideSpawns").then_some(0));
     // Container graphs (`master_container.tsi` of MapKarst, MapDerelictMansion, P1_6,
     // HideoutVampireManor: nodes that only hold subgraphs) name no `RoomSet`.
     let set = match rel("RoomSet") {

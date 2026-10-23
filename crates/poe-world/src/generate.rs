@@ -546,6 +546,13 @@ pub(crate) fn middle(hs: &[i32]) -> Option<i32> {
     Some(hi - (hi - lo) / 2)
 }
 
+/// The orientation of a `.gft` fill line as a one-bit mask: the line's last rotation wins (the
+/// client's entry holds one orientation byte; `I FR270` places only `FR270`, and the line counts
+/// once in the group's weight total), no rotation means any.
+fn fill_orientation(rotations: &[String]) -> u8 {
+    rotations.iter().rev().find_map(|r| crate::tileset::ORIENTATION_NAMES.iter().position(|n| n.eq_ignore_ascii_case(r))).map_or_else(|| orientation_mask(rotations), |o| 1 << o)
+}
+
 /// One `.gft` fill group: `(weight, path, orientation mask)`.
 type FillGroup = Vec<(u32, String, u8)>;
 
@@ -618,7 +625,7 @@ impl Master {
                 let group = s
                     .files
                     .iter()
-                    .map(|f| (f.weight, f.path.clone(), orientation_mask(&f.rotations)))
+                    .map(|f| (f.weight, f.path.clone(), fill_orientation(&f.rotations)))
                     .collect();
                 (s.name.to_ascii_lowercase(), group)
             })
