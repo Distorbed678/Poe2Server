@@ -222,6 +222,7 @@ impl Fill<'_> {
             }
         }
         let mut total: u32 = list.iter().map(|e| e.weight).sum();
+        if std::env::var("POE_DBG_FILLTOTAL").is_ok() { eprintln!("FILLTOTAL ({x},{y}) ground {ground:?} total {total} entries {}", list.len()); }
         while !list.is_empty() {
             let e = pick_entry(&list, rng.below(total)).clone();
             let o = if e.room {

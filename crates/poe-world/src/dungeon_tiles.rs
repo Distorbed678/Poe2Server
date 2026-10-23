@@ -353,7 +353,7 @@ impl TilePass<'_> {
             }
             // A blank room (no tag, doors or second ground) carries its ground.
             let own = match &room.arm.root_slot {
-                poe_data_tools::file_parsers::arm::types::Slot::K(k) if room.arm.tag.is_empty() && room.arm.thingies.iter().all(|t| t.et_file.is_none()) && k.corners.iter().all(|c| c.ground == k.corners[0].ground) && uniform_walk(room) => k.corners[0].ground.clone(),
+                poe_data_tools::file_parsers::arm::types::Slot::K(k) if (room.arm.tag.is_empty() || (p.special && std::env::var("POE_NO_SPECIAL_OWN").is_err())) && room.arm.thingies.iter().all(|t| t.et_file.is_none()) && k.corners.iter().all(|c| c.ground == k.corners[0].ground) && uniform_walk(room) => k.corners[0].ground.clone(),
                 _ => None,
             };
             let base = self.grounds[0].clone();
