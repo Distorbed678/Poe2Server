@@ -1392,6 +1392,12 @@ fn branch(graph: &Graph, fields: &[EdgeFields], key: &str, generic: &[(u32, u32,
     let branching = |n: u32| graph.nodes[n as usize].extra.get(1).is_some_and(|v| v != "0");
     for c in paths.iter().filter(|c| c.key == key) {
         let edge = &graph.edges[c.edge];
+        // The first loop of `0x1420a5680`: the corner marking of `connect` again for every
+        // inner room of the corridor. The placeholders of the branch pass are new (the unused
+        // ones of the corridor pass left in `compact`), so they take their heights here.
+        for l in 1..c.rooms.len().saturating_sub(1) {
+            mark_around(grid, records, c.rooms[l]);
+        }
         // The corridor's end rooms at branching nodes mark their neighbours.
         if branching(edge.to) {
             for n in neighbours(grid, c.rooms[0]) {

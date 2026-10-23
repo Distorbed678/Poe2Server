@@ -245,6 +245,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(i) => {
             let (line, site, n, r) = &trace[i];
             println!("first divergence at draw {i}: ours n={} r={}, client {site} n={n} r={r} (trace line {line})", log[i].0, log[i].1);
+            if std::env::var("POE_SHOW_OURS").is_ok() {
+                for k in i.saturating_sub(8)..(i + 6).min(log.len()) {
+                    println!("  ours[{k}] n={} r={}   client[{k}] {} n={} r={}", log[k].0, log[k].1, trace.get(k).map_or("", |t| t.1.as_str()), trace.get(k).map_or(0, |t| t.2), trace.get(k).map_or(0, |t| t.3));
+                }
+            }
             for l in &lines[line.saturating_sub(12)..(*line + 3).min(lines.len())] {
                 let s = l.join("\t");
                 println!("  {}", &s[..s.len().min(200)]);

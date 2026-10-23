@@ -383,7 +383,7 @@ impl Overlays {
             return Ok(false);
         }
         let code = room_fits(map, (x, y), &g.key, false, 1, master, types, files)?;
-        if std::env::var("POE_DBG_OVERLAY").is_ok() { eprintln!("FIT {w}x{h} ({x},{y}) code {code}"); }
+        if std::env::var("POE_DBG_OVERLAY").is_ok() { eprintln!("FIT {w}x{h} ({x},{y}) f{:x} code {code} e {}", g.flags, g.key.edges.iter().map(|e| e.as_deref().map_or("-".to_string(), |e| e.rsplit('/').next().unwrap().to_string())).collect::<Vec<_>>().join(",")); }
         Ok(code == 0)
     }
 
@@ -451,28 +451,18 @@ impl Overlays {
                 if !room.exclusions.is_empty() && !self.has_features(&room.exclusions, (pos.0, pos.1, pos.0 + w, pos.1 + h), map, master, files)? {
                     continue;
                 }
-                if g.flags & 0x40 != 0 {
-                    let mut any = false;
+                // `0x141fa23e0`: without `MatchAllTileKeys` an entry counts once; with it once
+                // per orientation of the entry (the ones turning the group's key) whose room
+                // keys all sit on the laid tiles (`0x141fa3780`). The orientation itself is
+                // drawn later from the whole mask.
+                if g.flags & 0x40 == 0 {
+                    options.push((Some((ri, 0xff)), room.weight));
+                } else {
                     for o in 0..8u8 {
                         if room.orientations >> o & 1 != 0 && self.matches_all_keys(&self.rooms[room.room].1, pos, o, map, master, files)? {
-                            any = true;
-                            break;
+                            options.push((Some((ri, 0xff)), room.weight));
                         }
                     }
-                    if !any {
-                        continue;
-                    }
-                }
-                // A position counts a room once, but the pick lists it once per orientation
-                // whose turned root key is the group's (the sums were 200 for a symmetric room).
-                if self.dungeon && room.explicit {
-                    for o in 0..8u8 {
-                        if room.orientations >> o & 1 != 0 {
-                            options.push((Some((ri, o)), room.weight));
-                        }
-                    }
-                } else {
-                    options.push((Some((ri, 0xff)), room.weight));
                 }
             }
             if options.is_empty() {
