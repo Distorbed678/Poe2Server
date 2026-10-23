@@ -493,7 +493,7 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
             eprintln!("DBG node {n} {} o{no} pos {pos:?} req {:?} best {:?}", node.room_type, required, if no == 9 { best_sides(graph, &slots[n], n) } else { None });
             for c in &cands {
                 let origin = origin_for(&grid, graph.region, pos, c.size);
-                eprintln!("DBG   cand {} o{} size {:?} w{} origin {origin:?} fits {:?} exits {:?}", rooms[c.room].path.rsplit('/').next().unwrap(), c.o, c.size, c.weight, fits(&grid, c, origin, required.len() as u32), c.exits.iter().map(|e| e.door.is_some() as u8).collect::<Vec<_>>());
+                eprintln!("DBG   cand {} o{} size {:?} w{} origin {origin:?} fits {:?} exits {:?}", rooms[c.room].path.rsplit('/').next().unwrap(), c.o, c.size, c.weight, fits(&grid, c, origin, required.len() as u32, &mut |d: &str| types.edge(files, d).map(|t| t.can_end).unwrap_or(false)), c.exits.iter().map(|e| e.door.is_some() as u8).collect::<Vec<_>>());
             }
         }
         let mut kept: Vec<(Candidate, (i32, i32), bool)> = Vec::new();
@@ -502,7 +502,7 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
                 continue;
             }
             let origin = origin_for(&grid, graph.region, pos, c.size);
-            if let Some(mismatch) = fits(&grid, &c, origin, required.len() as u32) {
+            if let Some(mismatch) = fits(&grid, &c, origin, required.len() as u32, &mut |d: &str| types.edge(files, d).map(|t| t.can_end).unwrap_or(false)) {
                 kept.push((c, origin, mismatch));
             }
         }
@@ -513,6 +513,7 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
             return Err(unsupported(format!("dungeon node {n} ({}): no suitable room", node.room_type)));
         }
         let total: u32 = kept.iter().map(|k| k.0.weight).sum();
+        if std::env::var("POE_DBG").is_ok() { eprintln!("DBG pick node {n} total {total} kept {:?}", kept.iter().map(|k| (rooms[k.0.room].path.rsplit('/').next().unwrap().to_string(), k.0.o, k.0.weight)).collect::<Vec<_>>()); }
         let mut k = pick(&kept, rng.below(total));
         if repeats(&grid, &rooms[kept[k].0.room].path, kept[k].1, kept[k].0.size) {
             k = pick(&kept, rng.below(total));
@@ -805,7 +806,7 @@ fn origin_for(grid: &Grid, region: u8, pos: (i32, i32), (w, h): (u32, u32)) -> (
 
 /// `0x1420af280`: the room fits at `origin` (free cells; at least `need` doors lead into the
 /// grid). Returns whether a door faces a placed room whose door there differs.
-fn fits(grid: &Grid, c: &Candidate, origin: (i32, i32), need: u32) -> Option<bool> {
+fn fits(grid: &Grid, c: &Candidate, origin: (i32, i32), need: u32, can_end: &mut dyn FnMut(&str) -> bool) -> Option<bool> {
     if !grid.free(origin, c.size) {
         return None;
     }
@@ -820,6 +821,10 @@ fn fits(grid: &Grid, c: &Candidate, origin: (i32, i32), need: u32) -> Option<boo
         let Some(state) = grid.state(cell) else { continue };
         inside += 1;
         if state < 2 || mismatch {
+            continue;
+        }
+        // The default door type and doors of an edge type that may end never mark (`0x1420af280`).
+        if door == "metadata/terrain/dungeon/rooms.et" || can_end(door) {
             continue;
         }
         let p = &grid.rooms[state as usize - 2];
