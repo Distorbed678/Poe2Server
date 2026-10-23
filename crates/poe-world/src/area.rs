@@ -599,17 +599,21 @@ fn generate_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: 
     let mut done: Vec<(Built, (i32, i32), Margins)> = Vec::new();
     for (file, origin) in std::mem::take(&mut built.subgraphs) {
         let mut sub = Graph::parse_bytes(&files.read(&file)?).map_err(|e| data(format!("{file}: {e:?}")))?;
-        if sub.dungeon_defaults.is_none() {
-            return Err(GenError::Unsupported(format!("subgraph {file}: not a dungeon graph (not ported)")));
-        }
         // Turned like the main graph (`0x141ff05f0` sets the parent's region).
         turn(files, &mut sub, graph.region)?;
-        random_offsets(&mut sub, rng);
+        let is_dgr = sub.dungeon_defaults.is_some();
+        if is_dgr {
+            random_offsets(&mut sub, rng);
+        }
         let (sub, removed) = prune(&sub, rng)?;
         // The region sits inside the subgraph master's `OuterBufferSize` margins.
         let m = Margins::parse(&crate::text::decode_utf16(&files.read(&sub.master_file)?));
         let at = (origin.0 + m.left as i32, origin.1 + m.top as i32);
-        let inner = build_dungeon(files, &sub, &removed, rng, Some((&built.map, at)))?;
+        let inner = if is_dgr {
+            build_dungeon(files, &sub, &removed, rng, Some((&built.map, at)))?
+        } else {
+            build_tgr(files, &sub, removed, rng, &mut |_| {}, Some((&built.map, at)))?
+        };
         if !inner.subgraphs.is_empty() {
             return Err(GenError::Unsupported(format!("subgraph {file}: nested subgraphs (not ported)")));
         }
@@ -909,6 +913,17 @@ fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng:
     if graph.dungeon_defaults.is_some() {
         return generate_dungeon(files, graph, &removed, rng, extra);
     }
+    let Built { map, mut master, tsi_bytes, tsi, .. } = build_tgr(files, graph, removed, rng, probe, None)?;
+    let margins = Margins::parse(&crate::text::decode_utf16(&tsi_bytes));
+    // Outer buffer.
+    let edge_types = master.edge_type_table(files)?;
+    outer_buffer(&map, margins, tsi.get("OuterGroundType").map(String::as_str), false, &mut master, files, &edge_types, rng)
+}
+
+/// A `.tgr` graph up to its outer buffer: the whole outdoor pipeline in `graph`'s own frame.
+/// `window` is the map and origin a subgraph is generated into (its corners start as the map's).
+#[allow(clippy::too_many_lines)]
+fn build_tgr(files: &dyn crate::generate::Files, graph: &Graph, removed: Vec<bool>, rng: &mut TerrainRng, probe: &mut dyn FnMut(Stage), window: Option<(&TileMap, (i32, i32))>) -> Result<Built, GenError> {
     let mut nodes: Vec<JitterNode> = graph
         .nodes
         .iter()
@@ -939,7 +954,6 @@ fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng:
     let tsi_path = graph.master_file.clone();
     let tsi_bytes = files.read(&tsi_path)?;
     let tsi = master_entries(&tsi_bytes, &tsi_path);
-    let margins = Margins::parse(&crate::text::decode_utf16(&tsi_bytes));
     let dir = tsi_path.rsplit_once('/').map_or("", |d| d.0);
     let rel = |k: &str| tsi.get(k).map(|v| if v.len() > 9 && v[..9].eq_ignore_ascii_case("metadata/") { v.to_string() } else { format!("{dir}/{v}") });
     let mut master = match (rel("TileSet"), rel("FillTiles")) {
@@ -1025,6 +1039,9 @@ fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng:
     let mut map = TileMap::new(graph.width, graph.height);
     map.ground_flags = master.ground_flag_table(files)?;
     map.edge_flags = master.edge_flag_table(files)?;
+    if let Some((outer, origin)) = window {
+        map.copy_lattice(outer, origin);
+    }
     for p in placed.iter_mut() {
         // `0x1420c9970` first lets a room that does not fit move (`0x1420c9260`).
         let align = crate::rooms::node_alignment(&placed_graph, p.node, &mut types, files)?;
@@ -1386,7 +1403,5 @@ fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng:
     derepeat_pass(&mut map, &master, &rooms, rng);
     crate::postunique::run(&mut map, &mut master, files, rng)?;
 
-    // Outer buffer.
-    let edge_types = master.edge_type_table(files)?;
-    outer_buffer(&map, margins, tsi.get("OuterGroundType").map(String::as_str), false, &mut master, files, &edge_types, rng)
+    Ok(Built { map, master, tsi_bytes, tsi, subgraphs: Vec::new() })
 }
