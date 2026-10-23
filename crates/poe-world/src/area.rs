@@ -655,7 +655,7 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
                     let (x0, y0) = (r.origin.0 * step as i32, r.origin.1 * step as i32);
                     let rect = (x0, y0, x0 + (r.size.0 * step + grid.overlap) as i32, y0 + (r.size.1 * step + grid.overlap) as i32);
                     let inset = if room.arm.dimensions.uint1.unwrap_or(1) == grid.overlap { grid.overlap as i32 } else { 0 };
-                    Some(crate::overlay::RoomRect { rect, feature: !room.arm.tag.is_empty(), described: r.node.is_some_and(|n| !graph.nodes[n].tags.is_empty()), inset })
+                    Some(crate::overlay::RoomRect { rect, feature: !room.arm.tag.is_empty() && !r.special, described: r.node.is_some_and(|n| !graph.nodes[n].tags.is_empty()), inset })
                 })
                 .collect();
             let mut o = crate::overlay::Overlays::new(files, &toy, &map, &mut master, &rects, files.special_tile(2))?;
