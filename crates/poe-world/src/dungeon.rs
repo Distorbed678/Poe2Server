@@ -281,9 +281,59 @@ impl Grid {
     }
 }
 
+/// A master's `FileGroups` (`.fgp`): group name to the graph files it lists, in file order.
+/// A group is a line without a `.`, files are the lines with one (relative to the `.fgp`'s
+/// directory unless they start with `Metadata/`).
+#[derive(Default, Debug, Clone)]
+pub struct FileGroups {
+    pub groups: HashMap<String, Vec<String>>,
+}
+
+impl FileGroups {
+    pub fn parse(text: &str, dir: &str) -> Self {
+        let mut groups: HashMap<String, Vec<String>> = HashMap::new();
+        let mut cur: Option<String> = None;
+        for line in text.lines() {
+            let l = line.trim();
+            if l.is_empty() || l.starts_with("//") || l.to_ascii_lowercase().starts_with("version") {
+                continue;
+            }
+            let l = l.trim_matches('"');
+            if !l.contains('.') {
+                groups.entry(l.to_string()).or_default();
+                cur = Some(l.to_string());
+            } else if let Some(g) = &cur {
+                let full = if l.to_ascii_lowercase().starts_with("metadata/") { l.to_string() } else { format!("{dir}/{l}") };
+                groups.get_mut(g).expect("group exists").push(full);
+            }
+        }
+        FileGroups { groups }
+    }
+
+    /// `0x1420adfd0`: a file of the group by `below(count)`; when the group gave files before,
+    /// the unused ones are drawn again (`below(left)`) if any are left. The pick is recorded.
+    pub fn pick(&self, group: &str, used: &mut HashMap<String, Vec<String>>, rng: &mut TerrainRng) -> Result<String, GenError> {
+        let list = self
+            .groups
+            .get(group)
+            .or_else(|| self.groups.iter().find(|(k, _)| k.eq_ignore_ascii_case(group)).map(|(_, v)| v))
+            .filter(|l| !l.is_empty())
+            .ok_or_else(|| unsupported(format!("Cannot find random subgraph: No files listed for group {group:?}")))?;
+        let mut file = list[rng.below(list.len() as u32) as usize].clone();
+        if let Some(u) = used.get(group) {
+            let left: Vec<&String> = list.iter().filter(|f| !u.contains(f)).collect();
+            if !left.is_empty() {
+                file = left[rng.below(left.len() as u32) as usize].clone();
+            }
+        }
+        used.entry(group.to_string()).or_default().push(file.clone());
+        Ok(file)
+    }
+}
+
 /// The dungeon layout of a pruned `.dgr` graph (`0x1420ac3e0`); `overlap` is the master's
 /// `RoomOverlap`.
-pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet, overlap: u32, rng: &mut TerrainRng) -> Result<Grid, GenError> {
+pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet, overlap: u32, file_groups: &FileGroups, rng: &mut TerrainRng) -> Result<Grid, GenError> {
     let mut types = TerrainTypes::default();
     let mut rooms: Vec<DungeonRoom> = set
         .rooms
@@ -410,6 +460,7 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
         !graph.nodes[n].room_type.is_empty() || !graph.nodes[n].tags.is_empty() || slots[n].iter().any(|&e| fields[e].impenetrable.eq_ignore_ascii_case("I"))
     };
     let node_extra = |n: usize| slots[n].iter().map(|&e| fields[e].extra_door).max().unwrap_or(0);
+    let mut used_files: HashMap<String, Vec<String>> = HashMap::new();
     for &n in &typed {
         if void(n) {
             continue;
@@ -421,9 +472,7 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
             let tag = |i: usize| node.tags.get(i).cloned().unwrap_or_default();
             let file = tag(0);
             let lower = file.to_ascii_lowercase();
-            if !lower.ends_with(".dgr") && !lower.ends_with(".tgr") {
-                return Err(unsupported(format!("dungeon node {n}: subgraph file group {file:?} (FileGroups not ported)")));
-            }
+            let file = if !lower.ends_with(".dgr") && !lower.ends_with(".tgr") { file_groups.pick(&file, &mut used_files, rng)? } else { file };
             let (mut w, mut h): (u32, u32) = (tag(1).trim().parse().unwrap_or(1), tag(2).trim().parse().unwrap_or(1));
             if graph.region & 1 == 1 && graph.region < 8 {
                 std::mem::swap(&mut w, &mut h);

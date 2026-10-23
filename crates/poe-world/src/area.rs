@@ -574,7 +574,14 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
     };
     // `RoomOverlap` is master +0x14b; the parser's default is 1 (constructor `0x14292e190`).
     let overlap: u32 = tsi.get("RoomOverlap").and_then(|v| v.trim().parse().ok()).unwrap_or(1);
-    let grid = crate::dungeon::layout(files, graph, removed, &set, overlap, rng)?;
+    let file_groups = match rel("FileGroups") {
+        Some(p) => {
+            let fdir = p.rsplit_once('/').map_or("", |d| d.0).to_string();
+            crate::dungeon::FileGroups::parse(&crate::text::decode_utf16(&files.read(&p)?), &fdir)
+        }
+        None => Default::default(),
+    };
+    let grid = crate::dungeon::layout(files, graph, removed, &set, overlap, &file_groups, rng)?;
     if std::env::var("POE_DBG").is_ok() {
         for (i, r) in grid.rooms.iter().enumerate() {
             eprintln!("DBG room {i} {} o{} origin {:?} size {:?} special {}", r.path, r.orientation, r.origin, r.size, r.special);
