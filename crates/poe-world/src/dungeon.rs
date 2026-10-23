@@ -979,7 +979,7 @@ fn corridors(
             .then(b.2.0.cmp(&a.2.0))
             .then(b.2.1.cmp(&a.2.1))
             .then(b.2.2.cmp(&a.2.2))
-            .then(a.2.3.cmp(&b.2.3))
+            .then(graph.edges[a.3].edge_type.encode_utf16().cmp(graph.edges[b.3].edge_type.encode_utf16()))
             .then(a.3.cmp(&b.3))
     });
     let mut batches: Vec<Vec<usize>> = Vec::new();
@@ -990,6 +990,7 @@ fn corridors(
             batches.push(vec![k.3]);
         }
     }
+    if std::env::var("POE_DBG_BATCHES").is_ok() { for k in &keys { eprintln!("BKEY edge {} prio {} cont {} key {:?}", k.3, k.0, k.1, k.2); } }
     // `0x141fc00f0`: a discarded `below(n)`, a forward Fisher-Yates shuffle, then a stable sort
     // by priority.
     for b in &mut batches {
@@ -1035,7 +1036,11 @@ fn corridors(
             keys.push(c.key.clone());
         }
     }
-    keys.sort();
+    // `0x1420db6f0` compares the resource paths as the graph spells them (case-sensitive).
+    let original = |k: &str| -> String {
+        graph.edges.iter().map(|e| e.edge_type.as_str()).chain(fields.iter().map(|f| f.branching_type.as_str())).find(|n| n.eq_ignore_ascii_case(k)).unwrap_or(k).to_string()
+    };
+    keys.sort_by(|a, b| original(a).encode_utf16().cmp(original(b).encode_utf16()));
     rng.below(keys.len() as u32);
     for i in 0..keys.len() {
         let k = rng.uniform((keys.len() - i) as u32) as usize;
