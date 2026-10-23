@@ -454,3 +454,52 @@ pub fn fill_cell(map: &mut TileMap, master: &mut Master, files: &dyn Files, pos:
     }
     Ok(f.placed)
 }
+
+/// `0x14209c150` (pre-unique room, run before the overlays when the master has an overlay
+/// list and the room set a `preunique` room): the ground-only cells are shuffled (a discarded
+/// `below(n)` first), then walked in that order; for each, `below(0x348)` picks an orientation
+/// of the room's `.rs` mask, and the first cell that is accessible, has no ground or one with
+/// `.gt` flag 8, and whose room rectangle lies free inside the region takes the room
+/// (`0x141f8c8c0`). The cell list keeps the shuffled order for the fill. No cell fits: an error.
+pub fn place_pre_unique(
+    map: &mut TileMap,
+    master: &mut Master,
+    files: &dyn Files,
+    room_path: &str,
+    mask: u8,
+    cells: &mut Vec<crate::dungeon_tiles::GroundCell>,
+    rng: &mut TerrainRng,
+) -> Result<(Vec<PlacedFillRoom>, Vec<(i32, i32)>), GenError> {
+    let n = cells.len();
+    rng.below(n as u32);
+    for i in 0..n {
+        let k = rng.uniform((n - i) as u32) as usize;
+        cells.swap(i, i + k);
+    }
+    if std::env::var("POE_DBG_PUALL").is_ok() { for (i, c) in cells.iter().enumerate() { eprintln!("PUL {} {:?} acc {} ground {:?} h {}", i + 1, c.pos, c.accessible, c.ground, c.height); } }
+    let mut f = Fill { map, master, files, rooms: HashMap::new(), placed: Vec::new(), height: None, wiggle: Some((Vec::new(), Default::default())) };
+    let (rw, rh) = {
+        let room = f.room(room_path)?;
+        (room.width() as u8, room.height() as u8)
+    };
+    for (ci, c) in cells.iter().enumerate() {
+        let v = rng.below(0x348);
+        let o = crate::region::pick(mask, v);
+        let (w, h) = oriented((rw, rh), o);
+        let (x, y) = c.pos;
+        if std::env::var("POE_DBG_PREUNIQUE").is_ok() { eprintln!("PU {} cell {:?} o{o} acc {} ground {:?} flags {:?} free {}", ci + 1, c.pos, c.accessible, c.ground, c.ground.as_deref().map(|g| f.map.gt_flags(g)), f.free(x, y, w, h)); }
+        let ground_ok = c.ground.as_deref().is_none_or(|g| f.map.gt_flags(g) & 8 != 0);
+        if !(c.accessible && ground_ok) {
+            continue;
+        }
+        let (mw, mh) = (f.map.width as i32, f.map.height as i32);
+        if x < mw && x + w <= mw && y < mh && y + h <= mh && x >= 0 && y >= 0 && f.free(x, y, w, h) {
+            if std::env::var("POE_DBG_PREUNIQUE").is_ok() { eprintln!("PREUNIQUE accept iteration {} cell {:?} o{o} size {w}x{h} ground {:?}", ci + 1, c.pos, c.ground); }
+            f.height = Some(c.height as i16);
+            f.place_room(x, y, room_path, o, c.ground.clone(), c.accessible, rng)?;
+            let wiggle = f.wiggle.take().map(|w| w.0).unwrap_or_default();
+            return Ok((f.placed, wiggle));
+        }
+    }
+    Err(GenError::Unsupported(format!("Failed to place pre-unique room {room_path}")))
+}

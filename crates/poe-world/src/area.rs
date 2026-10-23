@@ -641,6 +641,15 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
     }
     // Overlays around the fill (`0x14209c4c0`: the context `0x141fa0ac0`, phase 1, the fill of
     // the listed cells, phase 2). The generator's room list (`+0x58`) is empty for `.dgr`.
+    // `0x14209c150`: the pre-unique room, before the overlay context is built.
+    let mut cells = cells;
+    let (mut pre_rooms, mut pre_wiggle) = (Vec::new(), Vec::new());
+    if rel("Overlays").is_some() && std::env::var("POE_NO_PREUNIQUE").is_err() {
+        if let Some(r) = set.rooms.iter().find(|r| r.tag.eq_ignore_ascii_case("preunique")) {
+            (pre_rooms, pre_wiggle) = crate::fill::place_pre_unique(&mut map, &mut master, files, &r.path, r.orientations, &mut cells, rng)?;
+        }
+    }
+    cells.sort_by_key(|c| c.pos);
     let mut types = TerrainTypes::default();
     let mut overlays = match rel("Overlays").filter(|_| std::env::var("POE_NO_DOV").is_err()) {
         Some(toy) => {
@@ -669,7 +678,9 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
         o.run(1, &mut map, &mut master, &mut types, files, rng)?;
     }
     dbg_cell(&map, "post-overlay1");
-    let (fill_rooms, wiggle) = crate::fill::fill_cells(&mut map, &mut master, files, &cells, rng)?;
+    let (mut fill_rooms, wiggle) = crate::fill::fill_cells(&mut map, &mut master, files, &cells, rng)?;
+    fill_rooms.splice(0..0, pre_rooms);
+    let wiggle = [pre_wiggle, wiggle].concat();
     dbg_cell(&map, "post-fill");
     if let Some(o) = &mut overlays {
         o.run(2, &mut map, &mut master, &mut types, files, rng)?;

@@ -314,7 +314,7 @@ impl TilePass<'_> {
         if std::env::var("POE_NO_SETTLE").is_err() {
             self.settle_rooms(grid, rooms, map);
         }
-        cells.sort_by_key(|c| c.pos);
+        // The client sorts the list (`0x141f92ce0`) only after the pre-unique room; the caller does.
         Ok((cells, moved))
     }
 
