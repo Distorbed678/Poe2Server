@@ -651,7 +651,7 @@ impl Master {
             })
             .collect();
         Ok(Self {
-            tiles: TileSet::new(defs),
+            tiles: TileSet::with_flags(defs, gt_flags),
             fills,
             headers,
             ground_names: HashMap::new(),

@@ -166,6 +166,11 @@ pub struct Candidate {
 pub struct TileSet {
     pub tiles: Vec<TileDef>,
     index: HashMap<(String, TileKey), Vec<Candidate>>,
+    /// The second index (`0x141d09ab0`, node `+0x18`): the keys of tiles whose corners with a
+    /// height and a ground without `.gt` flag 1 are flattened one after the other (cumulative).
+    flat: HashMap<(String, TileKey), Vec<Candidate>>,
+    /// `.gt` flags of the grounds the tiles use (lower-case path).
+    flags: HashMap<String, u8>,
 }
 
 /// Orientation mask of a `.tst` rotation list (empty: all eight).
@@ -184,6 +189,14 @@ pub fn orientation_mask(rotations: &[String]) -> u8 {
 impl TileSet {
     /// Builds the index from tiles in `.tst` order.
     pub fn new(tiles: Vec<TileDef>) -> Self {
+        Self::with_flags(tiles, HashMap::new())
+    }
+
+    /// With the `.gt` flags of the tile grounds (the second index and the flattening lookup).
+    pub fn with_flags(tiles: Vec<TileDef>, flags: HashMap<String, u8>) -> Self {
+        let flags: HashMap<String, u8> = flags.into_iter().map(|(k, v)| (k.to_ascii_lowercase().replace('\\', "/"), v)).collect();
+        let no_height = |g: &Option<String>| g.as_ref().is_some_and(|g| flags.get(g).copied().unwrap_or(0x0f) & 1 == 0);
+        let mut flat: HashMap<(String, TileKey), Vec<Candidate>> = HashMap::new();
         let mut index: HashMap<(String, TileKey), Vec<Candidate>> = HashMap::new();
         for (i, t) in tiles.iter().enumerate() {
             if t.weight == 0 {
@@ -200,17 +213,21 @@ impl TileSet {
                 if t.orientations & (1 << o) == 0 {
                     continue;
                 }
-                index
-                    .entry((feature.clone(), key.oriented(o)))
-                    .or_default()
-                    .push(Candidate {
-                        tile: i,
-                        orientation: o,
-                        weight: t.weight,
-                    });
+                let c = Candidate { tile: i, orientation: o, weight: t.weight };
+                let oriented = key.oriented(o);
+                index.entry((feature.clone(), oriented.clone())).or_default().push(c);
+                let mut k = oriented;
+                for src in 0..4usize {
+                    if key.heights[src] == 0 || !no_height(&key.grounds[src]) {
+                        continue;
+                    }
+                    let at = (0..4).find(|&j| CORNERS[o as usize][j] == src).expect("permutation");
+                    k.heights[at] = 0;
+                    flat.entry((feature.clone(), k.clone())).or_default().push(c);
+                }
             }
         }
-        Self { tiles, index }
+        Self { tiles, index, flat, flags }
     }
 
     pub fn candidates(&self, feature: &str, key: &TileKey) -> &[Candidate] {
@@ -226,9 +243,30 @@ impl TileSet {
                 feature
             );
         }
-        self.index
-            .get(&(feature.to_ascii_lowercase(), key.clone()))
-            .map_or(&[], Vec::as_slice)
+        // `0x141d0a4c0`: the key, then the flattened-tile index, then the key with the heights
+        // of its corners (a ground without `.gt` flag 1) zeroed, again.
+        let feature = feature.to_ascii_lowercase();
+        let mut k = key.clone();
+        loop {
+            let probe = (feature.clone(), k);
+            if let Some(l) = self.index.get(&probe).filter(|l| !l.is_empty()) {
+                return l;
+            }
+            if let Some(l) = self.flat.get(&probe).filter(|l| !l.is_empty()) {
+                return l;
+            }
+            k = probe.1;
+            let mut changed = false;
+            for i in 0..4 {
+                if k.heights[i] != 0 && k.grounds[i].as_ref().is_some_and(|g| self.flags.get(g).copied().unwrap_or(0x0f) & 1 == 0) {
+                    k.heights[i] = 0;
+                    changed = true;
+                }
+            }
+            if !changed {
+                return &[];
+            }
+        }
     }
 }
 
