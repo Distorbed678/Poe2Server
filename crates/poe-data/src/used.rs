@@ -39,9 +39,11 @@ pub const USED: &[UsedTable] = &[
             "IsHideout",
             "HASH16",
             "Topologies",
+            "TerrainPlugins",
         ],
     ),
     t("Topologies", &["DGRFile"]),
+    t("TerrainPlugins", &["Id"]),
     t(
         "Characters",
         &[

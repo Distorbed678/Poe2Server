@@ -23,17 +23,17 @@ struct Entry {
 }
 
 fn entries(group: &[(u32, String, u8)]) -> Result<Vec<Entry>, GenError> {
-    group
-        .iter()
-        .map(|(w, p, mask)| {
-            let o = match mask {
-                0xff => 8,
-                m if m.count_ones() == 1 => m.trailing_zeros() as u8,
-                m => return Err(GenError::Unsupported(format!("fill {p}: orientation mask {m:#x}"))),
-            };
-            Ok(Entry { weight: *w, path: p.clone(), o, room: p.to_ascii_lowercase().ends_with(".arm") })
-        })
-        .collect()
+    // A line naming several rotations is one entry per rotation, each with the line's weight.
+    let mut out = Vec::new();
+    for (w, p, mask) in group {
+        let room = p.to_ascii_lowercase().ends_with(".arm");
+        if *mask == 0xff {
+            out.push(Entry { weight: *w, path: p.clone(), o: 8, room });
+        } else {
+            out.extend((0..8u8).filter(|b| mask >> b & 1 != 0).map(|o| Entry { weight: *w, path: p.clone(), o, room }));
+        }
+    }
+    Ok(out)
 }
 
 /// A fill room placed by the pass (for the de-repetition pass's ground overrides).

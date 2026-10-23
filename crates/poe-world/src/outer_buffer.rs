@@ -590,6 +590,26 @@ fn fill_black(map: &mut TileMap, rect: (i32, i32, i32, i32), ground: &str, repai
         }))
     };
     let ground = ground.to_ascii_lowercase();
+    if let (true, Some(ht)) = (repair && map.gt_flags(&ground) & 1 == 0, master.outer_fill_height) {
+        // The repair is skipped: every grid tile takes the override height (`0x141fd6990`).
+        for y in -a..h - h % th {
+            for x in -a..w - w % tw {
+                if !fits(map, x, y) {
+                    continue;
+                }
+                for py in y..=y + th {
+                    for px in x..=x + tw {
+                        if let Some(k) = map.point_index(x0 + px, y0 + py) {
+                            map.lattice[k].height = ht;
+                            map.lattice[k].flags |= 2;
+                        }
+                    }
+                }
+                map.place(x0 + x, y0 + y, &path, &tdt, o, ht as i16, None);
+            }
+        }
+        return Ok(());
+    }
     if !repair || map.gt_flags(&ground) & 1 != 0 {
         for y in -a..h - h % th {
             for x in -a..w - w % tw {

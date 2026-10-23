@@ -558,6 +558,9 @@ pub struct Master {
     headers: HashMap<String, Tdt>,
     /// Ground type file (lower case) -> its name (first line of the `.gt`).
     ground_names: HashMap<String, String>,
+    /// `.tsi` `OuterFillHeightOverride`: the height of the outer fill's plain placement, which
+    /// also replaces the height repair (master +0x153 / +0x161).
+    pub outer_fill_height: Option<i8>,
 }
 
 /// Reads a `.tdt`, applying an inheriting tile's overrides to its parent chain.
@@ -572,7 +575,7 @@ pub fn load_tdt(files: &dyn Files, path: &str) -> Result<Tdt, GenError> {
 impl Master {
     /// A master without tile set or fill tiles (container graphs, whose `.tsi` names neither).
     pub fn empty() -> Self {
-        Self { tiles: TileSet::new(Vec::new()), fills: HashMap::new(), headers: HashMap::new(), ground_names: HashMap::new() }
+        Self { tiles: TileSet::new(Vec::new()), fills: HashMap::new(), headers: HashMap::new(), ground_names: HashMap::new(), outer_fill_height: None }
     }
 
     pub fn load(files: &dyn Files, tst: &str, gft: &str) -> Result<Self, GenError> {
@@ -625,6 +628,7 @@ impl Master {
             fills,
             headers,
             ground_names: HashMap::new(),
+            outer_fill_height: None,
         })
     }
 
