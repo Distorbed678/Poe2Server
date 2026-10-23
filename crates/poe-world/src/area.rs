@@ -306,6 +306,11 @@ fn random_offsets(graph: &mut Graph, rng: &mut TerrainRng) {
     }
 }
 
+thread_local! {
+    /// The job's lettered-unique history (`0x141feb050`), by letter; cleared per generated area.
+    static LETTER_HISTORY: std::cell::RefCell<std::collections::BTreeMap<u8, Vec<usize>>> = Default::default();
+}
+
 fn prune(graph: &Graph, rng: &mut TerrainRng) -> Result<(Graph, Vec<bool>), GenError> {
     let mut drop_node = vec![false; graph.nodes.len()];
     for (i, n) in graph.nodes.iter().enumerate() {
@@ -329,23 +334,34 @@ fn prune(graph: &Graph, rng: &mut TerrainRng) -> Result<(Graph, Vec<bool>), GenE
     }
     let drop_node_before = dropped.clone();
     shuffle_nodes(&mut g, &drop_node_before, rng);
-    // `unique<N>[#count]` (`0x141feb3b0`): keep `count` random nodes of group N.
+    // `unique<N>[#count]` / `unique<L><N>[#count]` (`0x141feb3b0`, collected by `0x141fe96e0`).
     let mut groups: Vec<(u32, Vec<usize>)> = Vec::new();
+    let mut letters: std::collections::BTreeMap<u8, (u32, Vec<Vec<usize>>)> = Default::default();
     for (i, n) in g.nodes.iter().enumerate() {
         if dropped[i] {
             continue;
         }
         let Some(t) = n.tags.iter().find(|t| t.len() >= 6 && t[..6].eq_ignore_ascii_case("unique")) else { continue };
         let mut rest = &t[6..];
-        if rest.chars().next().is_some_and(|c| c.is_ascii_alphabetic()) {
-            return Err(data(format!("node {i}: lettered unique tag {t:?} (session history) is not ported")));
+        let letter = rest.chars().next().filter(|c| c.is_ascii_alphabetic()).map(|c| c.to_ascii_uppercase() as u8);
+        if letter.is_some() {
+            rest = &rest[1..];
         }
         let mut count = 1u32;
         if let Some((a, b)) = rest.split_once('#') {
             rest = a;
             count = b.trim().parse().unwrap_or(1);
         }
-        let k = if rest.is_empty() { 0 } else { match rest.trim().parse::<usize>() { Ok(v) => v, Err(_) => continue } };
+        let k = if rest.is_empty() && letter.is_none() { 0 } else { match rest.trim().parse::<usize>() { Ok(v) => v, Err(_) => continue } };
+        if let Some(l) = letter {
+            let e = letters.entry(l).or_insert((0, Vec::new()));
+            if e.1.len() <= k {
+                e.1.resize(k + 1, Vec::new());
+            }
+            e.0 = e.0.max(count);
+            e.1[k].push(i);
+            continue;
+        }
         if groups.len() <= k {
             groups.resize(k + 1, (0, Vec::new()));
         }
@@ -360,6 +376,31 @@ fn prune(graph: &Graph, rng: &mut TerrainRng) -> Result<(Graph, Vec<bool>), GenE
             }
             for n in list {
                 remove_node(&mut g, &mut removed, &mut dropped, n);
+            }
+        }
+    }
+    // Letter groups (`0x141fe9970`): the numbered subgroups that stay are kept per letter in
+    // the job's history of this graph (the vector `0x141feb050` returns), empty on the first
+    // generation: a discarded `below(n)`, a partial shuffle of `0..n` for `count` steps
+    // (`0x141fecde0`), cut to `count`; the nodes of the other subgroups go.
+    for (letter, (count, subgroups)) in letters {
+        let n = subgroups.len();
+        let mut keep: Vec<usize> = LETTER_HISTORY.with(|h| h.borrow().get(&letter).cloned().unwrap_or_default());
+        if keep.is_empty() && count != 0 {
+            keep = (0..n).collect();
+            rng.below(n as u32);
+            for i in 0..(count as usize).min(n) {
+                let k = rng.uniform((n - i) as u32) as usize;
+                keep.swap(i, i + k);
+            }
+            keep.truncate(count as usize);
+            LETTER_HISTORY.with(|h| h.borrow_mut().insert(letter, keep.clone()));
+        }
+        for (k, list) in subgroups.into_iter().enumerate() {
+            if !keep.contains(&k) {
+                for node in list {
+                    remove_node(&mut g, &mut removed, &mut dropped, node);
+                }
             }
         }
     }
@@ -537,6 +578,18 @@ fn edge_symmetric(types: &mut TerrainTypes, files: &dyn crate::generate::Files, 
     edge_symmetric(types, files, &t.splits[0].0)
 }
 
+/// The master's keys, with `OuterGroundType` made a full path (like the other file keys it is
+/// relative to the `.tsi` unless it starts with `Metadata/`: `Tiles/water.gt` of MapUniqueLake).
+fn master_entries(bytes: &[u8], tsi_path: &str) -> std::collections::HashMap<String, String> {
+    let mut tsi = tsi_entries(bytes);
+    if let Some(v) = tsi.get_mut("OuterGroundType") {
+        if !(v.len() > 9 && v[..9].eq_ignore_ascii_case("metadata/")) {
+            *v = format!("{}/{v}", tsi_path.rsplit_once('/').map_or("", |d| d.0));
+        }
+    }
+    tsi
+}
+
 /// A `.dgr` graph: the dungeon layout (`crate::dungeon`), then its tile pass
 /// (`crate::dungeon_tiles`).
 fn generate_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[bool], rng: &mut TerrainRng, extra: Option<&Graph>) -> Result<TileMap, GenError> {
@@ -599,6 +652,9 @@ fn generate_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: 
         }
     }
     for (mut inner, origin, m) in done.into_iter().rev() {
+        if std::env::var("POE_DBG").is_ok() {
+            eprintln!("DBG subgraph outer pass origin {:?} size {}x{} pieces {}", origin, inner.map.width, inner.map.height, inner.map.cells.iter().filter(|c| c.is_some()).count());
+        }
         let g = inner.tsi.get("OuterGroundType").cloned();
         let (w, h) = (inner.map.width, inner.map.height);
         let st = storey_of(&inner.tsi);
@@ -670,7 +726,7 @@ struct Built {
 fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[bool], rng: &mut TerrainRng, window: Option<(&TileMap, (i32, i32))>) -> Result<Built, GenError> {
     let tsi_path = graph.master_file.clone();
     let tsi_bytes = files.read(&tsi_path)?;
-    let tsi = tsi_entries(&tsi_bytes);
+    let tsi = master_entries(&tsi_bytes, &tsi_path);
     let dir = tsi_path.rsplit_once('/').map_or("", |d| d.0);
     let rel = |k: &str| tsi.get(k).map(|v| if v.len() > 9 && v[..9].eq_ignore_ascii_case("metadata/") { v.to_string() } else { format!("{dir}/{v}") });
     // Container graphs (`master_container.tsi` of MapKarst, MapDerelictMansion, P1_6,
@@ -847,6 +903,7 @@ fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng:
     } else {
         graph
     };
+    LETTER_HISTORY.with(|h| h.borrow_mut().clear());
     let (pruned, removed) = prune(graph, rng)?;
     let graph = &pruned;
     if graph.dungeon_defaults.is_some() {
@@ -881,7 +938,7 @@ fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng:
     // Master: tile set, fill tiles, room set, outer buffer.
     let tsi_path = graph.master_file.clone();
     let tsi_bytes = files.read(&tsi_path)?;
-    let tsi = tsi_entries(&tsi_bytes);
+    let tsi = master_entries(&tsi_bytes, &tsi_path);
     let margins = Margins::parse(&crate::text::decode_utf16(&tsi_bytes));
     let dir = tsi_path.rsplit_once('/').map_or("", |d| d.0);
     let rel = |k: &str| tsi.get(k).map(|v| if v.len() > 9 && v[..9].eq_ignore_ascii_case("metadata/") { v.to_string() } else { format!("{dir}/{v}") });

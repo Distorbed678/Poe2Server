@@ -669,7 +669,8 @@ fn fill_black(map: &mut TileMap, rect: (i32, i32, i32, i32), ground: &str, repai
         }
         if waiting.len() == before && ready.is_empty() {
             if std::env::var("POE_DBG").is_ok() {
-                eprintln!("DBG stuck rect {:?} waiting {:?}", rect, waiting.iter().map(|c| (c.0 + x0, c.1 + y0)).collect::<Vec<_>>());
+                let filled = (0..h).flat_map(|y| (0..w).map(move |x| (x, y))).filter(|&(x, y)| map.index(x0 + x, y0 + y).is_some_and(|i| map.cells[i].is_some())).count();
+                eprintln!("DBG stuck rect {:?} map {}x{} filled {} waiting {} first {:?}", rect, map.width, map.height, filled, waiting.len(), waiting.first());
             }
             return Err(GenError::Unsupported("could not fix heights in dungeon".into()));
         }
