@@ -603,7 +603,17 @@ pub fn virtual_junction(lg: &mut LayoutGraph, n: usize, rng: &mut TerrainRng) ->
                     pending.push((a, (lg.edges[a].from != n) as usize, v));
                 }
                 (true, true) => {
-                    return Err(GenError::Unsupported(format!("tile-less virtual node {n}: two virtual edges side by side (0x1420c64f0) not ported")));
+                    // Two virtual edges side by side: one width from the first's range, one
+                    // shared corner point (`0x1420c64f0`), both edges get it.
+                    if lg.edges[a].edge_type != lg.edges[b].edge_type {
+                        return Err(GenError::Unsupported(format!("Mismatched edge-types while handling tile-less virtual node at {node:?}")));
+                    }
+                    let (lo, hi) = lg.edges[a].width;
+                    let w = rng.below((hi - lo + 1) as u32) as i32 + lo;
+                    let c = slots[live[(i + 2) % live.len()]].unwrap();
+                    let v = virtual_corner(towards(lg, a), node, towards(lg, b), towards(lg, c), w);
+                    pending.push((a, (lg.edges[a].from != n) as usize, v));
+                    pending.push((b, (lg.edges[b].from != n) as usize, v));
                 }
             }
         }
@@ -667,6 +677,49 @@ pub fn virtual_junction(lg: &mut LayoutGraph, n: usize, rng: &mut TerrainRng) ->
         }
     }
     Ok(())
+}
+
+/// `0x1420c64f0`: the corner of two virtual edges meeting at `node` (from the points `a` and `b`
+/// next to it, `c` the third edge's): the intersection of the two lines offset by `w` on one side,
+/// the candidate on the side of the midpoint of `a` and `b` unless `c` falls on another side.
+fn virtual_corner(a: (i32, i32), node: (i32, i32), b: (i32, i32), c: (i32, i32), w: i32) -> (i32, i32) {
+    let (x3, y3, x4, y4) = (a.0, a.1, node.0, node.1);
+    let (dy1, dx1) = (y4 - y3, x4 - x3);
+    let (dx2, dy2) = (b.0 - x4, b.1 - y4);
+    let m = ((b.0 + x3) / 2, (b.1 + y3) / 2);
+    let cross2 = (m.1 - y4) * dx2 - (m.0 - x4) * dy2;
+    let side1 = |p: (i32, i32)| 0 < (p.1 - y3) * dx1 - (p.0 - x3) * dy1;
+    let side2 = |p: (i32, i32)| 0 < (p.1 - y4) * dx2 - (p.0 - x4) * dy2;
+    let b4 = side1(m);
+    let _ = cross2;
+    let m2 = 0 < cross2;
+    let b5 = !(b4 == side1(c) && m2 == side2(c));
+    let len1 = crate::voronoi::isqrt((dy1 * dy1 + dx1 * dx1) as u32) as i32;
+    let len2 = crate::voronoi::isqrt((dy2 * dy2 + dx2 * dx2) as u32) as i32;
+    let off = -dy1 * w;
+    let (u11, u10);
+    if dx2 * -dy1 == -dy2 * dx1 {
+        let (ox, oy) = (off / len1, (w * dx1) / len1);
+        u11 = (x4 + ox, y4 + oy);
+        u10 = (x4 - ox, y4 - oy);
+    } else {
+        let (ox, oy) = (off / len1, (w * dx1) / len1);
+        let (x7, x6) = (ox + x3, x3 - ox);
+        let (ex, ey) = ((-dy2 * w) / len2, (dx2 * w) / len2);
+        let (y13, y8) = (y3 - oy, y3 + oy);
+        let det = dx1 * dy2 - dy1 * dx2;
+        let t1 = (((y8 - y4) - ey) * dx2 - ((x7 - x4) - ex) * dy2) / det;
+        let t2 = (((y13 - y4) + ey) * dx2 - ((x6 - x4) + ex) * dy2) / det;
+        u11 = (x7 + t1 * dx1, y8 + t1 * dy1);
+        u10 = (t2 * dx1 + x6, t2 * dy1 + y13);
+    }
+    if b4 == side1(u11) && m2 == side2(u11) {
+        if b5 { u11 } else { u10 }
+    } else if b5 {
+        u10
+    } else {
+        u11
+    }
 }
 
 /// `0x142196290`: squared distance of `p` from the segment `a`–`b` as a fraction
