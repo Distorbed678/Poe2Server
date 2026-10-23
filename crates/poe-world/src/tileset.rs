@@ -214,10 +214,29 @@ impl TileSet {
     }
 
     pub fn candidates(&self, feature: &str, key: &TileKey) -> &[Candidate] {
+        if let Some(f) = key_dump() {
+            use std::io::Write;
+            let n = |e: &Option<String>| e.as_deref().map_or("-".to_string(), |s| s.rsplit('/').next().unwrap_or(s).to_string());
+            let _ = writeln!(
+                f.lock().unwrap(),
+                "size [{}, {}] h {:?} x {:?} v {:?}\te {} g {}\t{}",
+                key.size.0, key.size.1, key.heights, key.exits, key.virtual_exits,
+                key.edges.iter().map(n).collect::<Vec<_>>().join(","),
+                key.grounds.iter().map(n).collect::<Vec<_>>().join(","),
+                feature
+            );
+        }
         self.index
             .get(&(feature.to_ascii_lowercase(), key.clone()))
             .map_or(&[], Vec::as_slice)
     }
+}
+
+/// `POE_DUMP_KEYS=<file>`: every tile lookup in the client trace's `tile_key` format (debug aid
+/// to diff the key sequence against a trace; only meaningful on one thread).
+fn key_dump() -> Option<&'static std::sync::Mutex<std::fs::File>> {
+    static F: std::sync::OnceLock<Option<std::sync::Mutex<std::fs::File>>> = std::sync::OnceLock::new();
+    F.get_or_init(|| std::env::var("POE_DUMP_KEYS").ok().and_then(|p| std::fs::File::create(p).ok()).map(std::sync::Mutex::new)).as_ref()
 }
 
 /// The weighted pick the generator does (`0x1415d5960`): `r` in `0..total`.
