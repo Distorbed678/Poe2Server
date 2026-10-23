@@ -807,6 +807,9 @@ pub fn place_node_opt(
                 && py < p.pos.1 + p.size.1 as i32
                 && p.pos.1 < py + h
         });
+        // The client tests no overlap with earlier rooms here (its map is still empty); the settle
+        // spiral (`settle`) moves overlapping rooms apart afterwards.
+        let overlaps = overlaps && std::env::var_os("POE_OVERLAP").is_some(); // debug: the old rectangle test
         if inside && !overlaps {
             // `0x1420c59e0`: keep the room off the map border by the largest edge size
             // (twice for virtual edges) on each side its key has an edge.

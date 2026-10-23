@@ -1035,9 +1035,13 @@ fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng:
     smoothing::smooth(&mut lg);
     probe(Stage::Graph("smooth", &lg));
     // Virtual nodes no tile fitted (`0x1420c6cd0`).
+    let nodes_before = lg.nodes.len();
     for &n in &virtual_nodes {
         node_tiles::virtual_junction(&mut lg, n, rng)?;
     }
+    // The nodes this split made were not in the tile list built at the start (`0x1420c7400` ran
+    // on the original nodes).
+    let junction_made: std::collections::HashSet<usize> = (nodes_before..lg.nodes.len()).collect();
 
     // Virtual edges split into their two banks.
     let mut split_types: HashMap<String, SplitType> = HashMap::new();
@@ -1071,7 +1075,7 @@ fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng:
                 }
             }
             None => {
-                if lg.nodes[n].fixed {
+                if lg.nodes[n].fixed || junction_made.contains(&n) {
                     continue;
                 }
             }
