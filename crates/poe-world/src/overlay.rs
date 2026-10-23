@@ -383,7 +383,7 @@ impl Overlays {
             return Ok(false);
         }
         let code = room_fits(map, (x, y), &g.key, false, 1, master, types, files)?;
-        if std::env::var("POE_DBG_OVERLAY").is_ok() { eprintln!("FIT {w}x{h} ({x},{y}) f{:x} code {code} e {}", g.flags, g.key.edges.iter().map(|e| e.as_deref().map_or("-".to_string(), |e| e.rsplit('/').next().unwrap().to_string())).collect::<Vec<_>>().join(",")); }
+        if std::env::var("POE_DBG_OVERLAY").is_ok() { eprintln!("FIT {w}x{h} ({x},{y}) f{:x} code {code} e {}", g.flags, g.key.edges.iter().map(|e| e.as_deref().map_or("-".to_string(), |e| e.rsplit('/').next().unwrap().to_string())).collect::<Vec<_>>().join(",") + " g " + &g.key.grounds.iter().map(|e| e.as_deref().map_or("-".to_string(), |e| e.rsplit('/').next().unwrap().to_string()).to_ascii_lowercase()).collect::<Vec<_>>().join(",")); }
         Ok(code == 0)
     }
 
@@ -706,6 +706,7 @@ pub fn room_fits(map: &TileMap, pos: (i32, i32), key: &TileKey, wild: bool, marg
     let key_ground = |i: usize| key.grounds[i].clone().filter(|g| map.gt_flags(g) & 0x10 == 0);
     // `0x141f9cfc0`
     let mut odd = 0;
+    if std::env::var("POE_DBG_FITG").is_ok() && pos == (0, 27) { eprintln!("FITG {:?} lattice {:?} key {:?} flags {:?}", pos, corners.iter().map(|&(cx, cy)| corner(map, cx, cy).0).collect::<Vec<_>>(), key.grounds, map.ground_flags.iter().filter(|(k, _)| k.contains("black_inside") || k.contains("cavern_abyss")).collect::<Vec<_>>()); }
     for (s, &(cx, cy)) in corners.iter().enumerate() {
         let (a, _) = corner(map, cx, cy);
         let b = key_ground(s);
@@ -717,7 +718,9 @@ pub fn room_fits(map: &TileMap, pos: (i32, i32), key: &TileKey, wild: bool, marg
                 wild || a.is_some()
             } else if let Some(ag) = &a {
                 let fa = map.gt_flags(ag);
-                if fa & 0x80 != 0 {
+                // `+0x25` bit 0 of the ground (the name `SynthesisBackground`) passes here; it is not
+                // the Abyss/Water name bit 0x80 (`0x142918970`), and no 0.5.5e ground has it.
+                if false {
                     true
                 } else if fa & 5 == 0 && b.as_ref().is_some_and(|bg| map.gt_flags(bg) & 5 == 0) {
                     odd += 1;
