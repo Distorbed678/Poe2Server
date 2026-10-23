@@ -570,7 +570,7 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
     let tsi_bytes = files.read(&tsi_path)?;
     let tsi = tsi_entries(&tsi_bytes);
     let dir = tsi_path.rsplit_once('/').map_or("", |d| d.0);
-    let rel = |k: &str| tsi.get(k).map(|v| format!("{dir}/{v}"));
+    let rel = |k: &str| tsi.get(k).map(|v| if v.len() > 9 && v[..9].eq_ignore_ascii_case("metadata/") { v.to_string() } else { format!("{dir}/{v}") });
     // Container graphs (`master_container.tsi` of MapKarst, MapDerelictMansion, P1_6,
     // HideoutVampireManor: nodes that only hold subgraphs) name no `RoomSet`.
     let set = match rel("RoomSet") {
@@ -760,7 +760,7 @@ fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng:
     let tsi = tsi_entries(&tsi_bytes);
     let margins = Margins::parse(&crate::text::decode_utf16(&tsi_bytes));
     let dir = tsi_path.rsplit_once('/').map_or("", |d| d.0);
-    let rel = |k: &str| tsi.get(k).map(|v| format!("{dir}/{v}"));
+    let rel = |k: &str| tsi.get(k).map(|v| if v.len() > 9 && v[..9].eq_ignore_ascii_case("metadata/") { v.to_string() } else { format!("{dir}/{v}") });
     let mut master = match (rel("TileSet"), rel("FillTiles")) {
         (Some(t), Some(f)) => Master::load(files, &t, &f)?,
         (None, None) => Master::empty(),
