@@ -33,24 +33,48 @@ pub struct EdgeFields {
 }
 
 impl EdgeFields {
-    pub fn parse(extra: &[String]) -> Result<Self, GenError> {
-        let int = |i: usize| -> Result<i32, GenError> {
+    /// The edge fields by file version (`0x14292e8e0`): chance2; chance1 (version >= 16, else
+    /// 100 when chance2 is set); depth limit (>= 21); branching type (>= 18); extra door %
+    /// (zero below 17, read anyway); extra door type (>= 20); fuzzy %; impenetrability;
+    /// impenetrable value; void; accessibility.
+    pub fn parse(extra: &[String], version: u32) -> Result<Self, GenError> {
+        let at = std::cell::Cell::new(0usize);
+        let int = || -> Result<i32, GenError> {
+            let i = at.get();
+            at.set(i + 1);
             extra.get(i).and_then(|s| s.parse().ok()).ok_or_else(|| unsupported(format!(".dgr edge field {i} in {extra:?}")))
         };
-        let s = |i: usize| extra.get(i).cloned().unwrap_or_default();
-        Ok(Self {
-            chance2: int(0)?,
-            chance1: int(1)?,
-            depth_limit: int(2)?,
-            branching_type: s(3),
-            extra_door: int(4)? as u32,
-            extra_door_type: s(5),
-            fuzzy: int(6)?,
-            impenetrability: int(7)?,
-            impenetrable: s(8),
-            void: s(9).eq_ignore_ascii_case("V"),
-            accessible: int(10)? != 0,
-        })
+        let chance2 = int()?;
+        let (mut chance1, mut depth_limit) = (if chance2 != 0 { 100 } else { 0 }, 0);
+        let mut branching_type = String::new();
+        let take_str = || -> String {
+            let v = extra.get(at.get()).cloned().unwrap_or_default();
+            at.set(at.get() + 1);
+            v
+        };
+        if version >= 16 {
+            chance1 = int()?;
+            if version >= 21 {
+                depth_limit = int()?;
+            }
+            if version >= 18 {
+                branching_type = take_str();
+            }
+        }
+        let mut extra_door = int()? as u32;
+        if version < 17 {
+            extra_door = 0;
+        }
+        let mut extra_door_type = String::new();
+        if version >= 20 {
+            extra_door_type = take_str();
+        }
+        let fuzzy = int()?;
+        let impenetrability = int()?;
+        let impenetrable = take_str();
+        let void = take_str().eq_ignore_ascii_case("V");
+        let accessible = int()? != 0;
+        Ok(Self { chance2, chance1, depth_limit, branching_type, extra_door, extra_door_type, fuzzy, impenetrability, impenetrable, void, accessible })
     }
 }
 
@@ -368,7 +392,7 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
             return Err(unsupported(format!("room {}: {} exits for {}x{} units", r.path, r.exits.len(), r.units.0, r.units.1)));
         }
     }
-    let fields: Vec<EdgeFields> = graph.edges.iter().map(|e| EdgeFields::parse(&e.extra)).collect::<Result<_, _>>()?;
+    let fields: Vec<EdgeFields> = graph.edges.iter().map(|e| EdgeFields::parse(&e.extra, graph.version)).collect::<Result<_, _>>()?;
     // A node's side slots: its edges by edge index (`0x141d1c580`).
     let slots: Vec<Vec<usize>> = (0..graph.nodes.len())
         .map(|n| (0..graph.edges.len()).filter(|&e| !removed[e] && (graph.edges[e].from as usize == n || graph.edges[e].to as usize == n)).collect())
