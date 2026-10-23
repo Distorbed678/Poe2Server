@@ -589,6 +589,16 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
     let edge_types = master.edge_type_table(files)?;
     let flag = |k: &str| tsi.get(k).is_some_and(|v| v.trim() != "0");
     let pass = crate::dungeon_tiles::TilePass { master: &master, ecf: &ecf, unit, overlap: grid.overlap, edge_types: &edge_types, overlap_fixes: flag("AllowInteriorOverlapFixes"), doors_disabled: flag("DisableDoors"), grounds: [1, 2, 0].map(|i| (!graph.ground_types[i].is_empty()).then(|| graph.ground_types[i].clone())) };
+    // The graph's own grounds reach the lattice through the per-room settle; their `.gt` flags
+    // (for example `CarverUpperGround`: 0x1f, which makes the fill treat it as none) are not in
+    // the tile set's table unless a tile uses them.
+    for g in pass.grounds.iter().flatten() {
+        let key = g.to_ascii_lowercase().replace('\\', "/");
+        if !map.ground_flags.contains_key(&key) {
+            let f = crate::rooms::ground_flags(&crate::text::decode_utf16(&files.read(&key)?));
+            map.ground_flags.insert(key, f);
+        }
+    }
     let (cells, moved) = pass.run(&grid, &rooms, &mut map, rng)?;
     if let Ok(path) = std::env::var("POE_DUMP_PIECES") {
         let mut out = String::new();
@@ -635,15 +645,20 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
         }
         None => None,
     };
+    dbg_cell(&map, "pre-overlay1");
     if let Some(o) = &mut overlays {
         o.run(1, &mut map, &mut master, &mut types, files, rng)?;
     }
+    dbg_cell(&map, "post-overlay1");
     let (fill_rooms, wiggle) = crate::fill::fill_cells(&mut map, &mut master, files, &cells, rng)?;
+    dbg_cell(&map, "post-fill");
     if let Some(o) = &mut overlays {
         o.run(2, &mut map, &mut master, &mut types, files, rng)?;
     }
+    dbg_cell(&map, "post-overlay2");
     let wiggle = [moved, overlays.as_ref().map(|o| o.wiggle.clone()).unwrap_or_default(), wiggle].concat();
     crate::dungeon_tiles::wiggle(&mut master, files, &mut map, wiggle, rng)?;
+    dbg_cell(&map, "post-wiggle");
     // De-repetition over the rooms and fill rooms, then the outer buffer.
     let mut placements: Vec<RoomPlacement> = grid
         .rooms
@@ -656,6 +671,7 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
         placements.extend(o.fill_rooms.iter().map(|r| RoomPlacement { room: &r.room, origin: r.origin, orientation: r.orientation }));
     }
     derepeat_pass(&mut map, &master, &placements, rng);
+    dbg_cell(&map, "post-derepeat");
     let subgraphs = grid.rooms.iter().filter_map(|r| Some((r.subgraph.clone()?, (r.origin.0 * step as i32, r.origin.1 * step as i32)))).collect();
     drop(placements);
     Ok(Built { map, master, tsi_bytes, tsi, subgraphs })
@@ -664,6 +680,16 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
 /// Everything after the topology choice, for one graph.
 pub fn generate_graph(files: &dyn crate::generate::Files, graph: &Graph, rng: &mut TerrainRng) -> Result<TileMap, GenError> {
     generate_graph_probed(files, graph, rng, &mut |_| {})
+}
+
+fn dbg_cell(map: &TileMap, stage: &str) {
+    if let Ok(v) = std::env::var("POE_DBG_CELL") {
+        let xy: Vec<i32> = v.split(',').filter_map(|t| t.parse().ok()).collect();
+        if xy.len() == 2 {
+            let c = map.index(xy[0], xy[1]).and_then(|i| map.cells[i].as_ref());
+            eprintln!("CELL {stage}: {:?}", c.map(|c| (c.path.rsplit('/').next().unwrap_or("").to_string(), c.orientation)));
+        }
+    }
 }
 
 fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng: &mut TerrainRng, probe: &mut dyn FnMut(Stage)) -> Result<TileMap, GenError> {

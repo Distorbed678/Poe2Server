@@ -311,7 +311,9 @@ impl TilePass<'_> {
                 map.room_overrides(room, (p.origin.0 * step, p.origin.1 * step), p.orientation);
             }
         }
-        self.settle_rooms(grid, rooms, map);
+        if std::env::var("POE_NO_SETTLE").is_err() {
+            self.settle_rooms(grid, rooms, map);
+        }
         cells.sort_by_key(|c| c.pos);
         Ok((cells, moved))
     }
@@ -351,10 +353,16 @@ impl TilePass<'_> {
             }
             // A blank room (no tag, doors or second ground) carries its ground.
             let own = match &room.arm.root_slot {
-                poe_data_tools::file_parsers::arm::types::Slot::K(k) if room.arm.tag.is_empty() && room.arm.thingies.iter().all(|t| t.et_file.is_none()) && k.corners.iter().all(|c| c.ground == k.corners[0].ground) => k.corners[0].ground.clone(),
+                poe_data_tools::file_parsers::arm::types::Slot::K(k) if room.arm.tag.is_empty() && room.arm.thingies.iter().all(|t| t.et_file.is_none()) && k.corners.iter().all(|c| c.ground == k.corners[0].ground) && uniform_walk(room) => k.corners[0].ground.clone(),
                 _ => None,
             };
             let base = self.grounds[0].clone();
+            if let Ok(v) = std::env::var("POE_DBG_SETTLE") {
+                let xy: Vec<i32> = v.split(',').filter_map(|t| t.parse().ok()).collect();
+                if xy.len() == 2 && (x0..x1).contains(&(xy[0] - p.origin.0 * step)) && (y0..y1).contains(&(xy[1] - p.origin.1 * step)) {
+                    eprintln!("SETTLE room {} origin {:?} o{} own {:?} base {:?} tag {:?} slot {:?} thingies {}", p.path, p.origin, p.orientation, own, base, room.arm.tag, room.arm.root_slot, room.arm.thingies.len());
+                }
+            }
             let ground = own.or(base).map(|g| g.to_ascii_lowercase().replace('\\', "/"));
             for y in y0..y1 {
                 for x in x0..x1 {
@@ -1098,3 +1106,26 @@ pub fn wiggle(master: &mut Master, files: &dyn crate::generate::Files, map: &mut
     Ok(())
 }
 
+
+/// Room data +10 (`0x141f982b0`): a blank room whose slots' corner grounds are all as walkable
+/// (none, or `.gt` flag 4) as the room's own ground; only then the settle (`0x142099e90`) uses
+/// the room's ground instead of the graph's default.
+fn uniform_walk(room: &Room) -> bool {
+    use poe_data_tools::file_parsers::arm::types::Slot;
+    if std::env::var("POE_NO_UNIFORM_WALK").is_ok() {
+        return true;
+    }
+    let walk = |g: &Option<String>| match g {
+        None => true,
+        Some(g) => {
+            let key = g.to_ascii_lowercase().replace('\\', "/");
+            room.ground_flags.iter().find(|(k, _)| *k == key).is_none_or(|(_, f)| f & 4 != 0)
+        }
+    };
+    let Slot::K(root) = &room.arm.root_slot else { return false };
+    let want = walk(&root.corners[0].ground);
+    room.arm.grid.iter().flatten().all(|slot| match slot {
+        Slot::K(k) => k.corners.iter().all(|c| walk(&c.ground) == want),
+        _ => true,
+    })
+}
