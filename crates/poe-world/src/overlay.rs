@@ -534,7 +534,18 @@ impl Overlays {
             if std::env::var("POE_DBG_OVERLAY").is_ok() {
                 eprintln!("PLACE {} at {pos:?} o{o} height {height}", self.rooms[room.room].0);
             }
+            let before_pieces = map.pieces.len();
             room_pass_oriented(map, master, &self.rooms[room.room].1, pos, o, true, height, rng)?;
+            // The fill listener `0x14209a2c0` sees every tile an overlay room places as well.
+            if self.dungeon {
+                let mut w = crate::dungeon_tiles::Wiggles::default();
+                for pc in map.pieces[before_pieces..].to_vec() {
+                    let tdt = master.header(files, &pc.path)?.clone();
+                    if w.movable(files, &tdt)? {
+                        self.wiggle.push((pc.x, pc.y));
+                    }
+                }
+            }
             self.mark((pos.0, pos.1, pos.0 + w, pos.1 + h), 1);
             *self.counts.entry(room.room).or_default() += 1;
             self.placed.push((room.room, pos, o));
