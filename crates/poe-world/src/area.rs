@@ -190,6 +190,11 @@ impl crate::generate::Files for WithSpecialTiles<'_> {
 /// [`generate_probed`] with the file source given.
 pub fn generate_probed_files(gd: &GameData, files: &dyn crate::generate::Files, area_id: &str, rng: &mut TerrainRng, forced: Option<Forced>, probe: &mut dyn FnMut(Stage)) -> Result<Generated, GenError> {
     let forced = forced.unwrap_or_default();
+    // `TerrainGen_Run` seeds with `disabled` set for hideouts (WorldAreas `IsHideout`, row
+    // +0x12a): every draw then returns its lower bound.
+    if poe_data::views::WorldArea::find(gd, area_id).ok().flatten().is_some_and(|a| a.is_hideout) {
+        rng.disabled = true;
+    }
     let graphs = topology_entries(gd, area_id, 1)?;
     if graphs.is_empty() {
         return Err(data(format!("{area_id}: no topologies")));
@@ -667,7 +672,7 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
     let tsi_bytes = files.read(&tsi_path)?;
     let tsi = tsi_entries(&tsi_bytes);
     let dir = tsi_path.rsplit_once('/').map_or("", |d| d.0);
-    let rel = |k: &str| tsi.get(k).map(|v| format!("{dir}/{v}"));
+    let rel = |k: &str| tsi.get(k).map(|v| if v.len() > 9 && v[..9].eq_ignore_ascii_case("metadata/") { v.to_string() } else { format!("{dir}/{v}") });
     // Container graphs (`master_container.tsi` of MapKarst, MapDerelictMansion, P1_6,
     // HideoutVampireManor: nodes that only hold subgraphs) name no `RoomSet`.
     let set = match rel("RoomSet") {
@@ -879,7 +884,7 @@ fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng:
     let tsi = tsi_entries(&tsi_bytes);
     let margins = Margins::parse(&crate::text::decode_utf16(&tsi_bytes));
     let dir = tsi_path.rsplit_once('/').map_or("", |d| d.0);
-    let rel = |k: &str| tsi.get(k).map(|v| format!("{dir}/{v}"));
+    let rel = |k: &str| tsi.get(k).map(|v| if v.len() > 9 && v[..9].eq_ignore_ascii_case("metadata/") { v.to_string() } else { format!("{dir}/{v}") });
     let mut master = match (rel("TileSet"), rel("FillTiles")) {
         (Some(t), Some(f)) => Master::load(files, &t, &f)?,
         (None, None) => Master::empty(),
@@ -944,6 +949,16 @@ fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng:
         }
         placed.push(p);
     }
+    // `0x1420caa40`, second loop: the nodes touching a virtual edge are tried like rooms (rooms
+    // of the empty type, else tiles); those nothing fits are exploded below.
+    let mut placed_virtual: Vec<usize> = Vec::new();
+    for &n in &virtual_nodes {
+        if let Some(p) = crate::rooms::place_node_opt(&set, &master.tiles, &placed_graph, n, tiles, &placed, &mut types, files, rng)? {
+            placed.push(p);
+            placed_virtual.push(n);
+        }
+    }
+    virtual_nodes.retain(|n| !placed_virtual.contains(n));
     let fixed: Vec<(bool, bool)> = graph
         .nodes
         .iter()
@@ -953,7 +968,16 @@ fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng:
     let mut map = TileMap::new(graph.width, graph.height);
     map.ground_flags = master.ground_flag_table(files)?;
     map.edge_flags = master.edge_flag_table(files)?;
-    for p in &placed {
+    for p in placed.iter_mut() {
+        // `0x1420c9970` first lets a room that does not fit move (`0x1420c9260`).
+        let align = crate::rooms::node_alignment(&placed_graph, p.node, &mut types, files)?;
+        let before = p.pos;
+        if std::env::var_os("POE_DEBUG_ROOMS").is_some() {
+            eprintln!("settle node {} was {:?}", p.node, before);
+        }
+        if !crate::rooms::settle(&map, p, align, placed_graph.graph.region, &mut types, files)? {
+            return Err(data(format!("Overlapping node tiles at {:?}", p.pos)));
+        }
         match p.tile {
             // `0x1420c9970`: a node that took a tile places just that tile.
             Some(t) => {
@@ -1061,10 +1085,6 @@ fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng:
     // instead (`0x1420caa40`), which is not ported yet.
     for &n in virtual_nodes.iter().chain(&junctions) {
         if virtual_nodes.contains(&n) {
-            let (sides, key) = crate::rooms::node_key(&placed_graph, n, &mut types, files)?;
-            if !node_tiles::candidates(&placed_graph, n, 8, "", &key, &sides, &master.tiles, &mut types, files)?.is_empty() {
-                return Err(data(format!("node {n}: virtual node tile at the room stage is not ported")));
-            }
         }
         node_tiles::explode(&mut placed_graph, n, tiles, &mut types, files)?;
     }
@@ -1141,9 +1161,13 @@ fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng:
     smoothing::smooth(&mut lg);
     probe(Stage::Graph("smooth", &lg));
     // Virtual nodes no tile fitted (`0x1420c6cd0`).
+    let nodes_before = lg.nodes.len();
     for &n in &virtual_nodes {
         node_tiles::virtual_junction(&mut lg, n, rng)?;
     }
+    // The nodes this split made were not in the tile list built at the start (`0x1420c7400` ran
+    // on the original nodes).
+    let junction_made: std::collections::HashSet<usize> = (nodes_before..lg.nodes.len()).collect();
 
     // Virtual edges split into their two banks.
     let mut split_types: HashMap<String, SplitType> = HashMap::new();
@@ -1172,12 +1196,12 @@ fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng:
         // copy the flag of the node they were made from).
         match lg.nodes[n].orig {
             Some(gi) => {
-                if !graph.nodes[gi].room_type.is_empty() || virtual_nodes.contains(&gi) {
+                if !graph.nodes[gi].room_type.is_empty() || virtual_nodes.contains(&gi) || placed_virtual.contains(&gi) {
                     continue;
                 }
             }
             None => {
-                if lg.nodes[n].fixed {
+                if lg.nodes[n].fixed || junction_made.contains(&n) {
                     continue;
                 }
             }

@@ -88,9 +88,6 @@ fn flood(map: &mut TileMap, tiles: &TileSet, p: (i32, i32), dir: usize) {
         return;
     }
     let blank = gf & 8 != 0;
-    if std::env::var("POE_FLOOD_DEBUG").is_ok() {
-        eprintln!("FLOOD from {p:?} dir {dir} ground {g} flags {gf:#x}");
-    }
     let mut queue = VecDeque::new();
     let q = (p.0 + DIR[dir].0, p.1 + DIR[dir].1);
     if in_lattice(map, q) && !edge_in_the_way(map, tiles, p, q, dir) {
@@ -324,9 +321,6 @@ pub fn mark_enclosed_fills(map: &mut TileMap, files: &dyn crate::generate::Files
             }
             // Footprint in corners: the tile's size, turned by odd orientations.
             let (tw, th) = if c.orientation & 1 != 0 && c.orientation <= 7 { (t.size.1 as i32, t.size.0 as i32) } else { (t.size.0 as i32, t.size.1 as i32) };
-            if std::env::var("POE_DBG_FILLS").is_ok() {
-                eprintln!("FILL cand {} at ({tx},{ty}) size {tw}x{th} uniform {uniform} outline open: top {:?}", c.path, (0..=tw).filter(|&i| open(map, tx + i, ty)).count());
-            }
             let enclosed = (0..=tw).all(|i| !open(map, tx + i, ty) && !open(map, tx + i, ty + th))
                 && (1..th).all(|j| !open(map, tx, ty + j) && !open(map, tx + tw, ty + j));
             if enclosed {

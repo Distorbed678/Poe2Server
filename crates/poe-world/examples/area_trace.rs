@@ -103,6 +103,20 @@ fn compare_rooms(map: &TileMap, lines: &[Vec<String>]) {
             }
         }
     }
+    // Runs of pieces with the same shift (client - ours), for rooms the port placed elsewhere.
+    let mut runs: Vec<(usize, usize, i32, i32, bool)> = Vec::new();
+    for (i, p) in map.pieces.iter().enumerate() {
+        let Some(t) = places.get(i) else { break };
+        let same_tile = t.3.ends_with(&p.path.to_ascii_lowercase()) && t.2 == p.orientation;
+        let (dx, dy) = (t.0 - p.x, t.1 - p.y);
+        match runs.last_mut() {
+            Some(r) if r.2 == dx && r.3 == dy && r.4 == same_tile => r.1 = i,
+            _ => runs.push((i, i, dx, dy, same_tile)),
+        }
+    }
+    for r in runs.iter().filter(|r| r.2 != 0 || r.3 != 0 || !r.4).take(12) {
+        println!("  pieces {}..={} shift ({}, {}) same tile and orientation: {}", r.0, r.1, r.2, r.3, r.4);
+    }
     println!("room pass: {} pieces, {bad} differ", map.pieces.len());
 }
 

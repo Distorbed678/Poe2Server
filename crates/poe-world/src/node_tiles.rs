@@ -272,12 +272,14 @@ fn choose(view: &LayoutView, node: usize, master: &Master, map: &TileMap, chosen
             let mut pos = (px, py);
             keep_off_border(&mut pos, (w, h), &key.edges.clone(), max_size, tiles, types, files)?;
             let mut orientation = c.orientation;
-            if node_o >= 8 {
+            if node_o == 8 {
                 if let Some(d) = quarter_turn(view, node, &sides, pos, c.size, tiles) {
                     sides = sides.map(|s| if s == 4 { 4 } else { (s + d as usize) & 3 });
                     orientation = turn(orientation, d);
                     key = key.oriented(d);
                 }
+            } else {
+                crate::rooms::fix_sides(&key, &mut sides, view, node, types, files)?;
             }
             return Ok(NodeTile { node, tile: c.tile, orientation, pos, size: key.size, sides, key, align });
         }
@@ -301,6 +303,7 @@ pub(crate) fn quarter_turn(view: &dyn EdgeView, node: usize, sides: &[usize; 4],
     let (minus, plus) = (turned(3), turned(1));
     let cost = side_cost(view, node, sides);
     let cost_minus = side_cost(view, node, &minus);
+    if false && std::env::var_os("POE_DBG_QT").is_some() { eprintln!("QT node {node} sides {sides:?} pos {pos:?} size {size:?} cost {cost} minus {minus:?} {cost_minus} allowed {} plus {plus:?} {} allowed {} towards {:?} at {:?}", allowed(&minus), side_cost(view, node, &plus), allowed(&plus), (0..4).map(|i| view.slots(node)[i].map(|e| view.towards(node, e))).collect::<Vec<_>>(), view.pos(node)); }
     if allowed(&minus) && cost_minus < cost {
         if allowed(&plus) && side_cost(view, node, &plus) < cost_minus { Some(1) } else { Some(3) }
     } else if allowed(&plus) && side_cost(view, node, &plus) < cost {
@@ -513,9 +516,6 @@ pub fn explode(g: &mut crate::rooms::PlacedGraph, node: usize, tiles: (i32, i32)
         }
     }
     let (sides, _) = node_key(&*g, node, types, files)?;
-    if std::env::var("POE_ROUTE_DEBUG").is_ok() {
-        eprintln!("EXPLODE node {node} at {:?} slots {:?} sides {:?} others {:?} pts {:?}", g.nodes[node], slots, sides, g.nodes.iter().enumerate().collect::<Vec<_>>(), slots.iter().flatten().map(|&e| (e, g.graph.edges[e].from, g.graph.edges[e].to, g.points[e].clone())).collect::<Vec<_>>());
-    }
     for (slot, e) in slots.iter().enumerate() {
         let Some(e) = *e else { continue };
         let side = sides[slot];
@@ -603,7 +603,17 @@ pub fn virtual_junction(lg: &mut LayoutGraph, n: usize, rng: &mut TerrainRng) ->
                     pending.push((a, (lg.edges[a].from != n) as usize, v));
                 }
                 (true, true) => {
-                    return Err(GenError::Unsupported(format!("tile-less virtual node {n}: two virtual edges side by side (0x1420c64f0) not ported")));
+                    // Two virtual edges side by side: one width from the first's range, one
+                    // shared corner point (`0x1420c64f0`), both edges get it.
+                    if lg.edges[a].edge_type != lg.edges[b].edge_type {
+                        return Err(GenError::Unsupported(format!("Mismatched edge-types while handling tile-less virtual node at {node:?}")));
+                    }
+                    let (lo, hi) = lg.edges[a].width;
+                    let w = rng.below((hi - lo + 1) as u32) as i32 + lo;
+                    let c = slots[live[(i + 2) % live.len()]].unwrap();
+                    let v = virtual_corner(towards(lg, a), node, towards(lg, b), towards(lg, c), w);
+                    pending.push((a, (lg.edges[a].from != n) as usize, v));
+                    pending.push((b, (lg.edges[b].from != n) as usize, v));
                 }
             }
         }
@@ -667,6 +677,49 @@ pub fn virtual_junction(lg: &mut LayoutGraph, n: usize, rng: &mut TerrainRng) ->
         }
     }
     Ok(())
+}
+
+/// `0x1420c64f0`: the corner of two virtual edges meeting at `node` (from the points `a` and `b`
+/// next to it, `c` the third edge's): the intersection of the two lines offset by `w` on one side,
+/// the candidate on the side of the midpoint of `a` and `b` unless `c` falls on another side.
+fn virtual_corner(a: (i32, i32), node: (i32, i32), b: (i32, i32), c: (i32, i32), w: i32) -> (i32, i32) {
+    let (x3, y3, x4, y4) = (a.0, a.1, node.0, node.1);
+    let (dy1, dx1) = (y4 - y3, x4 - x3);
+    let (dx2, dy2) = (b.0 - x4, b.1 - y4);
+    let m = ((b.0 + x3) / 2, (b.1 + y3) / 2);
+    let cross2 = (m.1 - y4) * dx2 - (m.0 - x4) * dy2;
+    let side1 = |p: (i32, i32)| 0 < (p.1 - y3) * dx1 - (p.0 - x3) * dy1;
+    let side2 = |p: (i32, i32)| 0 < (p.1 - y4) * dx2 - (p.0 - x4) * dy2;
+    let b4 = side1(m);
+    let _ = cross2;
+    let m2 = 0 < cross2;
+    let b5 = !(b4 == side1(c) && m2 == side2(c));
+    let len1 = crate::voronoi::isqrt((dy1 * dy1 + dx1 * dx1) as u32) as i32;
+    let len2 = crate::voronoi::isqrt((dy2 * dy2 + dx2 * dx2) as u32) as i32;
+    let off = -dy1 * w;
+    let (u11, u10);
+    if dx2 * -dy1 == -dy2 * dx1 {
+        let (ox, oy) = (off / len1, (w * dx1) / len1);
+        u11 = (x4 + ox, y4 + oy);
+        u10 = (x4 - ox, y4 - oy);
+    } else {
+        let (ox, oy) = (off / len1, (w * dx1) / len1);
+        let (x7, x6) = (ox + x3, x3 - ox);
+        let (ex, ey) = ((-dy2 * w) / len2, (dx2 * w) / len2);
+        let (y13, y8) = (y3 - oy, y3 + oy);
+        let det = dx1 * dy2 - dy1 * dx2;
+        let t1 = (((y8 - y4) - ey) * dx2 - ((x7 - x4) - ex) * dy2) / det;
+        let t2 = (((y13 - y4) + ey) * dx2 - ((x6 - x4) + ex) * dy2) / det;
+        u11 = (x7 + t1 * dx1, y8 + t1 * dy1);
+        u10 = (t2 * dx1 + x6, t2 * dy1 + y13);
+    }
+    if b4 == side1(u11) && m2 == side2(u11) {
+        if b5 { u11 } else { u10 }
+    } else if b5 {
+        u10
+    } else {
+        u11
+    }
 }
 
 /// `0x142196290`: squared distance of `p` from the segment `a`–`b` as a fraction

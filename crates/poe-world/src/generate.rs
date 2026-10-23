@@ -635,9 +635,12 @@ impl Master {
         let gft_file = GFTParser
             .parse(&files.read(gft)?)
             .map_err(|e| data_err(gft, e))?;
+        // A group without entries (all its lines commented out) does not exist for the client:
+        // a ground naming it fills from the `default` group (`DefaultHyenas` of `G2_1`).
         let fills = gft_file
             .sections
             .iter()
+            .filter(|s| !s.files.is_empty())
             .map(|s| {
                 let group = s
                     .files
