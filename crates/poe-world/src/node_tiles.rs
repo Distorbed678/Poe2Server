@@ -272,12 +272,14 @@ fn choose(view: &LayoutView, node: usize, master: &Master, map: &TileMap, chosen
             let mut pos = (px, py);
             keep_off_border(&mut pos, (w, h), &key.edges.clone(), max_size, tiles, types, files)?;
             let mut orientation = c.orientation;
-            if node_o >= 8 {
+            if node_o == 8 {
                 if let Some(d) = quarter_turn(view, node, &sides, pos, c.size, tiles) {
                     sides = sides.map(|s| if s == 4 { 4 } else { (s + d as usize) & 3 });
                     orientation = turn(orientation, d);
                     key = key.oriented(d);
                 }
+            } else {
+                crate::rooms::fix_sides(&key, &mut sides, view, node, types, files)?;
             }
             return Ok(NodeTile { node, tile: c.tile, orientation, pos, size: key.size, sides, key, align });
         }
@@ -301,6 +303,7 @@ pub(crate) fn quarter_turn(view: &dyn EdgeView, node: usize, sides: &[usize; 4],
     let (minus, plus) = (turned(3), turned(1));
     let cost = side_cost(view, node, sides);
     let cost_minus = side_cost(view, node, &minus);
+    if false && std::env::var_os("POE_DBG_QT").is_some() { eprintln!("QT node {node} sides {sides:?} pos {pos:?} size {size:?} cost {cost} minus {minus:?} {cost_minus} allowed {} plus {plus:?} {} allowed {} towards {:?} at {:?}", allowed(&minus), side_cost(view, node, &plus), allowed(&plus), (0..4).map(|i| view.slots(node)[i].map(|e| view.towards(node, e))).collect::<Vec<_>>(), view.pos(node)); }
     if allowed(&minus) && cost_minus < cost {
         if allowed(&plus) && side_cost(view, node, &plus) < cost_minus { Some(1) } else { Some(3) }
     } else if allowed(&plus) && side_cost(view, node, &plus) < cost {

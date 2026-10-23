@@ -822,27 +822,25 @@ impl EdgeTiler<'_> {
     }
 
     /// `0x1420b5f30`: turn the chain starting at `end` of `e` into a path.
-    fn start_chain(&mut self, e: usize, end: usize, rng: &mut TerrainRng) {
+    fn start_chain(&mut self, e: usize, end: usize, rng: &mut TerrainRng) -> Result<(), String> {
         if self.tilised[e] {
-            return;
+            return Ok(());
         }
         let mut it = ChainIter::new(self, e, end, false);
         while it.next(self) {}
         let last = it.cur;
         let start = self.g.endpoint(e, end);
         if self.trivial_chain(e, end, last, self.sizes[e] as i32) {
-            return;
+            return Ok(());
         }
         self.extend_dead_end(start);
         self.extend_dead_end(last);
         let mut p = self.build_path(e, end, last);
         if p.points.is_empty() {
-            return;
+            return Ok(());
         }
         if p.is_loop {
-            // Loops are split in two halves by the client (not met yet).
-            eprintln!("edge tiles: loop chain at edge {e} not ported");
-            return;
+            return self.tilise_loop(p, e, end, rng);
         }
         if self.fit(&mut p, rng) {
             for k in 1..p.tiles.len().saturating_sub(1) {
@@ -857,6 +855,49 @@ impl EdgeTiler<'_> {
             }
             self.pending.push(p);
         }
+        Ok(())
+    }
+
+    /// The loop branch of `0x1420b5f30`: the chain that ends where it started is split in two
+    /// halves at the middle point (the first keeps points `0..=n/2`, the second takes the rest
+    /// and the second edge of the first edge's far node); both are fitted as loops, the second
+    /// half's tiles (without its first and last) are appended to the first, a closing duplicate
+    /// is dropped, and the tiles are made at once (`0x1420b7f30`).
+    fn tilise_loop(&mut self, mut a: PathInfo, e: usize, end: usize, rng: &mut TerrainRng) -> Result<(), String> {
+        let n = a.points.len();
+        let half = n / 2;
+        let start = self.g.endpoint(e, end);
+        let far = self.g.endpoint(e, 1 - end);
+        let Some(e2) = self.g.nodes[far].slots.iter().flatten().copied().find(|&x| x != e) else {
+            return Err(format!("Could not split PathInfo for loop edge {e}"));
+        };
+        let mut b = PathInfo {
+            points: a.points[half..].to_vec(),
+            bits: a.bits[half.min(a.bits.len())..].to_vec(),
+            final_node: start,
+            edge: e2,
+            end: (self.g.endpoint(e2, 1) == far) as usize,
+            is_loop: true,
+            ..Default::default()
+        };
+        a.points.truncate(half + 1);
+        a.bits.truncate(half);
+        if !self.fit(&mut a, rng) || !self.fit(&mut b, rng) {
+            return Err(format!("Could not tilise loop edge starting at {:?}", self.g.nodes[start].pos));
+        }
+        if b.tiles.len() > 2 {
+            let mid: Vec<(i32, i32)> = b.tiles[1..b.tiles.len() - 1].to_vec();
+            a.tiles.extend(mid);
+        }
+        if a.tiles.len() < 3 {
+            return Err(format!("Could not tilise loop edge starting at {:?}", self.g.nodes[start].pos));
+        }
+        if a.tiles.last() == a.tiles.first() {
+            a.tiles.pop();
+        }
+        self.place_path(&a, rng)?;
+        self.order.push(a);
+        Ok(())
     }
 
     /// `0x1420b6950`: all chains into paths, in the client's order (see [`Self::order`]).
@@ -871,7 +912,7 @@ impl EdgeTiler<'_> {
         // Stable sorts: by edge priority (all 0 so far), then split edges first.
         first.sort_by_key(|&(e, _)| !self.g.edges[e].split);
         for (e, end) in first.into_iter().chain(second) {
-            self.start_chain(e, end, rng);
+            self.start_chain(e, end, rng)?;
         }
         while !self.pending.is_empty() {
             for k in 0..self.placed.len() {
@@ -1062,7 +1103,7 @@ impl EdgeTiler<'_> {
         let curve = if info.centred || info.hashed {
             Vec::new()
         } else if p.is_loop {
-            return Err("edge tiles: loop paths (0x1420b70e0) not ported".into());
+            crossings_loop(&p.tiles, info.size)
         } else {
             crossings(&p.tiles, info.size)
         };
@@ -1091,7 +1132,7 @@ impl EdgeTiler<'_> {
                     key.exits[side] = if self.is_room(nb) {
                         self.room_exit(t, nb, side, s)?
                     } else if !info.hashed {
-                        crossing_exit(side, curve[k], info.size)
+                        crossing_exit(side, curve.get(k).copied().unwrap_or((0.0, 0.0)), info.size)
                     } else {
                         hashed_exit(t.0, t.1, side as u32, info.size)
                     };
@@ -1179,6 +1220,34 @@ fn crossings(tiles: &[(i32, i32)], size: u32) -> Vec<(f32, f32)> {
     let mut out = Vec::new();
     for i in 0..tiles.len() - 1 {
         let mut w: Vec<(f32, f32)> = pts[i..i + 10].to_vec();
+        let mid = ((w[4].0 + w[5].0) / 2.0, (w[4].1 + w[5].1) / 2.0);
+        for k in 0..10 {
+            for j in 0..(10usize - k).saturating_sub(1) {
+                let a = (w[j].0 * 0.5, w[j].1 * 0.5);
+                let b = (w[j + 1].0 * 0.5, w[j + 1].1 * 0.5);
+                w[j] = (a.0 + b.0, a.1 + b.1);
+            }
+        }
+        out.push((w[0].0 - mid.0, w[0].1 - mid.1));
+    }
+    out
+}
+
+/// `0x1420b70e0`: [`crossings`] for a loop: no end padding, the ten control points of crossing
+/// `i` are the tile centres `i - 4 ..= i + 5` taken round the loop, and there is one crossing per
+/// tile.
+fn crossings_loop(tiles: &[(i32, i32)], size: u32) -> Vec<(f32, f32)> {
+    let h = (size >> 1) & 0x7fff_ffff;
+    let centre = |t: (i32, i32)| -> (f32, f32) {
+        let x = (t.0 as u32).wrapping_add(h) as f32 + 0.5;
+        let y = (t.1 as u32).wrapping_add(h) as f32 + 0.5;
+        (x * 23.0, y * 23.0)
+    };
+    let pts: Vec<(f32, f32)> = tiles.iter().map(|&t| centre(t)).collect();
+    let n = pts.len() as i64;
+    let mut out = Vec::new();
+    for i in 0..n {
+        let mut w: Vec<(f32, f32)> = (0..10i64).map(|j| pts[(j - 4 + i).rem_euclid(n) as usize]).collect();
         let mid = ((w[4].0 + w[5].0) / 2.0, (w[4].1 + w[5].1) / 2.0);
         for k in 0..10 {
             for j in 0..(10usize - k).saturating_sub(1) {

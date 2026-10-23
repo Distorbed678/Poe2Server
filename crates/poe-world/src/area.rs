@@ -845,6 +845,10 @@ fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng:
     for p in placed.iter_mut() {
         // `0x1420c9970` first lets a room that does not fit move (`0x1420c9260`).
         let align = crate::rooms::node_alignment(&placed_graph, p.node, &mut types, files)?;
+        let before = p.pos;
+        if std::env::var_os("POE_DEBUG_ROOMS").is_some() {
+            eprintln!("settle node {} was {:?}", p.node, before);
+        }
         if !crate::rooms::settle(&map, p, align, placed_graph.graph.region, &mut types, files)? {
             return Err(data(format!("Overlapping node tiles at {:?}", p.pos)));
         }

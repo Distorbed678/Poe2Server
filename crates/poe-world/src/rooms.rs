@@ -678,10 +678,10 @@ pub struct PlacedRoom {
 
 /// `0x1420b8b70`: for a fixed-orientation node, when the room's corners disagree with the
 /// edges, turn the side assignment (+1, then −1, then two mirrorings) until they agree.
-fn fix_sides(
+pub(crate) fn fix_sides(
     key: &TileKey,
     sides: &mut [usize; 4],
-    g: &PlacedGraph,
+    g: &dyn EdgeView,
     node: usize,
     types: &mut TerrainTypes,
     files: &dyn Files,
@@ -837,7 +837,9 @@ pub fn place_node_opt(
                 px = px.min(tiles.0 - m - w).max(0);
             }
             let mut orientation = c.orientation;
-            if node_orientation(&g.graph.nodes[node].orientation) < 8 {
+            // `0x1420c87a0` turns only `(any)` nodes (orientation byte 8); every other node,
+            // `(best)` included, gets its sides checked against the key (`0x1420b8b70`).
+            if node_orientation(&g.graph.nodes[node].orientation) != 8 {
                 fix_sides(&key, &mut sides, g, node, types, files)?;
             } else if let Some(d) = crate::node_tiles::quarter_turn(g, node, &sides, (px, py), c.size, tiles) {
                 sides = sides.map(|s| if s == 4 { 4 } else { (s + d as usize) & 3 });
