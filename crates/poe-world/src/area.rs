@@ -592,7 +592,7 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
     // The graph's own grounds reach the lattice through the per-room settle; their `.gt` flags
     // (for example `CarverUpperGround`: 0x1f, which makes the fill treat it as none) are not in
     // the tile set's table unless a tile uses them.
-    for g in pass.grounds.iter().flatten() {
+    for g in pass.grounds.iter().flatten().filter(|_| std::env::var("POE_NO_GRFLAGS").is_err()) {
         let key = g.to_ascii_lowercase().replace('\\', "/");
         if !map.ground_flags.contains_key(&key) {
             let f = crate::rooms::ground_flags(&crate::text::decode_utf16(&files.read(&key)?));

@@ -148,6 +148,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let i = next.fetch_add(1, Ordering::Relaxed);
                     let Some((area, seed, topology, orientation)) = keys.get(i).cloned() else { break };
                     let (tx, rx) = mpsc::channel();
+                    let area_c = area.clone();
                     std::thread::spawn(move || {
                         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                             let mut rng = TerrainRng::new(seed);
@@ -162,6 +163,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     });
                     let ours = rx.recv_timeout(Duration::from_secs(budget)).unwrap_or_else(|_| {
                         hung.fetch_add(1, Ordering::Relaxed);
+                        eprintln!("HUNG {area_c} {seed} {topology} {orientation}");
                         Ours::Timeout(budget)
                     });
                     results.lock().unwrap()[i] = Some(ours);
