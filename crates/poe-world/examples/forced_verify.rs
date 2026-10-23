@@ -23,8 +23,8 @@
 //!   topology and orientation are replaced, other rows are kept (so batches accumulate).
 //! - `--threads N` (default: all cores).
 //! - `POE_FORCED_BUDGET=<seconds>` (default 120): per-job time budget; a job over it is
-//!   abandoned (its thread keeps spinning) and reported as a fail. After eight hung jobs the
-//!   run stops.
+//!   abandoned (its thread keeps spinning) and reported as a fail. After eight hung jobs
+//!   (`POE_FORCED_MAX_HUNG`) the run stops; each hung job is logged to stderr.
 //!
 //! A per-area summary (`matched/checked`) goes to stderr.
 
@@ -118,6 +118,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let path = positional.first().ok_or("usage: forced_verify <batch-results.tsv> [--out forced-results.tsv] [--threads N]")?;
     let budget: u64 = std::env::var("POE_FORCED_BUDGET").ok().map(|s| s.parse()).transpose()?.unwrap_or(120);
+    let max_hung: usize = std::env::var("POE_FORCED_MAX_HUNG").ok().map(|s| s.parse()).transpose()?.unwrap_or(8);
     let (jobs, skipped) = parse_batch(&std::fs::read_to_string(path)?);
     let gd: &'static GameData = Box::leak(Box::new(GameData::open(
         Path::new("GameFiles"),
@@ -146,6 +147,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 loop {
                     let i = next.fetch_add(1, Ordering::Relaxed);
                     let Some((area, seed, topology, orientation)) = keys.get(i).cloned() else { break };
+                    let key = (area.clone(), seed, topology, orientation);
                     let (tx, rx) = mpsc::channel();
                     std::thread::spawn(move || {
                         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -161,11 +163,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     });
                     let ours = rx.recv_timeout(Duration::from_secs(budget)).unwrap_or_else(|_| {
                         hung.fetch_add(1, Ordering::Relaxed);
+                        eprintln!("timeout after {budget}s: {}\t{}\t{}\t{}", key.0, key.1, key.2, key.3);
                         Ours::Timeout(budget)
                     });
                     results.lock().unwrap()[i] = Some(ours);
-                    if hung.load(Ordering::Relaxed) >= 8 {
-                        eprintln!("eight jobs hung; stopping");
+                    if (i + 1) % 5000 == 0 {
+                        eprintln!("{} of {} layouts done", i + 1, keys.len());
+                    }
+                    if hung.load(Ordering::Relaxed) >= max_hung {
+                        eprintln!("{max_hung} jobs hung; stopping");
                         std::process::exit(2);
                     }
                 }

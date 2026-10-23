@@ -1058,6 +1058,7 @@ fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng:
     lattice::border_floods(&mut map, &master.tiles);
     probe(Stage::Lattice("flood", &map));
     lattice::mark_unwalkable(&mut map, &master.tiles);
+    lattice::mark_enclosed_fills(&mut map, files).map_err(data)?;
     probe(Stage::Lattice("heights", &map));
     let default_ground = graph.ground_types.iter().find(|g| !g.is_empty()).cloned();
     lattice::settle(&mut map, default_ground.as_deref());

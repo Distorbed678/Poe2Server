@@ -1,4 +1,4 @@
-//! The collision grid (`docs/re/terrain/collision.md`): the four 4-bit cell layers the client
+//! The collision grid (`docs/re/terrain/doodads.md` in the hub): the four 4-bit cell layers the client
 //! builds from the generated tile map in `0x141d0e5f0` (phase `terrain_e5f0`), in the `PWG1`
 //! format of `poe_game::grid::Grid`.
 //!
@@ -7,7 +7,7 @@
 //! flags), turned by the record's orientation and written into layers 0 (low nibble: walk) and 1
 //! (high nibble: projectile) as the minimum with what is there (a 5 counts as unset); records
 //! without a sub-tile, or with blocked flags, clear whole 23×23 blocks. Layers 2 and 3 stay at 5
-//! until doodads write to them.
+//! in every export checked. Static doodads stamp their hulls into layers 0 and 1 afterwards.
 
 use std::collections::HashMap;
 

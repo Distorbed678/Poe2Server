@@ -508,7 +508,7 @@ pub struct TerrainConfig {
     /// client's. Off by default until the generator covers every area.
     #[serde(default)]
     pub generate: bool,
-    /// Use the walkability grid the server generates (`poe-world`, docs/architecture/collision.md)
+    /// Use the walkability grid the server generates (`poe-world`, docs/architecture/instance-world.md in the hub)
     /// instead of the one the client uploads or the layout cache holds. It is used only when the
     /// server's tile hash equals the client's; otherwise the uploaded grid stands in. Off by
     /// default until the generator covers every area.

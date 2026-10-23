@@ -284,6 +284,65 @@ pub fn mark_unwalkable(map: &mut TileMap, tiles: &TileSet) {
     }
 }
 
+/// `0x141fe0b40` (end of `0x141fe0fd0`): a tile whose edge types are empty or wildcards and with one ground on all
+/// four corners (a fill tile; not an inheriting `.tdt`) whose footprint corners on the outline
+/// are all unwalkable (flag 8, or off the map) becomes unwalkable inside as well: every corner
+/// of its footprint gets flag 8. Tiles are visited row by row, so earlier marks count for later
+/// tiles. (`0x141fe09b0` is the outline test, `0x141fd5c50` the tile test.)
+pub fn mark_enclosed_fills(map: &mut TileMap, files: &dyn crate::generate::Files) -> Result<(), crate::generate::GenError> {
+    let (w, h) = (map.width as i32, map.height as i32);
+    let mut tdts: std::collections::HashMap<String, crate::tdt::Tdt> = std::collections::HashMap::new();
+    let mut wildcards: std::collections::HashMap<String, bool> = std::collections::HashMap::new();
+    for ty in 0..h {
+        for tx in 0..w {
+            let Some(c) = map.get(tx as u32, ty as u32) else { continue };
+            if c.offset != (0, 0) {
+                continue;
+            }
+            let key = c.path.to_ascii_lowercase();
+            if !tdts.contains_key(&key) {
+                tdts.insert(key.clone(), crate::generate::load_tdt(files, &c.path)?);
+            }
+            let t = &tdts[&key];
+            let open = |m: &TileMap, x: i32, y: i32| m.point_index(x, y).is_some_and(|i| m.lattice[i].flags & 8 == 0);
+            let uniform = t.grounds.iter().all(|g| g == &t.grounds[0]);
+            if t.inherits.is_some() || !uniform {
+                continue;
+            }
+            // `0x141ef23f0`: an edge reference passes when it is empty or names a wildcard `.et`.
+            let mut edgeless = true;
+            for e in t.edges.iter().flatten() {
+                let ek = e.to_ascii_lowercase();
+                if !wildcards.contains_key(&ek) {
+                    let et = crate::rooms::EdgeType::parse(&crate::text::decode_utf16(&files.read(&ek)?));
+                    wildcards.insert(ek.clone(), et.wildcard);
+                }
+                edgeless &= wildcards[&ek];
+            }
+            if !edgeless {
+                continue;
+            }
+            // Footprint in corners: the tile's size, turned by odd orientations.
+            let (tw, th) = if c.orientation & 1 != 0 && c.orientation <= 7 { (t.size.1 as i32, t.size.0 as i32) } else { (t.size.0 as i32, t.size.1 as i32) };
+            if std::env::var("POE_DBG_FILLS").is_ok() {
+                eprintln!("FILL cand {} at ({tx},{ty}) size {tw}x{th} uniform {uniform} outline open: top {:?}", c.path, (0..=tw).filter(|&i| open(map, tx + i, ty)).count());
+            }
+            let enclosed = (0..=tw).all(|i| !open(map, tx + i, ty) && !open(map, tx + i, ty + th))
+                && (1..th).all(|j| !open(map, tx, ty + j) && !open(map, tx + tw, ty + j));
+            if enclosed {
+                for y in ty..=ty + th {
+                    for x in tx..=tx + tw {
+                        if let Some(i) = map.point_index(x, y) {
+                            map.lattice[i].flags |= 8;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 /// `0x1420b9820` (height offsets not ported: the Riverbank has none): every corner is set; one
 /// without a ground (or never set) takes the graph's default ground (graph +0xb0) if any.
 pub fn settle(map: &mut TileMap, default_ground: Option<&str>) {

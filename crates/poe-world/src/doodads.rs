@@ -1,4 +1,4 @@
-//! Doodads (`docs/re/terrain/doodads.md`): the objects a room (`.arm`) brings to the map, and
+//! Doodads (`docs/re/terrain/doodads.md` in the hub): the objects a room (`.arm`) brings to the map, and
 //! the doodad hash the client reports.
 //!
 //! `TerrainGen_Doodads` (`0x141ff5550`) walks every region's room placements (the list the
@@ -6,9 +6,10 @@
 //! (`0x141ff3310`) for each. A placement's doodad entries are the room's `doodads`; the cell
 //! of each comes from `0x141fe78d0`: the entry's cell inside the room, turned by the placement's
 //! orientation (table `0x142f020c8`) within the room's `w × h` tiles, plus the placement's
-//! corner. Entries whose object type has `+0x2d0 == 0` add `y + murmur(path) + (x << 16)` to
-//! the doodad hash. No random draws are involved (the ones in the trace belong to the
-//! server-only scatter branch, out of scope).
+//! corner. [`resolve`] then follows each entry's `AOSet` picks (`0x141fe7520`, drawing from the
+//! layout's random stream, in placement order). Entries whose object type has `+0x2d0 == 0` add
+//! `y + murmur(path) + (x << 16)` to the doodad hash; static types stamp their hull into the
+//! collision grid ([`crate::collision`]).
 
 use crate::{
     generate::{Files, Room},
@@ -128,6 +129,11 @@ pub fn type_solid(gd: &poe_data::GameData, kind: &str) -> bool {
 /// Whether objects of type `kind` count for the hash (see above).
 pub fn type_counts(gd: &poe_data::GameData, kind: &str) -> bool {
     let Ok(t) = poe_data::template::ObjectTemplate::load(gd, kind) else { return false };
+    // The type has a template of its own: a path that only has an `.ao` (extending another
+    // type, such as `Metadata/Chests/SirenEggs/SirenEgg_02` in G1_3) is not an object type.
+    if !t.files.last().is_some_and(|f| f.ends_with(".ot")) {
+        return false;
+    }
     !t.component("BaseEvents").iter().any(|(k, v)| match k.as_str() {
         "server_only" | "client_only" => v == "true",
         "league_category" => !v.is_empty(),
@@ -356,13 +362,30 @@ fn pick(cache: &mut AoCache, path: &str, rng: &mut TerrainRng) -> Option<Pick> {
     }
 }
 
+/// `(counts for the hash, static)` of an object type, read once per process: both come from the
+/// type's `.ot`/`.ao` files, and reading them through `GameData` takes its bundle lock, which
+/// serialised the threads of the batch tools. One process uses one game version.
+fn type_flags(gd: &poe_data::GameData, kind: &str) -> (bool, bool) {
+    use std::sync::{Mutex, OnceLock};
+    static FLAGS: OnceLock<Mutex<std::collections::HashMap<String, (bool, bool)>>> = OnceLock::new();
+    let map = FLAGS.get_or_init(Default::default);
+    if let Some(f) = map.lock().unwrap_or_else(|e| e.into_inner()).get(kind) {
+        return *f;
+    }
+    let counts = type_counts(gd, kind);
+    // An `.ao`-only path is no object type, so it neither counts nor stamps a hull; `type_solid`
+    // reads the template only.
+    let own = poe_data::template::ObjectTemplate::load(gd, kind).is_ok_and(|t| t.files.last().is_some_and(|f| f.ends_with(".ot")));
+    let f = (counts, own && type_solid(gd, kind));
+    map.lock().unwrap_or_else(|e| e.into_inner()).insert(kind.to_string(), f);
+    f
+}
+
 /// The doodad pass over the placed doodads in placement order: each entry resolves its object
 /// file (drawing from `rng` for `AOSet` choices), entries that resolve to nothing are dropped, and
 /// [`Doodad::counted`] is set from the object type.
 pub fn resolve(gd: &poe_data::GameData, files: &dyn Files, rng: &mut TerrainRng, doodads: Vec<Doodad>) -> Vec<Doodad> {
     let mut cache = AoCache::new(files);
-    let mut kinds: std::collections::HashMap<String, bool> = std::collections::HashMap::new();
-    let mut solids: std::collections::HashMap<String, bool> = std::collections::HashMap::new();
     let mut out = Vec::with_capacity(doodads.len());
     let dbg = std::env::var("POE_DBG_DOODAD_ORDER").is_ok();
     for (i, mut d) in doodads.into_iter().enumerate() {
@@ -381,8 +404,7 @@ pub fn resolve(gd: &poe_data::GameData, files: &dyn Files, rng: &mut TerrainRng,
         d.leaf = p.leaf;
         d.flip = d.mirrored ^ p.mirror ^ d.entry_flip;
         d.scale = d.entry_scale * p.scale;
-        d.counted = *kinds.entry(d.kind.clone()).or_insert_with(|| type_counts(gd, &d.kind));
-        d.solid = *solids.entry(d.kind.clone()).or_insert_with(|| type_solid(gd, &d.kind));
+        (d.counted, d.solid) = type_flags(gd, &d.kind);
         out.push(d);
     }
     out

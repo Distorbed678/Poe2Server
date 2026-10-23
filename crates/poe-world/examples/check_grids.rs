@@ -105,6 +105,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 eprintln!("FP {} {} zeros {} client-zero {} kind {}", name, d.leaf.rsplit('/').next().unwrap_or(""), zeros.len(), ok, d.kind);
                             }
                         }
+                        if let Ok(v) = std::env::var("POE_DBG_NEAR") {
+                            let n: Vec<i32> = v.split(',').filter_map(|x| x.parse().ok()).collect();
+                            for d in doodads.iter().filter(|d| (d.x - n[0]).abs() <= n[2] && (d.y - n[1]).abs() <= n[2]) {
+                                eprintln!("NEAR {name} ({}, {}) {:.3} counted {} solid {} kind {} path {} leaf {}", d.x, d.y, d.angle, d.counted, d.solid, d.kind, d.path, d.leaf);
+                            }
+                        }
                         if let Some(d) = &dump {
                             std::fs::create_dir_all(d).ok();
                             std::fs::write(d.join(format!("{name}.bin")), &ours).ok();
@@ -158,6 +164,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         let e = hist.entry(key).or_default();
                                         e.0 += 1;
                                         e.1 += tiles.contains_key(&(tx, ty)) as usize;
+                                    }
+                                }
+                                // The worst tiles by differing cells, with their .tdt.
+                                let mut worst: Vec<_> = tiles.iter().map(|(&t, &n)| (n, t)).collect();
+                                worst.sort_by(|a, b| b.cmp(a));
+                                for (n, (tx, ty)) in worst.into_iter().take(3).filter(|w| w.0 >= 100) {
+                                    if let Some(c) = map.get(tx, ty) {
+                                        eprintln!("  WORST {name} tile ({tx},{ty}) {n} cells {} sub {} o{}", c.path, c.sub, c.orientation);
                                     }
                                 }
                                 for (k, (n, bad)) in hist {

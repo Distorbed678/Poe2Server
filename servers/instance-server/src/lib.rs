@@ -660,7 +660,7 @@ impl InstanceServer {
 
     /// The collision grid the server generates for the instance's layout (`[terrain]
     /// generated_grid`): `poe-world` makes the `PWG1` bytes and `poe-game` reads them, so the
-    /// two crates stay independent (docs/architecture/collision.md). `None` when the generator
+    /// two crates stay independent (docs/architecture/instance-world.md in the hub). `None` when the generator
     /// fails or its tile hash differs from the client's (the caller falls back).
     async fn generated_grid(&self, area: &str, seed: u32, client_hash: u32, instance: Option<u32>) -> Option<spawn::Grid> {
         let data = self.data.clone();
