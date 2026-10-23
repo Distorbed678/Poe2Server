@@ -942,6 +942,12 @@ fn corridors(
     if graph.edges.is_empty() {
         return Ok(());
     }
+    // `0x1420ac3e0`: the corridor stage runs only when some edge batch is non-empty (void and
+    // removed edges make none); otherwise records, corridors, doors and room assignment are all
+    // skipped (a container graph whose only edge is a void one).
+    if !(0..graph.edges.len()).any(|e| !removed[e] && !fields[e].void) {
+        return Ok(());
+    }
     // `0x1420a5e50`: one record per placed room with a `below(128)` cost.
     let mut records: Vec<Record> = Vec::new();
     let grow = |records: &mut Vec<Record>, grid: &Grid, rng: &mut TerrainRng| {
