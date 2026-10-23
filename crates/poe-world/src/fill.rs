@@ -126,7 +126,7 @@ impl Fill<'_> {
                     .map(|(k, _)| (k.grounds[0].clone(), k.heights[0])),
             }
         };
-        let tile_ground = tdt.point_grounds.first().cloned().flatten();
+        let tile_ground = tdt.point_grounds.first().cloned().flatten().map(|g| g.to_ascii_lowercase().replace('\\', "/"));
         let loose = |g: &Option<String>| g.as_ref().is_none_or(|g| self.map.gt_flags(g) & 8 != 0);
         let Some((_, height)) = uniform(&grid[cy][cx]) else { return false };
         (0..h as usize).all(|dy| {

@@ -585,11 +585,17 @@ pub fn load_tdt(files: &dyn Files, path: &str) -> Result<Tdt, GenError> {
     // real edge: an object of the tile's model data (`.tmd`) with `Spawner` in its type path.
     let wild = |e: &str| e.to_ascii_lowercase().contains("wildcard");
     if tdt.edges.iter().flatten().all(|e| wild(e)) {
-        if let Some(tgt) = &tdt.tgt {
-            let tmd = format!("{}.tmd", tgt.trim_end_matches(".tgt").trim_end_matches(".TGT"));
+        if let Some(tmd) = &tdt.tmd {
             if let Ok(bytes) = files.read(&tmd.to_ascii_lowercase()) {
                 let text = crate::text::decode_utf16(&bytes);
-                tdt.spawner = text.lines().any(|l| l.rsplit('"').nth(1).is_some_and(|t| t.contains("Spawner")));
+                // Text `.tmd` (version 8): the quoted object type is the last field. Binary ones keep
+                // their object types in a string table (any string with `Spawner` counts).
+                tdt.spawner = if text.trim_start().starts_with("version") {
+                    text.lines().any(|l| l.rsplit('"').nth(1).is_some_and(|t| t.contains("Spawner")))
+                } else {
+                    let pat: Vec<u8> = "Spawner".encode_utf16().flat_map(|c| c.to_le_bytes()).collect();
+                    bytes.windows(pat.len()).any(|w| w == pat.as_slice())
+                };
             }
         }
     }

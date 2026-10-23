@@ -38,10 +38,12 @@ pub struct Tdt {
     /// Orientations the tile may be used in (data +0x171, bit per orientation; 0 or 0xff:
     /// all), intersected with the `.tst` rotation list by the tile-set index (`0x141d09ab0`).
     pub orientation_mask: u8,
-    /// Data `+0x16f` bit 1 (`0x141d053a0`): the tile's model data (`.tmd` next to its `.tgt`) has an
+    /// Data `+0x16f` bit 1 (`0x141d053a0`): the tile's model data (the `.tmd` the tile data names) has an
     /// object whose type path contains `Spawner`. Only filled by `load_tdt` for tiles without a
     /// real edge (the only ones `place_tile` asks).
     pub spawner: bool,
+    /// The tile's model data path (`.tmd`, the string after the corner points; `0x141d06730`).
+    pub tmd: Option<String>,
     /// Override flags of an inheriting tile (see the module docs).
     pub inherit_flags: u8,
     /// Sub-tiles (row-major in the tile's own orientation, `size.0 × size.1`) with their cell
@@ -184,6 +186,9 @@ impl Tdt {
         } else if f & 0x10 != 0 {
             t.size = self.size;
         }
+        if f & 2 != 0 {
+            t.tmd = self.tmd.clone();
+        }
         if f & 0x10 != 0 {
             t.hull_masks = self.hull_masks.clone();
             t.subtiles = self.subtiles.clone();
@@ -278,6 +283,9 @@ impl Tdt {
             }
         }
         if !has(8) {
+            if has(2) {
+                self.tmd = r.string().ok().flatten().filter(|s| !s.is_empty());
+            }
             return Ok(());
         }
         let n = (self.size.0 as usize + 1) * (self.size.1 as usize + 1);
@@ -291,6 +299,9 @@ impl Tdt {
             for _ in 0..n {
                 self.point_heights.push(r.u8()? as i8);
             }
+        }
+        if has(2) {
+            self.tmd = r.string().ok().flatten().filter(|s| !s.is_empty());
         }
         Ok(())
     }
