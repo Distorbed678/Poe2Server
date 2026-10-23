@@ -1083,13 +1083,17 @@ fn assign_rooms(files: &dyn Files, graph: &Graph, rooms: &[DungeonRoom], grid: &
         if !r.generic || r.unique {
             continue;
         }
+        // The matcher merges consecutive entries of one `.arm` (`0x141f9b430`): a room listed
+        // twice in a row in the `.rs` (G3_5 `1x1/tri_01.arm`) keeps the first line's weight.
+        let ri = rooms.iter().position(|q| q.path.eq_ignore_ascii_case(&r.path)).unwrap_or(ri);
+        let weight = rooms[ri].weight;
         for o in 0..8u8 {
             if r.mask >> o & 1 == 0 {
                 continue;
             }
             let exits = grid.turned(r.units.0, r.units.1, &r.exits, o);
             let size = if o & 1 == 1 { (r.units.1, r.units.0) } else { r.units };
-            entries.push((ri, o, size, exits, r.weight));
+            entries.push((ri, o, size, exits, weight));
         }
     }
     for i in 0..grid.rooms.len() {
@@ -2289,6 +2293,7 @@ fn spread(rooms: &[DungeonRoom], grid: &mut Grid, pos: (i32, i32), ground: Optio
         }
     }
     sizes.retain(|e| e.1 != 0);
+    if std::env::var("POE_DBG_SPREAD").is_ok() { eprintln!("SPREAD pos {pos:?} ground {ground:?} sizes {sizes:?} rooms {:?}", rooms.iter().filter(|r| r.blank && r.corners[0] == ground).map(|r| (r.path.rsplit('/').next().unwrap().to_string(), r.units, r.weight)).collect::<Vec<_>>()); }
     if sizes.is_empty() {
         return Ok(false);
     }
