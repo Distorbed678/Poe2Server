@@ -513,7 +513,7 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
             return Err(unsupported(format!("dungeon node {n} ({}): no suitable room", node.room_type)));
         }
         let total: u32 = kept.iter().map(|k| k.0.weight).sum();
-        if std::env::var("POE_DBG").is_ok() { eprintln!("DBG pick node {n} total {total} kept {:?}", kept.iter().map(|k| (rooms[k.0.room].path.rsplit('/').next().unwrap().to_string(), k.0.o, k.0.weight)).collect::<Vec<_>>()); }
+        if std::env::var("POE_DBG").is_ok() { eprintln!("DBG pick draws {} node {n} total {total} kept {:?}", rng.log.as_ref().map_or(0, |l| l.len()), kept.iter().map(|k| (rooms[k.0.room].path.rsplit('/').next().unwrap().to_string(), k.0.o, k.0.weight)).collect::<Vec<_>>()); }
         let mut k = pick(&kept, rng.below(total));
         if repeats(&grid, &rooms[kept[k].0.room].path, kept[k].1, kept[k].0.size) {
             k = pick(&kept, rng.below(total));

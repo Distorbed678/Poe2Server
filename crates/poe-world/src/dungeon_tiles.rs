@@ -482,7 +482,7 @@ impl TilePass<'_> {
                 }
                 let total = list.iter().map(|c| c.weight).sum();
                 if std::env::var("POE_DBG_KEYS").is_ok() {
-                    eprintln!("DBG key {pos:?} total {total} {} slot ({x},{y}) o{o} {key:?}", p.path.rsplit('/').next().unwrap_or(""));
+                    eprintln!("DBG key draws {} {pos:?} total {total} {} slot ({x},{y}) o{o} {key:?}", rng.log.as_ref().map_or(0, |l| l.len()), p.path.rsplit('/').next().unwrap_or(""));
                 }
                 let c = pick(list, rng.below(total)).expect("non-empty list");
                 let def = &self.master.tiles.tiles[c.tile];
