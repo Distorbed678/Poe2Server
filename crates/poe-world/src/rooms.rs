@@ -721,7 +721,7 @@ fn fix_sides(
 
 /// `0x141ef3290`: a node's alignment: an `align<N>` description, else the largest size of its
 /// edges' types.
-fn node_alignment(
+pub(crate) fn node_alignment(
     g: &PlacedGraph,
     node: usize,
     types: &mut TerrainTypes,
@@ -755,6 +755,23 @@ pub fn place_node(
     files: &dyn Files,
     rng: &mut TerrainRng,
 ) -> Result<PlacedRoom, GenError> {
+    place_node_opt(set, tile_set, g, node, tiles, placed, types, files, rng)?
+        .ok_or_else(|| GenError::Unsupported(format!("node {node} ({:?}): no room fits", g.graph.nodes[node].room_type)))
+}
+
+/// [`place_node`] returning `None` when no entry fits (the client's `0x1420c87a0` then leaves the
+/// node to the failure list, which the caller explodes or tiles later).
+pub fn place_node_opt(
+    set: &RoomSet,
+    tile_set: &TileSet,
+    g: &PlacedGraph,
+    node: usize,
+    tiles: (i32, i32),
+    placed: &[PlacedRoom],
+    types: &mut TerrainTypes,
+    files: &dyn Files,
+    rng: &mut TerrainRng,
+) -> Result<Option<PlacedRoom>, GenError> {
     let (mut list, mut sides) = room_candidates(set, tile_set, g, node, types, files)?;
     let align = node_alignment(g, node, types, files)?;
     let mut max_size = 0;
@@ -768,10 +785,7 @@ pub fn place_node(
         let total: u32 = list.iter().map(|c| c.weight).sum();
         let mut r = rng.below(total);
         if list.is_empty() {
-            return Err(GenError::Unsupported(format!(
-                "node {node} ({:?}): no room fits",
-                g.graph.nodes[node].room_type
-            )));
+            return Ok(None);
         }
         let mut i = 0;
         while i + 1 < list.len() && r >= list[i].weight {
@@ -830,7 +844,7 @@ pub fn place_node(
                 orientation = crate::node_tiles::turn(orientation, d);
                 key = key.oriented(d);
             }
-            return Ok(PlacedRoom {
+            return Ok(Some(PlacedRoom {
                 node,
                 room: c.room,
                 tile: c.tile,
@@ -839,7 +853,7 @@ pub fn place_node(
                 size: key.size,
                 sides,
                 key,
-            });
+            }));
         }
         list.retain(|o| !(o.room == c.room && o.tile == c.tile && o.orientation == c.orientation));
     }
@@ -1161,4 +1175,89 @@ pub fn repel(
         }
     }
     Ok(())
+}
+
+/// Spiral direction `d` (0..3) under region orientation `ro` as an index into [`SPIRAL_VECTORS`]
+/// (`0x141f8c430`, a 9×9 byte table by orientation clamped to 8).
+fn spiral_dir(d: u8, ro: u8) -> usize {
+    const TABLE: [[u8; 4]; 9] =
+        [[0, 1, 2, 3], [1, 2, 3, 0], [2, 3, 0, 1], [3, 0, 1, 2], [0, 3, 2, 1], [1, 0, 3, 2], [2, 1, 0, 3], [3, 2, 1, 0], [0, 1, 2, 3]];
+    TABLE[ro.min(8) as usize][d as usize & 3] as usize
+}
+
+/// Up, right, down, left (`0x142f0c608`).
+const SPIRAL_VECTORS: [(i32, i32); 4] = [(0, -1), (1, 0), (0, 1), (-1, 0)];
+
+/// `0x1420c9260`, the start of `0x1420c9970`: a room (or tile) whose margin rectangle does not
+/// fit where the placement and the repulsion left it (cells taken, a non-wildcard edge on the map
+/// border, or corner grounds that disagree with ones already in the lattice) moves in a square
+/// spiral of `align`-sized steps (step counts 1, 1, 2, 2, ... up to 9, directions through the
+/// region's table): first with the margin rectangle (left and top `align` where those sides have
+/// an edge, right and bottom the edge's size), then with the room alone. Returns whether a place
+/// was found (the client throws "Overlapping node tiles" otherwise).
+pub fn settle(
+    map: &crate::generate::TileMap,
+    p: &mut PlacedRoom,
+    align: i32,
+    ro: u8,
+    types: &mut TerrainTypes,
+    files: &dyn Files,
+) -> Result<bool, GenError> {
+    let (w, h) = (p.size.0 as i32, p.size.1 as i32);
+    let (mw, mh) = (map.width as i32, map.height as i32);
+    let key = p.key.clone();
+    let mut size_of = |i: usize| -> Result<i32, GenError> {
+        Ok(match &key.edges[i] {
+            None => 0,
+            Some(e) => types.edge(files, e)?.size as i32,
+        })
+    };
+    let l = if key.edges[3].is_some() { align } else { 0 };
+    let t = if key.edges[0].is_some() { align } else { 0 };
+    let (rw, rh) = (w + size_of(1)? + l, h + size_of(2)? + t);
+    // A side with a non-wildcard edge may not touch the map border.
+    let mut border = vec![[false; 4]; 1];
+    for i in 0..4 {
+        if let Some(e) = &key.edges[i] {
+            border[0][i] = !types.edge(files, e)?.wildcard;
+        }
+    }
+    let border = border[0];
+    let border_ok = |x: i32, y: i32| !((x == 0 && border[3]) || (y == 0 && border[0]) || (w + x == mw && border[1]) || (h + y == mh && border[2]));
+    // `0x141d0daf0`: the four corner grounds against the lattice's.
+    let lattice_ok = |x: i32, y: i32| -> bool {
+        let corners = [(x, y, 0), (x + w, y, 1), (x + w, y + h, 2), (x, y + h, 3)];
+        corners.iter().all(|&(cx, cy, k)| {
+            let Some(i) = map.point_index(cx, cy) else { return true };
+            let pt = &map.lattice[i];
+            if pt.flags & 1 == 0 || pt.ground == key.grounds[k] {
+                return true;
+            }
+            let wild = |g: &Option<String>| g.as_ref().is_none_or(|g| map.gt_flags(g) & 8 != 0);
+            wild(&key.grounds[k]) && wild(&pt.ground)
+        })
+    };
+    let (x0, y0) = (if l < p.pos.0 { p.pos.0 - l } else { 0 }, if t < p.pos.1 { p.pos.1 - t } else { 0 });
+    if x0 < mw && x0 + rw <= mw && y0 < mh && y0 + rh <= mh && map.free(x0, y0, rw, rh) && border_ok(p.pos.0, p.pos.1) && lattice_ok(p.pos.0, p.pos.1) {
+        return Ok(true);
+    }
+    for with_margin in [true, false] {
+        let mut origin = if with_margin { (x0, y0) } else { p.pos };
+        let (mut steps, mut d) = (1u32, 0u8);
+        while steps < 10 {
+            for _ in 0..steps {
+                let v = SPIRAL_VECTORS[spiral_dir(d, ro)];
+                origin = (origin.0 + align * v.0, origin.1 + align * v.1);
+                let (nx, ny) = (origin.0.max(0), origin.1.max(0));
+                let (fw, fh, px, py) = if with_margin { (rw, rh, l + nx, t + ny) } else { (w, h, nx, ny) };
+                if nx < mw && nx + fw <= mw && ny < mh && ny + fh <= mh && map.free(nx, ny, fw, fh) && border_ok(px, py) && lattice_ok(px, py) {
+                    p.pos = (px, py);
+                    return Ok(true);
+                }
+            }
+            steps += (d & 1) as u32;
+            d = (d + 1) & 3;
+        }
+    }
+    Ok(false)
 }

@@ -823,6 +823,16 @@ fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng:
         }
         placed.push(p);
     }
+    // `0x1420caa40`, second loop: the nodes touching a virtual edge are tried like rooms (rooms
+    // of the empty type, else tiles); those nothing fits are exploded below.
+    let mut placed_virtual: Vec<usize> = Vec::new();
+    for &n in &virtual_nodes {
+        if let Some(p) = crate::rooms::place_node_opt(&set, &master.tiles, &placed_graph, n, tiles, &placed, &mut types, files, rng)? {
+            placed.push(p);
+            placed_virtual.push(n);
+        }
+    }
+    virtual_nodes.retain(|n| !placed_virtual.contains(n));
     let fixed: Vec<(bool, bool)> = graph
         .nodes
         .iter()
@@ -832,7 +842,12 @@ fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng:
     let mut map = TileMap::new(graph.width, graph.height);
     map.ground_flags = master.ground_flag_table(files)?;
     map.edge_flags = master.edge_flag_table(files)?;
-    for p in &placed {
+    for p in placed.iter_mut() {
+        // `0x1420c9970` first lets a room that does not fit move (`0x1420c9260`).
+        let align = crate::rooms::node_alignment(&placed_graph, p.node, &mut types, files)?;
+        if !crate::rooms::settle(&map, p, align, placed_graph.graph.region, &mut types, files)? {
+            return Err(data(format!("Overlapping node tiles at {:?}", p.pos)));
+        }
         match p.tile {
             // `0x1420c9970`: a node that took a tile places just that tile.
             Some(t) => {
@@ -940,10 +955,6 @@ fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng:
     // instead (`0x1420caa40`), which is not ported yet.
     for &n in virtual_nodes.iter().chain(&junctions) {
         if virtual_nodes.contains(&n) {
-            let (sides, key) = crate::rooms::node_key(&placed_graph, n, &mut types, files)?;
-            if !node_tiles::candidates(&placed_graph, n, 8, "", &key, &sides, &master.tiles, &mut types, files)?.is_empty() {
-                return Err(data(format!("node {n}: virtual node tile at the room stage is not ported")));
-            }
         }
         node_tiles::explode(&mut placed_graph, n, tiles, &mut types, files)?;
     }
@@ -1051,7 +1062,7 @@ fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng:
         // copy the flag of the node they were made from).
         match lg.nodes[n].orig {
             Some(gi) => {
-                if !graph.nodes[gi].room_type.is_empty() || virtual_nodes.contains(&gi) {
+                if !graph.nodes[gi].room_type.is_empty() || virtual_nodes.contains(&gi) || placed_virtual.contains(&gi) {
                     continue;
                 }
             }
