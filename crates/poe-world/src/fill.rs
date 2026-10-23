@@ -197,9 +197,6 @@ impl Fill<'_> {
         let tdt = self.master.header(self.files, path)?.clone();
         let (w, h) = oriented(tdt.size, o);
         let height = self.corner_height(x, y, w, h);
-        if std::env::var("POE_DBG_FILLCELL").is_ok() {
-            eprintln!("PLACETILE ({x},{y}) o{o} h{height} {path}");
-        }
         self.map.place(x, y, path, &tdt, o, height, None);
         self.note(x, y, &tdt)?;
         Ok(w - 1)
@@ -277,10 +274,6 @@ impl Fill<'_> {
                     };
                     let (mut list, _) = self.groups(g.as_deref())?;
                     let mut total: u32 = list.iter().map(|e| e.weight).sum();
-                    if std::env::var("POE_FILL_DEBUG").is_ok() {
-                        let sl = match &room.arm.grid[cy][cx] { poe_data_tools::file_parsers::arm::types::Slot::K(k) => format!("{:?} h{} w{} {:?}", k.corners.iter().map(|c| (c.ground.clone().map(|g| g.rsplit('/').next().unwrap().to_string()), c.height)).collect::<Vec<_>>(), k.height, k.width, k.slot_tag), _ => "S".into() };
-                        eprintln!("FILLROOM {path} ({x},{y}) o{o} cell {cx},{cy} ground {g:?} total {total} slot {sl}");
-                    }
                     let mut placed = false;
                     while !list.is_empty() {
                         let e = pick_entry(&list, rng.below(total)).clone();
@@ -337,9 +330,6 @@ impl Fill<'_> {
                 }
                 let c = chosen.ok_or_else(|| GenError::Unsupported(format!("no tile fits at ({mx},{my}) for fill room {path}")))?;
                 let def = self.master.tiles.tiles[c.tile].clone();
-                if std::env::var("POE_DBG_FILLCELL").is_ok() {
-                    eprintln!("PLACEROOMTILE {path} room@({x},{y}) cell {cx},{cy} -> ({mx},{my}) {} feature {feature:?}", def.path);
-                }
                 self.map.place(mx, my, &def.path, &def.tdt, c.orientation, low as i16 + self.height.unwrap_or(0), Some(c.tile));
                 self.note(mx, my, &def.tdt)?;
             }
@@ -410,10 +400,6 @@ pub fn fill_cells(
             (p.flags & 1 != 0).then(|| p.ground.clone()).flatten()
         });
         f.height = Some(c.height as i16);
-        if std::env::var("POE_DBG_FILLCELL").is_ok() {
-            let lg = f.map.point_index(x, y).map(|i| (f.map.lattice[i].ground.clone(), f.map.lattice[i].flags));
-            eprintln!("FILLCELL ({x},{y}) cg {:?} lat {:?} -> {:?} h{} acc {} flags {:?} fills {:?}", c.ground, lg, ground, c.height, c.accessible, ground.as_deref().map(|g| f.map.gt_flags(g)), ground.as_deref().and_then(|g| f.master.ground_name(f.files, g).ok()).map(|n| (n.clone(), f.master.fills.get(&n).map(|v| v.len()))));
-        }
         f.cell(x, y, ground, c.accessible, rng)?;
     }
     let wiggle = f.wiggle.take().map(|w| w.0).unwrap_or_default();
