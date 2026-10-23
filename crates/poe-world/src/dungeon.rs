@@ -283,7 +283,7 @@ impl Grid {
 
 /// The dungeon layout of a pruned `.dgr` graph (`0x1420ac3e0`); `overlap` is the master's
 /// `RoomOverlap`.
-pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet, overlap: u32, rng: &mut TerrainRng) -> Result<Grid, GenError> {
+pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet, overlap: u32, fill_height: Option<i32>, rng: &mut TerrainRng) -> Result<Grid, GenError> {
     let mut types = TerrainTypes::default();
     let mut rooms: Vec<DungeonRoom> = set
         .rooms
@@ -595,14 +595,14 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
     // rooms (`0x1420aa710`; the request-driven steps after it, `0x1420aab60` / `0x1420aacf0`
     // extra rooms and `0x1420abf60` shrines, have nothing to place for a plain area), then the
     // reserved cells are freed and the filler rooms run again.
-    filler_rooms(&rooms, &mut grid, &mut types, files, rng)?;
+    filler_rooms(&rooms, &mut grid, &mut types, files, fill_height, rng)?;
     special_rooms(files, &rooms, &mut grid, &mut types, rng)?;
     for c in grid.cells.iter_mut() {
         if *c == 1 {
             *c = 0;
         }
     }
-    filler_rooms(&rooms, &mut grid, &mut types, files, rng)?;
+    filler_rooms(&rooms, &mut grid, &mut types, files, fill_height, rng)?;
     if std::env::var("POE_DUMP_ROOMS").is_ok() {
         for (i, r) in grid.rooms.iter().enumerate() {
             eprintln!("ROOM {i} {} {} {} {} {} o{}", if r.path.is_empty() { "-" } else { &r.path }, r.origin.0, r.origin.1, r.size.0, r.size.1, r.orientation);
@@ -2184,7 +2184,7 @@ fn split_fits(grid: &Grid, rooms: &[DungeonRoom], size: (u32, u32), exits: &[Exi
 /// `0x1420b19f0`: room sides whose two corners share a ground spread it into the empty cells
 /// beyond (`0x1420b1bd0`, per room in order: right, bottom, left, top sides); grounds with
 /// `.gt` flag 2 first, each pass repeated while it places anything.
-fn filler_rooms(rooms: &[DungeonRoom], grid: &mut Grid, types: &mut TerrainTypes, files: &dyn Files, rng: &mut TerrainRng) -> Result<(), GenError> {
+fn filler_rooms(rooms: &[DungeonRoom], grid: &mut Grid, types: &mut TerrainTypes, files: &dyn Files, fill_height: Option<i32>, rng: &mut TerrainRng) -> Result<(), GenError> {
     let _ = types;
     let mut flags: std::collections::HashMap<String, u8> = std::collections::HashMap::new();
     let mut gt = |g: &str| -> Result<u8, GenError> {
@@ -2223,7 +2223,9 @@ fn filler_rooms(rooms: &[DungeonRoom], grid: &mut Grid, types: &mut TerrainTypes
                     }
                     let mut any = false;
                     for (pos, k) in cells {
-                        let height = p.height + p.exits[k as usize].height;
+                        // `0x1420b1bd0`: the master's `DungeonFillRoomHeightOverride` (+0x159 set, value
+                        // +0x14d) replaces the height of every filler room.
+                        let height = fill_height.unwrap_or(p.height + p.exits[k as usize].height);
                         any |= spread(rooms, grid, pos, g.clone(), height, &mut gt, rng)?;
                     }
                     Ok(any)

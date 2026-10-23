@@ -574,7 +574,9 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
     };
     // `RoomOverlap` is master +0x14b; the parser's default is 1 (constructor `0x14292e190`).
     let overlap: u32 = tsi.get("RoomOverlap").and_then(|v| v.trim().parse().ok()).unwrap_or(1);
-    let grid = crate::dungeon::layout(files, graph, removed, &set, overlap, rng)?;
+    // `DungeonFillRoomHeightOverride` is master +0x14d (a byte), present flag +0x159.
+    let fill_height: Option<i32> = tsi.get("DungeonFillRoomHeightOverride").and_then(|v| v.trim().parse::<i32>().ok()).map(|v| v as u8 as i32);
+    let grid = crate::dungeon::layout(files, graph, removed, &set, overlap, fill_height, rng)?;
     if std::env::var("POE_DBG").is_ok() {
         for (i, r) in grid.rooms.iter().enumerate() {
             eprintln!("DBG room {i} {} o{} origin {:?} size {:?} special {}", r.path, r.orientation, r.origin, r.size, r.special);

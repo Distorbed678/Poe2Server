@@ -865,6 +865,7 @@ fn exit_fits(map: &TileMap, pos: (i32, i32), key: &TileKey, side: usize, wild: b
         return Ok(et.can_end);
     }
     let Some((nk, origin)) = tile_key_at(map, cx, cy, master, files)? else { return Ok(false) };
+    if std::env::var("POE_DBG_SIDE").ok().is_some_and(|v| v == format!("{},{}", pos.0, pos.1)) { eprintln!("EXITFIT pos {pos:?} side {side} exit {exit} outside ({cx},{cy}) nk edges {:?} exits {:?} virt {:?} origin {origin:?} size {:?} et virtual {} can_end {}", nk.edges, nk.exits, nk.virtual_exits, nk.size, et.virtual_edge, et.can_end); }
     let ns = (side + 2) & 3;
     let nlen = if ns % 2 == 0 { nk.size.0 } else { nk.size.1 };
     let along = if side % 2 == 0 { origin.0 } else { origin.1 };
