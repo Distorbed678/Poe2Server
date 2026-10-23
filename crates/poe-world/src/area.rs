@@ -698,8 +698,10 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
     }
     let mut master = match (rel("TileSet"), rel("FillTiles")) {
         (Some(t), Some(f)) => Master::load(files, &t, &f)?,
+        // `G_login`: a tile set and no fill tiles (nothing needs a fill group there).
+        (Some(t), None) => Master::load(files, &t, "")?,
         (None, None) => Master::empty(),
-        _ => return Err(data("master names a TileSet without FillTiles or the reverse")),
+        _ => return Err(data("master names FillTiles without a TileSet")),
     };
     // `OuterFillHeightOverride` (master +0x161 set, value +0x153): the outer fill places plain.
     master.outer_fill_height = tsi.get("OuterFillHeightOverride").and_then(|v| v.trim().parse::<i8>().ok()).or_else(|| tsi.contains_key("OverrideSpawns").then_some(0));
@@ -887,8 +889,10 @@ fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng:
     let rel = |k: &str| tsi.get(k).map(|v| if v.len() > 9 && v[..9].eq_ignore_ascii_case("metadata/") { v.to_string() } else { format!("{dir}/{v}") });
     let mut master = match (rel("TileSet"), rel("FillTiles")) {
         (Some(t), Some(f)) => Master::load(files, &t, &f)?,
+        // `G_login`: a tile set and no fill tiles (nothing needs a fill group there).
+        (Some(t), None) => Master::load(files, &t, "")?,
         (None, None) => Master::empty(),
-        _ => return Err(data("master names a TileSet without FillTiles or the reverse")),
+        _ => return Err(data("master names FillTiles without a TileSet")),
     };
     // `OuterFillHeightOverride` (master +0x161 set, value +0x153): the outer fill places plain.
     master.outer_fill_height = tsi.get("OuterFillHeightOverride").and_then(|v| v.trim().parse::<i8>().ok()).or_else(|| tsi.contains_key("OverrideSpawns").then_some(0));
@@ -1201,7 +1205,7 @@ fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng:
                 }
             }
             None => {
-                if lg.nodes[n].fixed || junction_made.contains(&n) {
+                if lg.nodes[n].fixed {
                     continue;
                 }
             }
@@ -1215,6 +1219,9 @@ fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng:
             near = !(b <= tx && b <= ty && tx < tiles.0 - b && ty < tiles.1 - b);
         }
         if !node_tiles::needs_tile(&lg, n, near, &mut types, files)? {
+            continue;
+        }
+        if junction_made.contains(&n) && !near {
             continue;
         }
         if !near {

@@ -584,16 +584,29 @@ pub fn load_tdt(files: &dyn Files, path: &str) -> Result<Tdt, GenError> {
     // `0x141d053a0`: data +0x16f bit 1, asked by `place_tile` (`0x141f9e2e0`) for tiles without a
     // real edge: an object of the tile's model data (`.tmd`) with `Spawner` in its type path.
     let wild = |e: &str| e.to_ascii_lowercase().contains("wildcard");
-    if tdt.edges.iter().flatten().all(|e| wild(e)) {
-        if let Some(tgt) = &tdt.tgt {
-            let tmd = format!("{}.tmd", tgt.trim_end_matches(".tgt").trim_end_matches(".TGT"));
-            if let Ok(bytes) = files.read(&tmd.to_ascii_lowercase()) {
-                let text = crate::text::decode_utf16(&bytes);
-                tdt.spawner = text.lines().any(|l| l.rsplit('"').nth(1).is_some_and(|t| t.contains("Spawner")));
+    let all_wild = tdt.edges.iter().flatten().all(|e| wild(e));
+    if let Some(tgt) = &tdt.tgt {
+        let tmd = format!("{}.tmd", tgt.trim_end_matches(".tgt").trim_end_matches(".TGT"));
+        if let Ok(bytes) = files.read(&tmd.to_ascii_lowercase()) {
+            let text = crate::text::decode_utf16(&bytes);
+            let types: Vec<&str> = text.lines().filter_map(|l| l.rsplit('"').nth(1)).collect();
+            if all_wild {
+                tdt.spawner = types.iter().any(|t| t.contains("Spawner"));
             }
         }
     }
     Ok(tdt)
+}
+
+fn collect_tst(files: &dyn Files, path: &str, out: &mut Vec<poe_data_tools::file_parsers::tst::types::Entry>, depth: u32) -> Result<(), GenError> {
+    let parsed = TSTParser.parse(&files.read(path)?).map_err(|e| data_err(path, e))?;
+    if depth < 8 {
+        for inc in &parsed.includes {
+            collect_tst(files, &inc.to_ascii_lowercase(), out, depth + 1)?;
+        }
+    }
+    out.extend(parsed.tdt_files);
+    Ok(())
 }
 
 impl Master {
@@ -603,9 +616,11 @@ impl Master {
     }
 
     pub fn load(files: &dyn Files, tst: &str, gft: &str) -> Result<Self, GenError> {
-        let parsed = TSTParser
-            .parse(&files.read(tst)?)
-            .map_err(|e| data_err(tst, e))?;
+        // `include "<other.tst>"` lines (G3_town) come first in the file: the included file's
+        // entries precede the file's own.
+        let mut entries = Vec::new();
+        collect_tst(files, tst, &mut entries, 0)?;
+        let parsed = poe_data_tools::file_parsers::tst::types::TSTFile { includes: Vec::new(), tdt_files: entries };
         let mut defs = Vec::new();
         let mut headers = HashMap::new();
         let mut gt_flags: HashMap<String, u8> = HashMap::new();
@@ -632,13 +647,14 @@ impl Master {
                 tdt,
             });
         }
-        let gft_file = GFTParser
-            .parse(&files.read(gft)?)
-            .map_err(|e| data_err(gft, e))?;
+        let sections = if gft.is_empty() {
+            Vec::new()
+        } else {
+            GFTParser.parse(&files.read(gft)?).map_err(|e| data_err(gft, e))?.sections
+        };
         // A group without entries (all its lines commented out) does not exist for the client:
         // a ground naming it fills from the `default` group (`DefaultHyenas` of `G2_1`).
-        let fills = gft_file
-            .sections
+        let fills = sections
             .iter()
             .filter(|s| !s.files.is_empty())
             .map(|s| {
@@ -893,7 +909,7 @@ pub fn room_pass_oriented(
             // Slot +0x72: the lowest corner's height moves into the tile height.
             // (Only overlay rooms are checked against the client for this; node rooms of
             // `.tgr` graphs keep the absolute corner heights.)
-            let low = if mark { key.heights.iter().map(|&v| v as i8).min().unwrap_or(0) } else { 0 };
+            let low = key.heights.iter().map(|&v| v as i8).min().unwrap_or(0);
             for v in &mut key.heights {
                 *v = (*v as i8 - low) as u8;
             }
@@ -922,7 +938,7 @@ pub fn room_pass_oriented(
             let list = master.tiles.candidates(&feature, &key);
             if list.is_empty() {
                 return Err(GenError::Unsupported(format!(
-                    "no tile for room cell ({x},{y}) feature {feature:?}"
+                    "no tile for room cell ({x},{y}) feature {feature:?} key {key:?}"
                 )));
             }
             let total = list.iter().map(|c| c.weight).sum();

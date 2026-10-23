@@ -233,8 +233,14 @@ fn keep_off_border(pos: &mut (i32, i32), size: (i32, i32), edges: &[Option<Strin
 /// `0x1420c87a0` for a room-less node: draws its tile and position.
 #[allow(clippy::too_many_arguments)]
 fn choose(view: &LayoutView, node: usize, master: &Master, map: &TileMap, chosen: &[NodeTile], tiles: (i32, i32), types: &mut TerrainTypes, files: &dyn Files, rng: &mut TerrainRng) -> Result<NodeTile, GenError> {
-    let (mut sides, key) = node_key(view, node, types, files)?;
+    let (mut sides, mut key) = node_key(view, node, types, files)?;
     let node_o = view.gnode(node).map_or(8, |n| node_orientation(&n.orientation));
+    // `0x1420c5540` inside `0x1420c76d0`: no tile of the feature has the key's edges, so one
+    // edge moves to a free side (`0x1420c51c0`).
+    let any_match = |k: &TileKey| feature_has_edges(&master.tiles, "", &k.edges);
+    if !any_match(&key) {
+        crate::rooms::adjust_sides(view, node, &mut sides, &mut key, &any_match, types, files)?;
+    }
     let mut list = candidates(view, node, node_o, "", &key, &sides, &master.tiles, types, files)?;
     if list.is_empty() {
         return Err(GenError::Unsupported(format!("node {node}: no tile matches its edges {:?}", key.edges)));
@@ -442,7 +448,15 @@ fn repel(lg: &mut LayoutGraph, graph: &Graph, chosen: &mut [NodeTile], map: &Til
 /// `0x1420c9970`: the tile into the map, the node's edges cut at the tile and ended at its
 /// exits (`0x1420c5750`, `0x1420c5b50`), the node split per exit (`0x141ef2800`).
 fn place(lg: &mut LayoutGraph, region: u8, t: &NodeTile, master: &Master, map: &mut TileMap, types: &mut TerrainTypes, files: &dyn Files) -> Result<(), GenError> {
-    let pos = crate::region::snap(region, t.pos, t.align);
+    let mut pos = crate::region::snap(region, t.pos, t.align);
+    // `0x1420c9970` first lets a tile that does not fit move (`0x1420c9260`, as for rooms).
+    {
+        let mut pr = crate::rooms::PlacedRoom { node: t.node, room: usize::MAX, tile: Some(t.tile), orientation: t.orientation, pos, size: t.size, sides: t.sides, key: t.key.clone() };
+        if !crate::rooms::settle(map, &mut pr, t.align, region, types, files)? {
+            return Err(GenError::Unsupported(format!("Overlapping node tiles at {:?}", pr.pos)));
+        }
+        pos = pr.pos;
+    }
     let def = &master.tiles.tiles[t.tile];
     map.place(pos.0, pos.1, &def.path, &def.tdt, t.orientation, 0, Some(t.tile));
     let (rx, ry) = (pos.0 * 23, pos.1 * 23);
