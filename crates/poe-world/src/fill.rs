@@ -215,7 +215,8 @@ impl Fill<'_> {
             for r in rooms {
                 // `0x141f91110`: on an unwalkable corner only rooms whose room data +0x188 list
                 // (0x30-byte entries: the points of interest, by size) is empty.
-                let has_pois = self.room(&r.path)?.arm.points_of_interest.iter().any(|g| !g.is_empty());
+                let has_pois = self.room(&r.path)?.arm.points_of_interest.iter().any(|g| g.iter().any(|p| std::env::var("POE_POI_ANY").is_ok() || !p.tag.is_empty()));
+                if std::env::var("POE_DBG_POI").is_ok() && !walkable && has_pois { eprintln!("POI skip {} w{} pois {:?}", r.path, r.weight, self.room(&r.path)?.arm.points_of_interest); }
                 if walkable || !has_pois {
                     list.push(r);
                 }
