@@ -190,6 +190,11 @@ impl crate::generate::Files for WithSpecialTiles<'_> {
 /// [`generate_probed`] with the file source given.
 pub fn generate_probed_files(gd: &GameData, files: &dyn crate::generate::Files, area_id: &str, rng: &mut TerrainRng, forced: Option<Forced>, probe: &mut dyn FnMut(Stage)) -> Result<Generated, GenError> {
     let forced = forced.unwrap_or_default();
+    // `TerrainGen_Run` seeds with `disabled` set for hideouts (WorldAreas `IsHideout`, row
+    // +0x12a): every draw then returns its lower bound.
+    if poe_data::views::WorldArea::find(gd, area_id).ok().flatten().is_some_and(|a| a.is_hideout) {
+        rng.disabled = true;
+    }
     let graphs = topology_entries(gd, area_id, 1)?;
     if graphs.is_empty() {
         return Err(data(format!("{area_id}: no topologies")));

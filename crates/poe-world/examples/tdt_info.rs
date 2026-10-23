@@ -7,7 +7,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let bytes = files.read(&path.to_lowercase())?;
         match poe_world::tdt::Tdt::parse(&bytes) {
             Ok(t) => println!(
-                "{path}: v{} feature {:?} size {:?} inherits {:?} edges {:?} grounds {:?} unk {:?} dist {:?} rest {} bytes",
+                "{path}: v{} feature {:?} size {:?} inherits {:?} edges {:?} grounds {:?} unk {:?} dist {:?} rest {} bytes orientation_mask {:#x} hull_masks {:?}",
                 t.version,
                 t.feature,
                 t.size,
@@ -22,7 +22,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .collect::<Vec<_>>(),
                 t.unk,
                 t.edge_distances,
-                t.rest.len()
+                t.rest.len(), t.orientation_mask, t.hull_masks
             ),
             Err(e) => println!("{path}: {e}"),
         }
