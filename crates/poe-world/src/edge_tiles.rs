@@ -842,7 +842,11 @@ impl EdgeTiler<'_> {
         if p.is_loop {
             return self.tilise_loop(p, e, end, rng);
         }
-        if self.fit(&mut p, rng) {
+        let fitted = self.fit(&mut p, rng);
+        if std::env::var_os("POE_DEBUG_CHAIN").is_some() {
+            eprintln!("chain edge {e} end {end}: points {:?} fit {fitted} tiles {:?}", p.points, p.tiles);
+        }
+        if fitted {
             for k in 1..p.tiles.len().saturating_sub(1) {
                 let (x, y) = p.tiles[k];
                 let i = self.idx(x as u32, y as u32);

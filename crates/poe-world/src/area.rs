@@ -592,7 +592,7 @@ fn master_entries(bytes: &[u8], tsi_path: &str) -> std::collections::HashMap<Str
 
 /// A `.dgr` graph: the dungeon layout (`crate::dungeon`), then its tile pass
 /// (`crate::dungeon_tiles`).
-fn generate_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[bool], rng: &mut TerrainRng, extra: Option<&Graph>) -> Result<TileMap, GenError> {
+fn generate_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[bool], rng: &mut TerrainRng, extra: Option<&Graph>, probe: &mut dyn FnMut(Stage)) -> Result<TileMap, GenError> {
     let mut built = build_dungeon(files, graph, removed, rng, None)?;
     // `0x141ff7e00` / `0x141ff05f0`: each `graph` node's subgraph is generated after the main
     // graph's fill and de-repetition, straight into its reserved rectangle of the map.
@@ -612,7 +612,7 @@ fn generate_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: 
         let inner = if is_dgr {
             build_dungeon(files, &sub, &removed, rng, Some((&built.map, at)))?
         } else {
-            build_tgr(files, &sub, removed, rng, &mut |_| {}, Some((&built.map, at)))?
+            build_tgr(files, &sub, removed, rng, probe, Some((&built.map, at)))?
         };
         if !inner.subgraphs.is_empty() {
             return Err(GenError::Unsupported(format!("subgraph {file}: nested subgraphs (not ported)")));
@@ -911,7 +911,7 @@ fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng:
     let (pruned, removed) = prune(graph, rng)?;
     let graph = &pruned;
     if graph.dungeon_defaults.is_some() {
-        return generate_dungeon(files, graph, &removed, rng, extra);
+        return generate_dungeon(files, graph, &removed, rng, extra, probe);
     }
     let Built { map, mut master, tsi_bytes, tsi, .. } = build_tgr(files, graph, removed, rng, probe, None)?;
     let margins = Margins::parse(&crate::text::decode_utf16(&tsi_bytes));
@@ -1191,7 +1191,8 @@ fn build_tgr(files: &dyn crate::generate::Files, graph: &Graph, removed: Vec<boo
             virtual_end |= types.edge(files, &graph.edges[ei as usize].edge_type)?.virtual_edge;
         }
         let fixed = placed.iter().any(|p| p.node == i);
-        lg.nodes.push(LNode { pos: placed_graph.nodes[i], slots, fixed, virtual_end, orig: Some(i) });
+        let axes = (graph.nodes[i].values.get(9).copied().unwrap_or(0) != 0, graph.nodes[i].values.get(10).copied().unwrap_or(0) != 0);
+        lg.nodes.push(LNode { pos: placed_graph.nodes[i], slots, fixed, virtual_end, orig: Some(i), axes });
     }
     for (gi, e) in graph.edges.iter().enumerate() {
         let ri = route_index[gi];
@@ -1226,7 +1227,7 @@ fn build_tgr(files: &dyn crate::generate::Files, graph: &Graph, removed: Vec<boo
                 first = false;
             } else {
                 let nn = lg.nodes.len();
-                lg.nodes.push(LNode { pos, slots: [Some(e), None, None, None], fixed: true, virtual_end: false, orig: None });
+                lg.nodes.push(LNode { pos, slots: [Some(e), None, None, None], fixed: true, virtual_end: false, orig: None, axes: (false, false) });
                 if which == 0 { lg.edges[e].from = nn } else { lg.edges[e].to = nn }
                 lg.nodes[node].slots[k] = None;
             }
@@ -1354,8 +1355,12 @@ fn build_tgr(files: &dyn crate::generate::Files, graph: &Graph, removed: Vec<boo
     probe(Stage::Lattice("borders", &map));
     lattice::border_floods(&mut map, &master.tiles);
     probe(Stage::Lattice("flood", &map));
-    lattice::mark_unwalkable(&mut map, &master.tiles);
-    lattice::mark_enclosed_fills(&mut map, files).map_err(data)?;
+    // The unwalkable marking (`0x141fe0fd0`) works from the real map's border: a subgraph's
+    // window marks nothing (G3_1's `End_*.tgr`: no corner gets flag 8).
+    if window.is_none() {
+        lattice::mark_unwalkable(&mut map, &master.tiles);
+        lattice::mark_enclosed_fills(&mut map, files).map_err(data)?;
+    }
     probe(Stage::Lattice("heights", &map));
     let default_ground = graph.ground_types.iter().find(|g| !g.is_empty()).cloned();
     lattice::settle(&mut map, default_ground.as_deref());

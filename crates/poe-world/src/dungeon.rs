@@ -519,7 +519,8 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
         // The type's rooms in every allowed orientation (`RoomSet` entries).
         let mut all: Vec<Candidate> = Vec::new();
         for (ri, r) in rooms.iter().enumerate() {
-            if !r.generic || !r.tag.eq_ignore_ascii_case(&node.room_type) {
+            // The node's room type is a comma list; a room matches when its tag is one entry.
+            if !r.generic || !node.room_type.split(',').any(|t| r.tag.eq_ignore_ascii_case(t.trim())) {
                 continue;
             }
             for o in 0..8u8 {

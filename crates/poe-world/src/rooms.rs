@@ -366,6 +366,9 @@ pub fn node_key(
             0
         };
         per_side[side].push(i);
+        if std::env::var_os("POE_DEBUG_CANDS").is_some() {
+            eprintln!("node_key node {node} at ({nx},{ny}) slot {i} edge {e} towards ({px},{py}) side {side}");
+        }
     }
     // `0x1420d15b0`/`0x1420d16c0`: while a side holds several edges, move the edge whose
     // direction is closest to a neighbouring side that is empty (else holds one edge).
@@ -464,6 +467,9 @@ pub(crate) fn fits_edges(
         let ok_b = key.grounds[b] == et.grounds[0] || (et.grounds[0].is_none() && wild(&key.grounds[b])?);
         let ok_a = key.grounds[a] == et.grounds[1] || (et.grounds[1].is_none() && wild(&key.grounds[a])?);
         let mismatch = !(ok_b && ok_a);
+        if std::env::var_os("POE_DEBUG_FITS").is_some() {
+            eprintln!("fits node {node} side {s} et {path} dir {} a {a} b {b} key.g[a] {:?} key.g[b] {:?} et.g {:?} h {:?} lo {lo} hc {} climb {} ok_a {ok_a} ok_b {ok_b} strict {strict_height}", dir[s], key.grounds[a], key.grounds[b], et.grounds, h, et.height_change, climb[s]);
+        }
         let mut flag1 = |gt: &Option<String>| -> Result<bool, GenError> {
             Ok(match gt {
                 None => true,
@@ -583,7 +589,8 @@ pub fn room_candidates(
                 && (0..8u8).any(|o| r.orientations & (1 << o) != 0 && r.key.oriented(o).edges == key.edges)
         })
     };
-    if !any_match(&key) && !adjust_sides(g, node, &mut sides, &mut key, &any_match, types, files)? {
+    // `0x1420c76d0` skips the side adjustment (`0x1420c51c0`) for a node without a room type.
+    if !n.room_type.is_empty() && !any_match(&key) && !adjust_sides(g, node, &mut sides, &mut key, &any_match, types, files)? {
         return Ok((Vec::new(), sides));
     }
     let mut matches = Vec::new();
@@ -773,6 +780,9 @@ pub fn place_node_opt(
     rng: &mut TerrainRng,
 ) -> Result<Option<PlacedRoom>, GenError> {
     let (mut list, mut sides) = room_candidates(set, tile_set, g, node, types, files)?;
+    if std::env::var_os("POE_DEBUG_CANDS").is_some() {
+        eprintln!("cands node {node} at {:?} {:?} sides {:?} slots {:?} total {}: {:?}", g.nodes[node], g.graph.nodes[node].room_type, sides, g.slots(node).iter().map(|s| s.map(|e| g.edge_type(e).rsplit('/').next().unwrap_or("").to_string())).collect::<Vec<_>>(), list.len(), list.iter().map(|c| (c.room, c.tile.map(|t| tile_set.tiles[t].path.rsplit('/').next().unwrap_or("").to_string()), c.orientation, c.size)).collect::<Vec<_>>());
+    }
     let align = node_alignment(g, node, types, files)?;
     let mut max_size = 0;
     for e in g.slots(node).into_iter().flatten() {
@@ -782,11 +792,11 @@ pub fn place_node_opt(
     let cx = (x / 23).min(tiles.0 - 1);
     let cy = (y / 23).min(tiles.1 - 1);
     loop {
-        let total: u32 = list.iter().map(|c| c.weight).sum();
-        let mut r = rng.below(total);
         if list.is_empty() {
             return Ok(None);
         }
+        let total: u32 = list.iter().map(|c| c.weight).sum();
+        let mut r = rng.below(total);
         let mut i = 0;
         while i + 1 < list.len() && r >= list[i].weight {
             r -= list[i].weight;

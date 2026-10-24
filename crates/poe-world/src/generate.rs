@@ -566,7 +566,7 @@ pub struct Master {
     /// Fill groups by name (`default`, or a ground type's name).
     pub fills: HashMap<String, FillGroup>,
     /// Tile headers by path (lower case), loaded on demand for fill tiles.
-    headers: HashMap<String, Tdt>,
+    pub(crate) headers: HashMap<String, Tdt>,
     /// Ground type file (lower case) -> its name (first line of the `.gt`).
     ground_names: HashMap<String, String>,
     /// `.tsi` `OuterFillHeightOverride`: the height of the outer fill's plain placement, which

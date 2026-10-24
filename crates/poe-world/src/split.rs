@@ -88,7 +88,8 @@ impl LayoutGraph {
     }
 
     fn add_node(&mut self, pos: Pos) -> usize {
-        self.nodes.push(LNode { pos, slots: [None; 4], fixed: false, virtual_end: false, orig: None });
+        if std::env::var_os("POE_DEBUG_CANDS").is_some() { eprintln!("add_node {} at {pos:?}", self.nodes.len()); }
+        self.nodes.push(LNode { pos, slots: [None; 4], fixed: false, virtual_end: false, orig: None, axes: (false, false) });
         self.nodes.len() - 1
     }
 
@@ -287,6 +288,8 @@ fn split_chain(
         g.link_split(node, new);
         g.nodes[new].fixed = g.nodes[node].fixed;
         g.nodes[new].virtual_end = g.nodes[node].virtual_end;
+        g.nodes[new].axes = g.nodes[node].axes;
+        if std::env::var_os("POE_DEBUG_CANDS").is_some() { eprintln!("split new node {new} at {:?} from node {node} axes {:?}", g.nodes[new].pos, g.nodes[node].axes); }
         if cur == 0 { clone.from = new } else { clone.to = new }
         clone.split = true;
         let ci = g.edges.len();
@@ -329,6 +332,8 @@ fn split_chain(
             g.nodes[far_node].virtual_end = inside;
             g.nodes[clone_far].virtual_end = inside;
             g.nodes[clone_far].fixed = g.nodes[far_node].fixed;
+            g.nodes[clone_far].axes = g.nodes[far_node].axes;
+            if std::env::var_os("POE_DEBUG_CANDS").is_some() { eprintln!("split far node {clone_far} at {:?} from node {far_node} axes {:?}", g.nodes[clone_far].pos, g.nodes[far_node].axes); }
             split_points(g, e, ci, cur, true, (-1, -1), size, rng);
             return;
         }
