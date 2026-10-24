@@ -315,7 +315,7 @@ impl Fill<'_> {
                 let (mx, my) = (x + ax.min(bx), y + ay.min(by));
                 let list = self.master.tiles.candidates(&feature, &key).to_vec();
                 if list.is_empty() {
-                    return Err(GenError::Unsupported(format!("fill room {path}: no tile for cell ({cx},{cy})")));
+                    return Err(GenError::Unsupported(format!("fill room {path}: no tile for cell ({cx},{cy}) key {key:?}")));
                 }
                 if self.map.index(mx, my).is_some_and(|i| self.map.cells[i].is_some()) {
                     continue;

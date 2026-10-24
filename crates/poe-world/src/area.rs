@@ -201,7 +201,10 @@ pub fn generate_probed_files(gd: &GameData, files: &dyn crate::generate::Files, 
     }
     // `phase_cad0`: league mechanic rolls come before the topology choice.
     crate::league::roll_area(gd, area_id, rng);
-    let sub = rng.below(u32::MAX);
+    // `0x141ff90f0`: the sub-seed is drawn unless the area's kind (`+0x1b4`, the unnamed i32
+    // column 45 of `WorldAreas`) is 0x21, a world-map panel: it then comes from the caller's
+    // seed word and the main stream is not touched (unforced choice not ported: 0).
+    let sub = if area_kind(gd, area_id) == Some(0x21) { 0 } else { rng.below(u32::MAX) };
     // A forced topology indexes the raw list (all league modes, `0x141ff9280`); the client
     // throws for an index past its end ("Cannot force graph"). Without one it draws from the
     // mode-filtered list.
@@ -244,6 +247,13 @@ pub fn generate_probed_files(gd: &GameData, files: &dyn crate::generate::Files, 
     let doodads = crate::doodads::resolve(gd, &files, rng, map.doodads.clone());
     let doodad_draws = logged.and_then(|n| rng.log.as_ref().map(|l| l[n..].to_vec())).unwrap_or_default();
     Ok(Generated { graph: dgr, map, doodads, draws, doodad_draws })
+}
+
+/// The area kind of a `WorldAreas` row (area record `+0x1b4`: 0x20/0x21/0x23 are world-map panels).
+fn area_kind(gd: &GameData, area_id: &str) -> Option<i64> {
+    let areas = gd.table("WorldAreas").ok()?;
+    let area = areas.find_by_str("Id", area_id).ok()??;
+    area.get_index(45).ok()?.as_int()
 }
 
 /// The `TerrainPlugins` row name of a `WorldAreas` row (`0x141d04820` registers the plugins by
@@ -304,6 +314,22 @@ fn random_offsets(graph: &mut Graph, rng: &mut TerrainRng) {
         n.x += dx;
         n.y += dy;
     }
+    // `0x141fea420` / `0x141fee6e0` (right after the offsets, all nodes): a room type holding a
+    // comma list (`Gates_N, Gates_FN`) keeps one entry, `below(count)`.
+    for n in &mut graph.nodes {
+        if n.room_type.contains(',') {
+            let entries: Vec<&str> = n.room_type.split(',').map(str::trim).collect();
+            if entries.len() > 1 {
+                let k = rng.below(entries.len() as u32) as usize;
+                n.room_type = entries[k].to_string();
+            }
+        }
+    }
+}
+
+thread_local! {
+    /// The job's lettered-unique history (`0x141feb050`), by letter; cleared per generated area.
+    static LETTER_HISTORY: std::cell::RefCell<std::collections::BTreeMap<u8, Vec<usize>>> = Default::default();
 }
 
 fn prune(graph: &Graph, rng: &mut TerrainRng) -> Result<(Graph, Vec<bool>), GenError> {
@@ -329,23 +355,34 @@ fn prune(graph: &Graph, rng: &mut TerrainRng) -> Result<(Graph, Vec<bool>), GenE
     }
     let drop_node_before = dropped.clone();
     shuffle_nodes(&mut g, &drop_node_before, rng);
-    // `unique<N>[#count]` (`0x141feb3b0`): keep `count` random nodes of group N.
+    // `unique<N>[#count]` / `unique<L><N>[#count]` (`0x141feb3b0`, collected by `0x141fe96e0`).
     let mut groups: Vec<(u32, Vec<usize>)> = Vec::new();
+    let mut letters: std::collections::BTreeMap<u8, (u32, Vec<Vec<usize>>)> = Default::default();
     for (i, n) in g.nodes.iter().enumerate() {
         if dropped[i] {
             continue;
         }
         let Some(t) = n.tags.iter().find(|t| t.len() >= 6 && t[..6].eq_ignore_ascii_case("unique")) else { continue };
         let mut rest = &t[6..];
-        if rest.chars().next().is_some_and(|c| c.is_ascii_alphabetic()) {
-            return Err(data(format!("node {i}: lettered unique tag {t:?} (session history) is not ported")));
+        let letter = rest.chars().next().filter(|c| c.is_ascii_alphabetic()).map(|c| c.to_ascii_uppercase() as u8);
+        if letter.is_some() {
+            rest = &rest[1..];
         }
         let mut count = 1u32;
         if let Some((a, b)) = rest.split_once('#') {
             rest = a;
             count = b.trim().parse().unwrap_or(1);
         }
-        let k = if rest.is_empty() { 0 } else { match rest.trim().parse::<usize>() { Ok(v) => v, Err(_) => continue } };
+        let k = if rest.is_empty() && letter.is_none() { 0 } else { match rest.trim().parse::<usize>() { Ok(v) => v, Err(_) => continue } };
+        if let Some(l) = letter {
+            let e = letters.entry(l).or_insert((0, Vec::new()));
+            if e.1.len() <= k {
+                e.1.resize(k + 1, Vec::new());
+            }
+            e.0 = e.0.max(count);
+            e.1[k].push(i);
+            continue;
+        }
         if groups.len() <= k {
             groups.resize(k + 1, (0, Vec::new()));
         }
@@ -360,6 +397,31 @@ fn prune(graph: &Graph, rng: &mut TerrainRng) -> Result<(Graph, Vec<bool>), GenE
             }
             for n in list {
                 remove_node(&mut g, &mut removed, &mut dropped, n);
+            }
+        }
+    }
+    // Letter groups (`0x141fe9970`): the numbered subgroups that stay are kept per letter in
+    // the job's history of this graph (the vector `0x141feb050` returns), empty on the first
+    // generation: a discarded `below(n)`, a partial shuffle of `0..n` for `count` steps
+    // (`0x141fecde0`), cut to `count`; the nodes of the other subgroups go.
+    for (letter, (count, subgroups)) in letters {
+        let n = subgroups.len();
+        let mut keep: Vec<usize> = LETTER_HISTORY.with(|h| h.borrow().get(&letter).cloned().unwrap_or_default());
+        if keep.is_empty() && count != 0 {
+            keep = (0..n).collect();
+            rng.below(n as u32);
+            for i in 0..(count as usize).min(n) {
+                let k = rng.uniform((n - i) as u32) as usize;
+                keep.swap(i, i + k);
+            }
+            keep.truncate(count as usize);
+            LETTER_HISTORY.with(|h| h.borrow_mut().insert(letter, keep.clone()));
+        }
+        for (k, list) in subgroups.into_iter().enumerate() {
+            if !keep.contains(&k) {
+                for node in list {
+                    remove_node(&mut g, &mut removed, &mut dropped, node);
+                }
             }
         }
     }
@@ -537,26 +599,42 @@ fn edge_symmetric(types: &mut TerrainTypes, files: &dyn crate::generate::Files, 
     edge_symmetric(types, files, &t.splits[0].0)
 }
 
+/// The master's keys, with `OuterGroundType` made a full path (like the other file keys it is
+/// relative to the `.tsi` unless it starts with `Metadata/`: `Tiles/water.gt` of MapUniqueLake).
+fn master_entries(bytes: &[u8], tsi_path: &str) -> std::collections::HashMap<String, String> {
+    let mut tsi = tsi_entries(bytes);
+    if let Some(v) = tsi.get_mut("OuterGroundType") {
+        if !(v.len() > 9 && v[..9].eq_ignore_ascii_case("metadata/")) {
+            *v = format!("{}/{v}", tsi_path.rsplit_once('/').map_or("", |d| d.0));
+        }
+    }
+    tsi
+}
+
 /// A `.dgr` graph: the dungeon layout (`crate::dungeon`), then its tile pass
 /// (`crate::dungeon_tiles`).
-fn generate_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[bool], rng: &mut TerrainRng, extra: Option<&Graph>) -> Result<TileMap, GenError> {
+fn generate_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[bool], rng: &mut TerrainRng, extra: Option<&Graph>, probe: &mut dyn FnMut(Stage)) -> Result<TileMap, GenError> {
     let mut built = build_dungeon(files, graph, removed, rng, None)?;
     // `0x141ff7e00` / `0x141ff05f0`: each `graph` node's subgraph is generated after the main
     // graph's fill and de-repetition, straight into its reserved rectangle of the map.
     let mut done: Vec<(Built, (i32, i32), Margins)> = Vec::new();
     for (file, origin) in std::mem::take(&mut built.subgraphs) {
         let mut sub = Graph::parse_bytes(&files.read(&file)?).map_err(|e| data(format!("{file}: {e:?}")))?;
-        if sub.dungeon_defaults.is_none() {
-            return Err(GenError::Unsupported(format!("subgraph {file}: not a dungeon graph (not ported)")));
-        }
         // Turned like the main graph (`0x141ff05f0` sets the parent's region).
         turn(files, &mut sub, graph.region)?;
-        random_offsets(&mut sub, rng);
+        let is_dgr = sub.dungeon_defaults.is_some();
+        if is_dgr {
+            random_offsets(&mut sub, rng);
+        }
         let (sub, removed) = prune(&sub, rng)?;
         // The region sits inside the subgraph master's `OuterBufferSize` margins.
         let m = Margins::parse(&crate::text::decode_utf16(&files.read(&sub.master_file)?));
         let at = (origin.0 + m.left as i32, origin.1 + m.top as i32);
-        let inner = build_dungeon(files, &sub, &removed, rng, Some((&built.map, at)))?;
+        let inner = if is_dgr {
+            build_dungeon(files, &sub, &removed, rng, Some((&built.map, at)))?
+        } else {
+            build_tgr(files, &sub, removed, rng, probe, Some((&built.map, at)))?
+        };
         if !inner.subgraphs.is_empty() {
             return Err(GenError::Unsupported(format!("subgraph {file}: nested subgraphs (not ported)")));
         }
@@ -599,6 +677,9 @@ fn generate_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: 
         }
     }
     for (mut inner, origin, m) in done.into_iter().rev() {
+        if std::env::var("POE_DBG").is_ok() {
+            eprintln!("DBG subgraph outer pass origin {:?} size {}x{} pieces {}", origin, inner.map.width, inner.map.height, inner.map.cells.iter().filter(|c| c.is_some()).count());
+        }
         let g = inner.tsi.get("OuterGroundType").cloned();
         let (w, h) = (inner.map.width, inner.map.height);
         let st = storey_of(&inner.tsi);
@@ -612,7 +693,10 @@ fn generate_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: 
             let mut window = built.map.window(origin, w + m.left + m.right, h + m.top + m.bottom);
             let rect = (m.left as i32, m.top as i32, (m.left + w) as i32, (m.top + h) as i32);
             let edges = inner.master.edge_type_table(files)?;
-            crate::outer_buffer::outer_buffer_window(&mut window, rect, g.as_deref(), true, &mut inner.master, files, &edges, rng)?;
+            crate::outer_buffer::outer_buffer_window(&mut window, rect, g.as_deref(), true, &mut inner.master, files, &edges, rng).map_err(|e| match e {
+                GenError::Unsupported(s) => GenError::Unsupported(format!("{s} (outer buffer of the subgraph window at {origin:?}, {}x{}, margins {m:?})", w + m.left + m.right, h + m.top + m.bottom)),
+                e => e,
+            })?;
             built.map.paste(&window, origin);
         }
         for (i, was) in before.iter().enumerate() {
@@ -670,7 +754,7 @@ struct Built {
 fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[bool], rng: &mut TerrainRng, window: Option<(&TileMap, (i32, i32))>) -> Result<Built, GenError> {
     let tsi_path = graph.master_file.clone();
     let tsi_bytes = files.read(&tsi_path)?;
-    let tsi = tsi_entries(&tsi_bytes);
+    let tsi = master_entries(&tsi_bytes, &tsi_path);
     let dir = tsi_path.rsplit_once('/').map_or("", |d| d.0);
     let rel = |k: &str| tsi.get(k).map(|v| if v.len() > 9 && v[..9].eq_ignore_ascii_case("metadata/") { v.to_string() } else { format!("{dir}/{v}") });
     // Container graphs (`master_container.tsi` of MapKarst, MapDerelictMansion, P1_6,
@@ -847,11 +931,23 @@ fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng:
     } else {
         graph
     };
+    LETTER_HISTORY.with(|h| h.borrow_mut().clear());
     let (pruned, removed) = prune(graph, rng)?;
     let graph = &pruned;
     if graph.dungeon_defaults.is_some() {
-        return generate_dungeon(files, graph, &removed, rng, extra);
+        return generate_dungeon(files, graph, &removed, rng, extra, probe);
     }
+    let Built { map, mut master, tsi_bytes, tsi, .. } = build_tgr(files, graph, removed, rng, probe, None)?;
+    let margins = Margins::parse(&crate::text::decode_utf16(&tsi_bytes));
+    // Outer buffer.
+    let edge_types = master.edge_type_table(files)?;
+    outer_buffer(&map, margins, tsi.get("OuterGroundType").map(String::as_str), false, &mut master, files, &edge_types, rng)
+}
+
+/// A `.tgr` graph up to its outer buffer: the whole outdoor pipeline in `graph`'s own frame.
+/// `window` is the map and origin a subgraph is generated into (its corners start as the map's).
+#[allow(clippy::too_many_lines)]
+fn build_tgr(files: &dyn crate::generate::Files, graph: &Graph, removed: Vec<bool>, rng: &mut TerrainRng, probe: &mut dyn FnMut(Stage), window: Option<(&TileMap, (i32, i32))>) -> Result<Built, GenError> {
     let mut nodes: Vec<JitterNode> = graph
         .nodes
         .iter()
@@ -881,8 +977,7 @@ fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng:
     // Master: tile set, fill tiles, room set, outer buffer.
     let tsi_path = graph.master_file.clone();
     let tsi_bytes = files.read(&tsi_path)?;
-    let tsi = tsi_entries(&tsi_bytes);
-    let margins = Margins::parse(&crate::text::decode_utf16(&tsi_bytes));
+    let tsi = master_entries(&tsi_bytes, &tsi_path);
     let dir = tsi_path.rsplit_once('/').map_or("", |d| d.0);
     let rel = |k: &str| tsi.get(k).map(|v| if v.len() > 9 && v[..9].eq_ignore_ascii_case("metadata/") { v.to_string() } else { format!("{dir}/{v}") });
     let mut master = match (rel("TileSet"), rel("FillTiles")) {
@@ -968,6 +1063,9 @@ fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng:
     let mut map = TileMap::new(graph.width, graph.height);
     map.ground_flags = master.ground_flag_table(files)?;
     map.edge_flags = master.edge_flag_table(files)?;
+    if let Some((outer, origin)) = window {
+        map.copy_lattice(outer, origin);
+    }
     for p in placed.iter_mut() {
         // `0x1420c9970` first lets a room that does not fit move (`0x1420c9260`).
         let align = crate::rooms::node_alignment(&placed_graph, p.node, &mut types, files)?;
@@ -1280,8 +1378,12 @@ fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng:
     probe(Stage::Lattice("borders", &map));
     lattice::border_floods(&mut map, &master.tiles);
     probe(Stage::Lattice("flood", &map));
-    lattice::mark_unwalkable(&mut map, &master.tiles);
-    lattice::mark_enclosed_fills(&mut map, files).map_err(data)?;
+    // The unwalkable marking (`0x141fe0fd0`) works from the real map's border: a subgraph's
+    // window marks nothing (G3_1's `End_*.tgr`: no corner gets flag 8).
+    if window.is_none() {
+        lattice::mark_unwalkable(&mut map, &master.tiles);
+        lattice::mark_enclosed_fills(&mut map, files).map_err(data)?;
+    }
     probe(Stage::Lattice("heights", &map));
     let default_ground = graph.ground_types.iter().find(|g| !g.is_empty()).cloned();
     lattice::settle(&mut map, default_ground.as_deref());
@@ -1329,7 +1431,5 @@ fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng:
     derepeat_pass(&mut map, &master, &rooms, rng);
     crate::postunique::run(&mut map, &mut master, files, rng)?;
 
-    // Outer buffer.
-    let edge_types = master.edge_type_table(files)?;
-    outer_buffer(&map, margins, tsi.get("OuterGroundType").map(String::as_str), false, &mut master, files, &edge_types, rng)
+    Ok(Built { map, master, tsi_bytes, tsi, subgraphs: Vec::new() })
 }

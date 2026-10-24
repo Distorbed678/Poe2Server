@@ -583,7 +583,8 @@ pub fn room_candidates(
                 && (0..8u8).any(|o| r.orientations & (1 << o) != 0 && r.key.oriented(o).edges == key.edges)
         })
     };
-    if !any_match(&key) && !adjust_sides(g, node, &mut sides, &mut key, &any_match, types, files)? {
+    // `0x1420c76d0` skips the side adjustment (`0x1420c51c0`) for a node without a room type.
+    if !n.room_type.is_empty() && !any_match(&key) && !adjust_sides(g, node, &mut sides, &mut key, &any_match, types, files)? {
         return Ok((Vec::new(), sides));
     }
     let mut matches = Vec::new();
@@ -782,6 +783,9 @@ pub fn place_node_opt(
     let cx = (x / 23).min(tiles.0 - 1);
     let cy = (y / 23).min(tiles.1 - 1);
     loop {
+        if list.is_empty() {
+            return Ok(None);
+        }
         let total: u32 = list.iter().map(|c| c.weight).sum();
         let mut r = rng.below(total);
         if list.is_empty() {

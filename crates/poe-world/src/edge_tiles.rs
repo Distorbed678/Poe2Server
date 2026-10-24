@@ -842,7 +842,8 @@ impl EdgeTiler<'_> {
         if p.is_loop {
             return self.tilise_loop(p, e, end, rng);
         }
-        if self.fit(&mut p, rng) {
+        let fitted = self.fit(&mut p, rng);
+        if fitted {
             for k in 1..p.tiles.len().saturating_sub(1) {
                 let (x, y) = p.tiles[k];
                 let i = self.idx(x as u32, y as u32);

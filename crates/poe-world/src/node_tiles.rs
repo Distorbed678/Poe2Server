@@ -116,6 +116,10 @@ pub fn feature_has_edges(set: &TileSet, feature: &str, edges: &[Option<String>; 
     })
 }
 
+fn base_size(t: &crate::tileset::TileDef, o: u8) -> (u8, u8) {
+    t.key.oriented(o).size
+}
+
 /// `0x1420c76d0`, tile branch: the sizes the feature's tiles with the key's edges come in
 /// (`0x141d09700`, sorted), and per size every tile entry with those edges and that size
 /// (`0x141d0a7d0`; the size swapped when there is none) of that feature, filtered by the node's
@@ -148,8 +152,12 @@ pub fn candidates(view: &dyn EdgeView, node: usize, node_o: u8, feature: &str, k
                 group = all.iter().filter(|x| x.3.size == (b, a)).collect();
             }
             for (tile, o, w, k, _) in group {
-                let ok = if node_o < 8 { *o == node_o } else { fits_edges(k, sides, view, node, strict, types, files)? };
-                if ok {
+                // A fixed-orientation node keeps every orientation whose edges match, each
+                // listed with the node's orientation (as for rooms: G3_1's bridge lists its
+                // tile twice).
+                if node_o < 8 {
+                    out.push(Entry { tile: *tile, orientation: node_o, weight: *w, size: base_size(&set.tiles[*tile], node_o) });
+                } else if fits_edges(k, sides, view, node, strict, types, files)? {
                     out.push(Entry { tile: *tile, orientation: *o, weight: *w, size: k.size });
                 }
             }

@@ -146,6 +146,15 @@ impl Pass<'_> {
         }
     }
 
+    /// A placed piece's tile header: the master's tile, or for a piece pasted from a subgraph
+    /// (another tile set) the header loaded by [`preload_headers`].
+    fn piece_tdt(&self, piece: &crate::generate::Piece) -> Option<&crate::tdt::Tdt> {
+        match piece.tile {
+            Some(t) => Some(&self.master.tiles.tiles[t].tdt),
+            None => self.master.headers.get(&piece.path.to_ascii_lowercase()),
+        }
+    }
+
     /// `0x141fd5cd0`: the edge type crossing side `side` of a placed cell, where the cell's
     /// offset along that side is `off` (mirrored on the far sides); for virtual edges, the split
     /// type whose exit crosses. Returns it with the (adjusted) offset.
@@ -153,7 +162,7 @@ impl Pass<'_> {
         let i = self.map.index(x, y)?;
         let p = self.map.piece_at[i]?;
         let piece = &self.map.pieces[p];
-        let tdt = &self.master.tiles.tiles[piece.tile?].tdt;
+        let tdt = self.piece_tdt(piece)?;
         let key = TileKey::from_tdt(tdt).oriented(piece.orientation);
         let path = key.edges[side].clone()?;
         let et = self.edges.get(&path)?;
@@ -177,7 +186,7 @@ impl Pass<'_> {
     fn exit(&self, x: i32, y: i32, side: usize) -> i32 {
         let i = self.map.index(x, y).unwrap();
         let piece = &self.map.pieces[self.map.piece_at[i].unwrap()];
-        let tdt = &self.master.tiles.tiles[piece.tile.unwrap()].tdt;
+        let tdt = self.piece_tdt(piece).unwrap();
         let o = piece.orientation;
         let own = crate::edge_tiles::own_side_pub(o, side);
         let dim = if own & 1 == 0 { tdt.size.0 } else { tdt.size.1 } as i32;
@@ -475,6 +484,15 @@ impl Pass<'_> {
     }
 }
 
+/// Loads the headers of the pieces that are not tiles of the master's set (pasted from a
+/// subgraph), so the strips can read their edges.
+fn preload_headers(map: &TileMap, master: &mut Master, files: &dyn Files) -> Result<(), GenError> {
+    for p in map.pieces.iter().filter(|p| p.tile.is_none()) {
+        master.header(files, &p.path)?;
+    }
+    Ok(())
+}
+
 /// `0x141fd8360`: the region map placed inside its outer buffer and the margins tiled.
 /// `outer_ground` is the master's `OuterGroundType`; `repair` levels its fill tiles (dungeons).
 pub fn outer_buffer(
@@ -503,6 +521,7 @@ pub fn outer_buffer(
     if let Some(g) = outer_ground {
         fill_black(&mut map, rect, g, repair, master, files)?;
     }
+    preload_headers(&map, master, files)?;
     let mut pass = Pass { map: &mut map, master, files, edges, w: w as i32, h: h as i32 };
     pass.extend_lattice(rect);
     pass.below_strip(rect, rng)?;
@@ -539,6 +558,7 @@ pub fn outer_buffer_window(
         fill_black(map, rect, g, repair, master, files)?;
     }
     let (w, h) = (map.width as i32, map.height as i32);
+    preload_headers(map, master, files)?;
     let mut pass = Pass { map, master, files, edges, w, h };
     pass.extend_lattice(rect);
     pass.below_strip(rect, rng)?;
@@ -669,7 +689,8 @@ fn fill_black(map: &mut TileMap, rect: (i32, i32, i32, i32), ground: &str, repai
         }
         if waiting.len() == before && ready.is_empty() {
             if std::env::var("POE_DBG").is_ok() {
-                eprintln!("DBG stuck rect {:?} waiting {:?}", rect, waiting.iter().map(|c| (c.0 + x0, c.1 + y0)).collect::<Vec<_>>());
+                let filled = (0..h).flat_map(|y| (0..w).map(move |x| (x, y))).filter(|&(x, y)| map.index(x0 + x, y0 + y).is_some_and(|i| map.cells[i].is_some())).count();
+                eprintln!("DBG stuck rect {:?} map {}x{} filled {} waiting {} first {:?}", rect, map.width, map.height, filled, waiting.len(), waiting.first());
             }
             return Err(GenError::Unsupported("could not fix heights in dungeon".into()));
         }
