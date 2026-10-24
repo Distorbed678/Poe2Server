@@ -232,17 +232,34 @@ impl TileMap {
                 }
                 Spill::Point(x, y, g, h) => {
                     if let Some(j) = m.point_index(x + offset.0, y + offset.1) {
-                        let p = &mut m.lattice[j];
-                        p.flags |= 3;
-                        if g.is_some() {
-                            p.ground = g.clone();
-                        }
-                        p.height = *h;
+                        m.replay_point(j, g, *h);
                     }
                 }
             }
         }
         m
+    }
+
+    /// A corner write of a tile placed outside this map's bounds at the time, replayed in
+    /// placement order with `place`'s rule (`0x141d0bad0`): the ground always, the height (and the
+    /// set flag) only where the tile's or the old ground takes heights (`.gt` flag 1).
+    fn replay_point(&mut self, j: usize, g: &Option<String>, h: i8) {
+        let takes_height = |m: &Self, g: &Option<String>| g.as_ref().is_none_or(|g| m.gt_flags(g) & 1 != 0);
+        let old = self.lattice[j].ground.clone();
+        let set_height = takes_height(self, g) || takes_height(self, &old);
+        if std::env::var("POE_DBG_RP").is_ok() {
+            let w = self.width as usize + 1;
+            eprintln!("RP ({},{}) h{h} new {:?} (flags {:?}) old {:?} (flags {:?}) set {set_height} cur_h {} cur_flags {}", j % w, j / w, g, g.as_ref().map(|g| self.gt_flags(g)), old, old.as_ref().map(|g| self.gt_flags(g)), self.lattice[j].height, self.lattice[j].flags);
+        }
+        let p = &mut self.lattice[j];
+        p.flags |= 1;
+        if g.is_some() {
+            p.ground = g.clone();
+        }
+        if set_height {
+            p.height = h;
+            p.flags |= 2;
+        }
     }
 
     /// A `width × height` copy of this map from `origin` on (cells, pieces moved, corners).
@@ -311,14 +328,7 @@ impl TileMap {
                     None => self.spill.push(Spill::Cell(x + origin.0, y + origin.1, piece + base, cell.clone())),
                 },
                 Spill::Point(x, y, g, h) => match self.point_index(x + origin.0, y + origin.1) {
-                    Some(j) => {
-                        let p = &mut self.lattice[j];
-                        p.flags |= 3;
-                        if g.is_some() {
-                            p.ground = g.clone();
-                        }
-                        p.height = *h;
-                    }
+                    Some(j) => self.replay_point(j, g, *h),
                     None => self.spill.push(Spill::Point(x + origin.0, y + origin.1, g.clone(), *h)),
                 },
             }
@@ -444,6 +454,7 @@ impl TileMap {
         // is the wildcard) is placed without the mirror bit.
         let real_edge = tdt.edges.iter().flatten().any(|e| self.edge_flags.get(&e.to_ascii_lowercase()).copied().unwrap_or(0) & 0x80 == 0);
         let o = if tdt.spawner && !real_edge && std::env::var("POE_NO_PLACE_MASK").is_err() { o & 3 } else { o };
+        if std::env::var("POE_DBG_PL").is_ok() { eprintln!("PL {x} {y} o{o} h{height} {}", path); }
         let size = tdt.size;
         let piece = self.pieces.len();
         self.pieces.push(Piece {
@@ -469,9 +480,10 @@ impl TileMap {
         }
         // Corner points (`0x141d0bad0`): the tile's ground per point, and its height where the
         // ground (old or new) is missing or takes heights (`.gt` flag 1).
-        for v in 0..=h {
+        for v_ in 0..=h {
             for u in 0..=w {
-                let k = ((w + 1) * v + u) as usize;
+                let v = v_;
+                let k = ((w + 1) * v_ + u) as usize;
                 let g = tdt.point_grounds.get(k).cloned().flatten().map(|g| g.to_ascii_lowercase());
                 let (dx, dy) = crate::tileset::orient_point(o, w, h, u, v);
                 let Some(i) = self.point_index(x + dx, y + dy) else {
@@ -482,6 +494,8 @@ impl TileMap {
                 let old = self.lattice[i].ground.clone();
                 let takes_height = |m: &Self, g: &Option<String>| g.as_ref().is_none_or(|g| m.gt_flags(g) & 1 != 0);
                 let set_height = takes_height(self, &g) || takes_height(self, &old);
+                if let Ok(v) = std::env::var("POE_DBG_WR2") { let v: Vec<i32> = v.split(',').map(|a| a.parse().unwrap()).collect(); if (x + dx + v[2], y + dy + v[2]) == (v[0], v[1]) { eprintln!("WR2 u,v=({u},{v_}) dxdy=({dx},{dy}) k={k} d={:?} all_d={:?} size={:?}", tdt.point_heights.get(k), tdt.point_heights, tdt.size); eprintln!("WR2 by tile ({x},{y}) {path} o{o} h{height} g {:?} (flags {:?}) old {:?} (flags {:?}) set_height {set_height} cur_h {}", g, g.as_ref().map(|g| self.gt_flags(g)), old, old.as_ref().map(|g| self.gt_flags(g)), self.lattice[i].height); } }
+                if std::env::var("POE_DBG_WR").is_ok() && (x + dx, y + dy) == (96, 3) { eprintln!("WR (96,3) by tile ({x},{y}) o{o} h{height} g {:?} old {:?} set_height {set_height}", g, old); }
                 let p = &mut self.lattice[i];
                 p.flags |= 1;
                 if g.is_some() {
