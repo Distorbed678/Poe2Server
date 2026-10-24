@@ -496,8 +496,8 @@ pub struct RoomCandidate {
 /// edges the first moves next to it (to the following side if free, else the preceding one);
 /// with three, the edge after the free side moves into it, and if no room matches that, the
 /// edge before it instead. Returns whether a room matches afterwards.
-fn adjust_sides(
-    g: &PlacedGraph,
+pub(crate) fn adjust_sides(
+    g: &dyn EdgeView,
     node: usize,
     sides: &mut [usize; 4],
     key: &mut TileKey,
@@ -509,7 +509,7 @@ fn adjust_sides(
     let mut real = Vec::new();
     for (i, s) in slots.iter().enumerate() {
         if let Some(e) = s {
-            if !types.edge(files, &g.graph.edges[*e].edge_type)?.wildcard {
+            if !types.edge(files, g.edge_type(*e))?.wildcard {
                 real.push(i);
             }
         }

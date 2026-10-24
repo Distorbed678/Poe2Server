@@ -60,6 +60,21 @@ pub trait Files {
     fn special_tile(&self, _row: usize) -> Option<String> {
         None
     }
+    /// Rooms league mechanics rolled for this run add to the pre-unique list
+    /// ([`crate::league::extra_rooms`]); [`crate::area::generate_probed_files`] wraps its files
+    /// with them.
+    fn league_rooms(&self) -> Vec<LeagueRoom> {
+        Vec::new()
+    }
+}
+
+/// A room a league mechanic adds (`ExtraTerrainFeatures`): the `.arm`, the orientation mask of
+/// its pre-unique entry, and the `.tdt` tiles the feature adds to the tile set.
+#[derive(Debug, Clone)]
+pub struct LeagueRoom {
+    pub room: String,
+    pub mask: u8,
+    pub tiles: Vec<String>,
 }
 
 impl Files for poe_data::GameFiles {
@@ -638,6 +653,17 @@ pub fn load_tdt(files: &dyn Files, path: &str) -> Result<Tdt, GenError> {
     Ok(tdt)
 }
 
+fn collect_tst(files: &dyn Files, path: &str, out: &mut Vec<poe_data_tools::file_parsers::tst::types::Entry>, depth: u32) -> Result<(), GenError> {
+    let parsed = TSTParser.parse(&files.read(path)?).map_err(|e| data_err(path, e))?;
+    if depth < 8 {
+        for inc in &parsed.includes {
+            collect_tst(files, &inc.to_ascii_lowercase(), out, depth + 1)?;
+        }
+    }
+    out.extend(parsed.tdt_files);
+    Ok(())
+}
+
 impl Master {
     /// A master without tile set or fill tiles (container graphs, whose `.tsi` names neither).
     pub fn empty() -> Self {
@@ -645,9 +671,11 @@ impl Master {
     }
 
     pub fn load(files: &dyn Files, tst: &str, gft: &str) -> Result<Self, GenError> {
-        let parsed = TSTParser
-            .parse(&files.read(tst)?)
-            .map_err(|e| data_err(tst, e))?;
+        // `include "<other.tst>"` lines (G3_town) come first in the file: the included file's
+        // entries precede the file's own.
+        let mut entries = Vec::new();
+        collect_tst(files, tst, &mut entries, 0)?;
+        let parsed = poe_data_tools::file_parsers::tst::types::TSTFile { includes: Vec::new(), tdt_files: entries };
         let mut defs = Vec::new();
         let mut headers = HashMap::new();
         let mut gt_flags: HashMap<String, u8> = HashMap::new();
@@ -674,13 +702,14 @@ impl Master {
                 tdt,
             });
         }
-        let gft_file = GFTParser
-            .parse(&files.read(gft)?)
-            .map_err(|e| data_err(gft, e))?;
+        let sections = if gft.is_empty() {
+            Vec::new()
+        } else {
+            GFTParser.parse(&files.read(gft)?).map_err(|e| data_err(gft, e))?.sections
+        };
         // A group without entries (all its lines commented out) does not exist for the client:
         // a ground naming it fills from the `default` group (`DefaultHyenas` of `G2_1`).
-        let fills = gft_file
-            .sections
+        let fills = sections
             .iter()
             .filter(|s| !s.files.is_empty())
             .map(|s| {
@@ -699,6 +728,24 @@ impl Master {
             ground_names: HashMap::new(),
             outer_fill_height: None,
         })
+    }
+
+    /// `0x141d09a30`: a `.tdt` a league mechanic adds to the tile set (weight 1, every
+    /// orientation the tile allows), after the `.tst` entries.
+    pub fn add_extra_tile(&mut self, files: &dyn Files, path: &str) -> Result<(), GenError> {
+        let tdt = load_tdt(files, path)?;
+        self.headers.insert(path.to_ascii_lowercase(), tdt.clone());
+        let mut key = TileKey::from_tdt(&tdt);
+        for g in key.grounds.iter_mut() {
+            let Some(p) = g.clone() else { continue };
+            let flags = crate::rooms::ground_flags(&crate::text::decode_utf16(&files.read(&p.to_ascii_lowercase())?));
+            if flags & 0x10 != 0 {
+                *g = None;
+            }
+        }
+        let orientations = tdt.restrict_orientations(0xff);
+        self.tiles.add(TileDef { key, path: path.to_string(), weight: 1, orientations, tdt });
+        Ok(())
     }
 
     /// `.gt` flags of every ground the tile set's tiles use (for [`TileMap::ground_flags`]).
@@ -935,7 +982,7 @@ pub fn room_pass_oriented(
             // Slot +0x72: the lowest corner's height moves into the tile height.
             // (Only overlay rooms are checked against the client for this; node rooms of
             // `.tgr` graphs keep the absolute corner heights.)
-            let low = if mark { key.heights.iter().map(|&v| v as i8).min().unwrap_or(0) } else { 0 };
+            let low = key.heights.iter().map(|&v| v as i8).min().unwrap_or(0);
             for v in &mut key.heights {
                 *v = (*v as i8 - low) as u8;
             }

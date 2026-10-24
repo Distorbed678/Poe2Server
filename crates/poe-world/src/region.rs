@@ -120,8 +120,10 @@ pub fn turn_graph(g: &mut Graph, o: u8, symmetric: &dyn Fn(&str) -> bool) {
         if o & 1 == 1 && n.values.len() > 10 {
             n.values.swap(9, 10);
         }
+        // A node with the lock-orientation flag (value 4) keeps its orientation: the region's turn does not
+        // compose with it (the `rune` room of `ExpeditionLogBook_Heath`, region orientation 6).
         let no = crate::rooms::node_orientation(&n.orientation);
-        if no < 8 {
+        if no < 8 && n.values.get(4).copied().unwrap_or(0) == 0 {
             n.orientation = ORIENTATION_NAMES[compose(no, o) as usize].to_string();
         }
     }

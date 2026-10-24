@@ -176,6 +176,7 @@ pub fn generate_probed(gd: &GameData, area_id: &str, rng: &mut TerrainRng, force
 struct WithSpecialTiles<'a> {
     inner: &'a dyn crate::generate::Files,
     special: Vec<String>,
+    league: Vec<crate::generate::LeagueRoom>,
 }
 
 impl crate::generate::Files for WithSpecialTiles<'_> {
@@ -184,6 +185,9 @@ impl crate::generate::Files for WithSpecialTiles<'_> {
     }
     fn special_tile(&self, row: usize) -> Option<String> {
         self.special.get(row).cloned()
+    }
+    fn league_rooms(&self) -> Vec<crate::generate::LeagueRoom> {
+        self.league.clone()
     }
 }
 
@@ -200,7 +204,7 @@ pub fn generate_probed_files(gd: &GameData, files: &dyn crate::generate::Files, 
         return Err(data(format!("{area_id}: no topologies")));
     }
     // `phase_cad0`: league mechanic rolls come before the topology choice.
-    crate::league::roll_area(gd, area_id, rng);
+    let rolled = crate::league::roll_area(gd, area_id, rng);
     // `0x141ff90f0`: the sub-seed is drawn unless the area's kind (`+0x1b4`, the unnamed i32
     // column 45 of `WorldAreas`) is 0x21, a world-map panel: it then comes from the caller's
     // seed word and the main stream is not touched (unforced choice not ported: 0).
@@ -240,7 +244,7 @@ pub fn generate_probed_files(gd: &GameData, files: &dyn crate::generate::Files, 
         None
     };
     let special: Vec<String> = gd.table("SpecialTiles").ok().map(|t| (0..).map_while(|r| t.row(r)).filter_map(|r| r.str("TDTFile").ok().map(String::from)).collect()).unwrap_or_default();
-    let files = WithSpecialTiles { inner: files, special };
+    let files = WithSpecialTiles { inner: files, special, league: crate::league::extra_rooms(gd, &rolled) };
     let map = generate_graph_probed(&files, &graph, rng, probe, ship.as_ref())?;
     let draws = rng.draws;
     let logged = rng.log.as_ref().map(Vec::len);
@@ -774,7 +778,8 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
         }
         None => Default::default(),
     };
-    let grid = crate::dungeon::layout(files, graph, removed, &set, overlap, fill_height, &file_groups, rng)?;
+    let unit: u32 = tsi.get("RoomUnitSize").and_then(|v| v.trim().parse().ok()).unwrap_or(9);
+    let grid = crate::dungeon::layout(files, graph, removed, &set, overlap, unit, fill_height, &file_groups, rng)?;
     if std::env::var("POE_DBG").is_ok() {
         for (i, r) in grid.rooms.iter().enumerate() {
             eprintln!("DBG room {i} {} o{} origin {:?} size {:?} special {}", r.path, r.orientation, r.origin, r.size, r.special);
@@ -782,16 +787,24 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
     }
     let mut master = match (rel("TileSet"), rel("FillTiles")) {
         (Some(t), Some(f)) => Master::load(files, &t, &f)?,
+        // `G_login`: a tile set and no fill tiles (nothing needs a fill group there).
+        (Some(t), None) => Master::load(files, &t, "")?,
         (None, None) => Master::empty(),
-        _ => return Err(data("master names a TileSet without FillTiles or the reverse")),
+        _ => return Err(data("master names FillTiles without a TileSet")),
     };
     // `OuterFillHeightOverride` (master +0x161 set, value +0x153): the outer fill places plain.
+    // The league features' tiles join the tile set when the features are added (`0x141f8aed0`).
+    let league = files.league_rooms();
+    for lr in &league {
+        for t in &lr.tiles {
+            master.add_extra_tile(files, t)?;
+        }
+    }
     master.outer_fill_height = tsi.get("OuterFillHeightOverride").and_then(|v| v.trim().parse::<i8>().ok()).or_else(|| tsi.contains_key("OverrideSpawns").then_some(0));
     let ecf = match rel("EdgeCombination") {
         Some(p) => crate::dungeon_tiles::Ecf::parse(&crate::text::decode_utf16(&files.read(&p)?)),
         None => Default::default(),
     };
-    let unit: u32 = tsi.get("RoomUnitSize").and_then(|v| v.trim().parse().ok()).unwrap_or(9);
     let step = unit - grid.overlap;
     let mut map = TileMap::new(grid.w * step + grid.overlap, grid.h * step + grid.overlap);
     map.ground_flags = master.ground_flag_table(files)?;
@@ -807,7 +820,23 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
     }
     let edge_types = master.edge_type_table(files)?;
     let flag = |k: &str| tsi.get(k).is_some_and(|v| v.trim() != "0");
-    let pass = crate::dungeon_tiles::TilePass { master: &master, ecf: &ecf, unit, overlap: grid.overlap, edge_types: &edge_types, overlap_fixes: flag("AllowInteriorOverlapFixes"), doors_disabled: flag("DisableDoors"), grounds: [1, 2, 0].map(|i| (!graph.ground_types[i].is_empty()).then(|| graph.ground_types[i].clone())) };
+    // Pending league feature rooms are placed by the tile pass in mission slots; it borrows the
+    // master, so the placement works on a second one.
+    let host = if grid.pending.is_empty() {
+        None
+    } else {
+        let mut m = match (rel("TileSet"), rel("FillTiles")) {
+            (Some(t), Some(f)) => Master::load(files, &t, &f)?,
+            _ => return Err(data("league feature rooms need a tile set and fill tiles")),
+        };
+        for lr in &league {
+            for t in &lr.tiles {
+                m.add_extra_tile(files, t)?;
+            }
+        }
+        Some(crate::dungeon_tiles::Host { files, master: std::cell::RefCell::new(m) })
+    };
+    let pass = crate::dungeon_tiles::TilePass { master: &master, ecf: &ecf, unit, overlap: grid.overlap, edge_types: &edge_types, overlap_fixes: flag("AllowInteriorOverlapFixes"), doors_disabled: flag("DisableDoors"), grounds: [1, 2, 0].map(|i| (!graph.ground_types[i].is_empty()).then(|| graph.ground_types[i].clone())), host, hosted: Default::default() };
     // The graph's own grounds reach the lattice through the per-room settle; their `.gt` flags
     // (for example `CarverUpperGround`: 0x1f, which makes the fill treat it as none) are not in
     // the tile set's table unless a tile uses them.
@@ -843,10 +872,22 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
     // the listed cells, phase 2). The generator's room list (`+0x58`) is empty for `.dgr`.
     // `0x14209c150`: the pre-unique room, before the overlay context is built.
     let mut cells = cells;
-    let (mut pre_rooms, mut pre_wiggle) = (Vec::new(), Vec::new());
+    let (mut pre_rooms, mut pre_wiggle) = (pass.hosted.take(), Vec::new());
+    // League mechanics' rooms come first (`0x14209a620`, before the injectors and the pre-unique room).
+    if rel("FillTiles").is_some() && std::env::var("POE_NO_DGR_LEAGUE").is_err() {
+        let league_rooms = files.league_rooms();
+        // `0x14209a620`: a room set with mission rooms (`mission` tag) leaves the features without
+        // the priority flag (+0x60; not the stone circle) to the mission-tile slots of the rooms.
+        let has_missions = set.rooms.iter().any(|r| r.tag.eq_ignore_ascii_case("mission"));
+        if !league_rooms.is_empty() && !has_missions {
+            (pre_rooms, pre_wiggle) = crate::fill::place_league_rooms_dgr(&mut map, &mut master, files, &league_rooms, &mut cells, rng)?;
+        }
+    }
     if rel("Overlays").is_some() && std::env::var("POE_NO_PREUNIQUE").is_err() {
         if let Some(r) = set.rooms.iter().find(|r| r.tag.eq_ignore_ascii_case("preunique")) {
-            (pre_rooms, pre_wiggle) = crate::fill::place_pre_unique(&mut map, &mut master, files, &r.path, r.orientations, &mut cells, rng)?;
+            let (r2, w2) = crate::fill::place_pre_unique(&mut map, &mut master, files, &r.path, r.orientations, &mut cells, rng)?;
+            pre_rooms.extend(r2);
+            pre_wiggle.extend(w2);
         }
     }
     cells.sort_by_key(|c| c.pos);
@@ -941,7 +982,12 @@ fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng:
     let margins = Margins::parse(&crate::text::decode_utf16(&tsi_bytes));
     // Outer buffer.
     let edge_types = master.edge_type_table(files)?;
-    outer_buffer(&map, margins, tsi.get("OuterGroundType").map(String::as_str), false, &mut master, files, &edge_types, rng)
+    let mut map = outer_buffer(&map, margins, tsi.get("OuterGroundType").map(String::as_str), false, &mut master, files, &edge_types, rng)?;
+    if std::env::var_os("POE_GRID2").is_some() {
+        lattice::mark_unwalkable(&mut map, &master.tiles);
+        lattice::mark_enclosed_fills(&mut map, files).map_err(data)?;
+    }
+    Ok(map)
 }
 
 /// A `.tgr` graph up to its outer buffer: the whole outdoor pipeline in `graph`'s own frame.
@@ -982,8 +1028,10 @@ fn build_tgr(files: &dyn crate::generate::Files, graph: &Graph, removed: Vec<boo
     let rel = |k: &str| tsi.get(k).map(|v| if v.len() > 9 && v[..9].eq_ignore_ascii_case("metadata/") { v.to_string() } else { format!("{dir}/{v}") });
     let mut master = match (rel("TileSet"), rel("FillTiles")) {
         (Some(t), Some(f)) => Master::load(files, &t, &f)?,
+        // `G_login`: a tile set and no fill tiles (nothing needs a fill group there).
+        (Some(t), None) => Master::load(files, &t, "")?,
         (None, None) => Master::empty(),
-        _ => return Err(data("master names a TileSet without FillTiles or the reverse")),
+        _ => return Err(data("master names FillTiles without a TileSet")),
     };
     // `OuterFillHeightOverride` (master +0x161 set, value +0x153): the outer fill places plain.
     master.outer_fill_height = tsi.get("OuterFillHeightOverride").and_then(|v| v.trim().parse::<i8>().ok()).or_else(|| tsi.contains_key("OverrideSpawns").then_some(0));
@@ -1282,7 +1330,9 @@ fn build_tgr(files: &dyn crate::generate::Files, graph: &Graph, removed: Vec<boo
     split_virtual(&mut lg, &lookup, (tiles.0 * 23, tiles.1 * 23), rng);
     probe(Stage::Graph("split", &lg));
     // Logical links of tile-less virtual nodes (`0x1420bcff0`).
-    let (link_tiles, _) = node_tiles::resolve_links(&mut lg)?;
+    let (link_tiles, moved_to) = node_tiles::resolve_links(&mut lg)?;
+    // Erased nodes shifted the later indices: the nodes the junction split made keep their flag.
+    let junction_made: std::collections::HashSet<usize> = junction_made.iter().filter_map(|&n| moved_to.get(n).copied().flatten()).collect();
 
     // Rounding, border dead ends and node tiles (`0x1420cade0`), slot compaction, rounding,
     // end points.
@@ -1299,7 +1349,7 @@ fn build_tgr(files: &dyn crate::generate::Files, graph: &Graph, removed: Vec<boo
                 }
             }
             None => {
-                if lg.nodes[n].fixed || junction_made.contains(&n) {
+                if lg.nodes[n].fixed {
                     continue;
                 }
             }
@@ -1313,6 +1363,9 @@ fn build_tgr(files: &dyn crate::generate::Files, graph: &Graph, removed: Vec<boo
             near = !(b <= tx && b <= ty && tx < tiles.0 - b && ty < tiles.1 - b);
         }
         if !node_tiles::needs_tile(&lg, n, near, &mut types, files)? {
+            continue;
+        }
+        if junction_made.contains(&n) && !near {
             continue;
         }
         if !near {
@@ -1391,6 +1444,9 @@ fn build_tgr(files: &dyn crate::generate::Files, graph: &Graph, removed: Vec<boo
     for p in &mut map.lattice {
         p.flags &= !4;
     }
+    // League mechanics' rooms (`0x1420bd890`, `0x1420be940`), before the overlays.
+    let league_rooms = files.league_rooms();
+    let pre_rooms = if league_rooms.is_empty() { Vec::new() } else { crate::fill::place_league_rooms(&mut map, &mut master, files, &league_rooms, rng)? };
     // Overlays before and after the fill (`0x141fa1a70`).
     let mut overlays = match rel("Overlays") {
         Some(toy) => {
@@ -1414,7 +1470,8 @@ fn build_tgr(files: &dyn crate::generate::Files, graph: &Graph, removed: Vec<boo
         o.run(1, &mut map, &mut master, &mut types, files, rng)?;
     }
     probe(Stage::Lattice("fill", &map));
-    let fill_rooms = fill_pass(&mut map, &mut master, files, rng)?;
+    let mut fill_rooms = pre_rooms;
+    fill_rooms.extend(fill_pass(&mut map, &mut master, files, rng)?);
     if let Some(o) = &mut overlays {
         o.run(2, &mut map, &mut master, &mut types, files, rng)?;
     }

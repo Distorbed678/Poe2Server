@@ -279,6 +279,17 @@ pub struct TilePass<'a> {
     /// The graph's ground types as the pass context holds them: +0x20 the default (graph line 2),
     /// +0x28 the ground of the lowest points (line 3), +0x30 that of the highest (line 1).
     pub grounds: [Option<String>; 3],
+    /// What a `missiontile` slot needs to place a pending league feature room: a master of its
+    /// own (the pass borrows the main one) with the feature's tiles, and the files.
+    pub host: Option<Host<'a>>,
+    /// The feature rooms placed in mission slots (for the de-repetition pass).
+    pub hosted: std::cell::RefCell<Vec<crate::fill::PlacedFillRoom>>,
+}
+
+/// See [`TilePass::host`].
+pub struct Host<'a> {
+    pub files: &'a dyn crate::generate::Files,
+    pub master: std::cell::RefCell<Master>,
 }
 
 impl TilePass<'_> {
@@ -290,6 +301,7 @@ impl TilePass<'_> {
         let mut doors = Doors { on: self.door_tiles().next().is_some(), ..Default::default() };
         let mut cells: Vec<GroundCell> = Vec::new();
         let mut borders: Vec<((i32, i32), Border)> = Vec::new();
+        let mut pending = grid.pending.clone();
         for p in &grid.rooms {
             if p.path.is_empty() {
                 continue;
@@ -298,7 +310,7 @@ impl TilePass<'_> {
             if doors.on && self.overlap != 0 {
                 doors.mark(p, self.unit as i32, self.overlap as i32);
             }
-            self.room(p, room, map, &mut borders, &mut cells, &mut moved, rng)?;
+            self.room(p, room, map, &mut borders, &mut cells, &mut moved, &mut pending, rng)?;
         }
         self.borders(borders, map, &mut cells, &mut doors, rng)?;
         if doors.on && !self.doors_disabled {
@@ -389,7 +401,7 @@ impl TilePass<'_> {
 
     /// `0x1420983d0`: a room's slots row by row.
     #[allow(clippy::too_many_arguments)]
-    fn room(&self, p: &crate::dungeon::PlacedRoom, room: &Room, map: &mut TileMap, borders: &mut Vec<((i32, i32), Border)>, cells: &mut Vec<GroundCell>, moved: &mut Vec<(i32, i32)>, rng: &mut TerrainRng) -> Result<(), GenError> {
+    fn room(&self, p: &crate::dungeon::PlacedRoom, room: &Room, map: &mut TileMap, borders: &mut Vec<((i32, i32), Border)>, cells: &mut Vec<GroundCell>, moved: &mut Vec<(i32, i32)>, pending: &mut Vec<crate::dungeon::Pending>, rng: &mut TerrainRng) -> Result<(), GenError> {
         let o = p.orientation;
         let step = (self.unit - self.overlap) as i32;
         let base = (p.origin.0 * step, p.origin.1 * step);
@@ -477,6 +489,45 @@ impl TilePass<'_> {
                     continue;
                 }
                 let list = self.master.tiles.candidates(&feature, &key);
+                if list.is_empty() && feature.eq_ignore_ascii_case("missiontile") {
+                    // `0x1420983d0`: a slot with no tile of its own takes a pending league feature
+                    // room of its size (`0x141f8b470`: `below(n)` among those that fit); none
+                    // pending leaves it empty.
+                    let (kw, kh) = (key.size.0 as u32, key.size.1 as u32);
+                    let fits: Vec<usize> = match &self.host {
+                        Some(h) => {
+                            let mut v = Vec::new();
+                            for (i, pe) in pending.iter().enumerate() {
+                                let r = crate::generate::load_room(h.files, &pe.room.to_ascii_lowercase())?;
+                                let (rw, rh) = (r.width() as u32, r.height() as u32);
+                                let sz = if pe.orientation & 1 == 1 && pe.orientation < 8 { (rh, rw) } else { (rw, rh) };
+                                if sz == (kw, kh) {
+                                    v.push(i);
+                                }
+                            }
+                            v
+                        }
+                        None => Vec::new(),
+                    };
+                    if fits.is_empty() {
+                        continue;
+                    }
+                    let h = self.host.as_ref().expect("host");
+                    let pe = pending.remove(fits[rng.below(fits.len() as u32) as usize]);
+                    for dy in 0..kh as i32 {
+                        for dx in 0..kw as i32 {
+                            if let Some(k) = map.point_index(pos.0 + dx, pos.1 + dy) {
+                                map.lattice[k].height = height as i8;
+                                map.lattice[k].flags |= 2;
+                            }
+                        }
+                    }
+                    let ground = map.point_index(pos.0, pos.1).and_then(|k| map.lattice[k].ground.clone());
+                    let (placed, wiggle) = crate::fill::place_hosted(map, &mut h.master.borrow_mut(), h.files, &pe.room, pe.orientation, pos, height, ground, rng)?;
+                    self.hosted.borrow_mut().extend(placed);
+                    moved.extend(wiggle);
+                    continue;
+                }
                 if list.is_empty() {
                     return Err(unsupported(format!("dungeon: no tile for {} slot ({x},{y}) at {pos:?} feature {feature:?} key {key:?}", p.path)));
                 }
