@@ -176,6 +176,7 @@ pub fn generate_probed(gd: &GameData, area_id: &str, rng: &mut TerrainRng, force
 struct WithSpecialTiles<'a> {
     inner: &'a dyn crate::generate::Files,
     special: Vec<String>,
+    league: Vec<crate::generate::LeagueRoom>,
 }
 
 impl crate::generate::Files for WithSpecialTiles<'_> {
@@ -184,6 +185,9 @@ impl crate::generate::Files for WithSpecialTiles<'_> {
     }
     fn special_tile(&self, row: usize) -> Option<String> {
         self.special.get(row).cloned()
+    }
+    fn league_rooms(&self) -> Vec<crate::generate::LeagueRoom> {
+        self.league.clone()
     }
 }
 
@@ -200,7 +204,7 @@ pub fn generate_probed_files(gd: &GameData, files: &dyn crate::generate::Files, 
         return Err(data(format!("{area_id}: no topologies")));
     }
     // `phase_cad0`: league mechanic rolls come before the topology choice.
-    crate::league::roll_area(gd, area_id, rng);
+    let rolled = crate::league::roll_area(gd, area_id, rng);
     let sub = rng.below(u32::MAX);
     // A forced topology indexes the raw list (all league modes, `0x141ff9280`); the client
     // throws for an index past its end ("Cannot force graph"). Without one it draws from the
@@ -237,7 +241,7 @@ pub fn generate_probed_files(gd: &GameData, files: &dyn crate::generate::Files, 
         None
     };
     let special: Vec<String> = gd.table("SpecialTiles").ok().map(|t| (0..).map_while(|r| t.row(r)).filter_map(|r| r.str("TDTFile").ok().map(String::from)).collect()).unwrap_or_default();
-    let files = WithSpecialTiles { inner: files, special };
+    let files = WithSpecialTiles { inner: files, special, league: crate::league::extra_rooms(gd, &rolled) };
     let map = generate_graph_probed(&files, &graph, rng, probe, ship.as_ref())?;
     let draws = rng.draws;
     let logged = rng.log.as_ref().map(Vec::len);
@@ -1188,7 +1192,9 @@ fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng:
     split_virtual(&mut lg, &lookup, (tiles.0 * 23, tiles.1 * 23), rng);
     probe(Stage::Graph("split", &lg));
     // Logical links of tile-less virtual nodes (`0x1420bcff0`).
-    let (link_tiles, _) = node_tiles::resolve_links(&mut lg)?;
+    let (link_tiles, moved_to) = node_tiles::resolve_links(&mut lg)?;
+    // Erased nodes shifted the later indices: the nodes the junction split made keep their flag.
+    let junction_made: std::collections::HashSet<usize> = junction_made.iter().filter_map(|&n| moved_to.get(n).copied().flatten()).collect();
 
     // Rounding, border dead ends and node tiles (`0x1420cade0`), slot compaction, rounding,
     // end points.
@@ -1296,6 +1302,9 @@ fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng:
     for p in &mut map.lattice {
         p.flags &= !4;
     }
+    // League mechanics' rooms (`0x1420bd890`, `0x1420be940`), before the overlays.
+    let league_rooms = files.league_rooms();
+    let pre_rooms = if league_rooms.is_empty() { Vec::new() } else { crate::fill::place_league_rooms(&mut map, &mut master, files, &league_rooms, rng)? };
     // Overlays before and after the fill (`0x141fa1a70`).
     let mut overlays = match rel("Overlays") {
         Some(toy) => {
@@ -1319,7 +1328,8 @@ fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng:
         o.run(1, &mut map, &mut master, &mut types, files, rng)?;
     }
     probe(Stage::Lattice("fill", &map));
-    let fill_rooms = fill_pass(&mut map, &mut master, files, rng)?;
+    let mut fill_rooms = pre_rooms;
+    fill_rooms.extend(fill_pass(&mut map, &mut master, files, rng)?);
     if let Some(o) = &mut overlays {
         o.run(2, &mut map, &mut master, &mut types, files, rng)?;
     }
@@ -1338,5 +1348,10 @@ fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng:
 
     // Outer buffer.
     let edge_types = master.edge_type_table(files)?;
-    outer_buffer(&map, margins, tsi.get("OuterGroundType").map(String::as_str), false, &mut master, files, &edge_types, rng)
+    let mut map = outer_buffer(&map, margins, tsi.get("OuterGroundType").map(String::as_str), false, &mut master, files, &edge_types, rng)?;
+    if std::env::var_os("POE_GRID2").is_some() {
+        lattice::mark_unwalkable(&mut map, &master.tiles);
+        lattice::mark_enclosed_fills(&mut map, files).map_err(data)?;
+    }
+    Ok(map)
 }

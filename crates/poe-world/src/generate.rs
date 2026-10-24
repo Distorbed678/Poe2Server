@@ -60,6 +60,21 @@ pub trait Files {
     fn special_tile(&self, _row: usize) -> Option<String> {
         None
     }
+    /// Rooms league mechanics rolled for this run add to the pre-unique list
+    /// ([`crate::league::extra_rooms`]); [`crate::area::generate_probed_files`] wraps its files
+    /// with them.
+    fn league_rooms(&self) -> Vec<LeagueRoom> {
+        Vec::new()
+    }
+}
+
+/// A room a league mechanic adds (`ExtraTerrainFeatures`): the `.arm`, the orientation mask of
+/// its pre-unique entry, and the `.tdt` tiles the feature adds to the tile set.
+#[derive(Debug, Clone)]
+pub struct LeagueRoom {
+    pub room: String,
+    pub mask: u8,
+    pub tiles: Vec<String>,
 }
 
 impl Files for poe_data::GameFiles {
@@ -673,6 +688,24 @@ impl Master {
             ground_names: HashMap::new(),
             outer_fill_height: None,
         })
+    }
+
+    /// `0x141d09a30`: a `.tdt` a league mechanic adds to the tile set (weight 1, every
+    /// orientation the tile allows), after the `.tst` entries.
+    pub fn add_extra_tile(&mut self, files: &dyn Files, path: &str) -> Result<(), GenError> {
+        let tdt = load_tdt(files, path)?;
+        self.headers.insert(path.to_ascii_lowercase(), tdt.clone());
+        let mut key = TileKey::from_tdt(&tdt);
+        for g in key.grounds.iter_mut() {
+            let Some(p) = g.clone() else { continue };
+            let flags = crate::rooms::ground_flags(&crate::text::decode_utf16(&files.read(&p.to_ascii_lowercase())?));
+            if flags & 0x10 != 0 {
+                *g = None;
+            }
+        }
+        let orientations = tdt.restrict_orientations(0xff);
+        self.tiles.add(TileDef { key, path: path.to_string(), weight: 1, orientations, tdt });
+        Ok(())
     }
 
     /// `.gt` flags of every ground the tile set's tiles use (for [`TileMap::ground_flags`]).

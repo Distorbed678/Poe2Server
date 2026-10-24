@@ -184,33 +184,29 @@ pub fn orientation_mask(rotations: &[String]) -> u8 {
 impl TileSet {
     /// Builds the index from tiles in `.tst` order.
     pub fn new(tiles: Vec<TileDef>) -> Self {
-        let mut index: HashMap<(String, TileKey), Vec<Candidate>> = HashMap::new();
-        for (i, t) in tiles.iter().enumerate() {
-            if t.weight == 0 {
-                continue;
-            }
-            let feature = t
-                .tdt
-                .feature
-                .clone()
-                .unwrap_or_default()
-                .to_ascii_lowercase();
-            let key = t.key.clone();
+        let mut set = Self { tiles: Vec::new(), index: HashMap::new() };
+        for t in tiles {
+            set.add(t);
+        }
+        set
+    }
+
+    /// Adds one tile after the others (`0x141d09ab0`): one candidate per allowed orientation.
+    pub fn add(&mut self, t: TileDef) {
+        let i = self.tiles.len();
+        if t.weight != 0 {
+            let feature = t.tdt.feature.clone().unwrap_or_default().to_ascii_lowercase();
             for o in 0..8u8 {
                 if t.orientations & (1 << o) == 0 {
                     continue;
                 }
-                index
-                    .entry((feature.clone(), key.oriented(o)))
+                self.index
+                    .entry((feature.clone(), t.key.oriented(o)))
                     .or_default()
-                    .push(Candidate {
-                        tile: i,
-                        orientation: o,
-                        weight: t.weight,
-                    });
+                    .push(Candidate { tile: i, orientation: o, weight: t.weight });
             }
         }
-        Self { tiles, index }
+        self.tiles.push(t);
     }
 
     pub fn candidates(&self, feature: &str, key: &TileKey) -> &[Candidate] {

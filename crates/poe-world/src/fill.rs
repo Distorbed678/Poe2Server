@@ -491,3 +491,77 @@ pub fn place_pre_unique(
     }
     Err(GenError::Unsupported(format!("Failed to place pre-unique room {room_path}")))
 }
+
+/// `0x1420bdae0` (the `.tgr` driver `0x1420bec40`, after the lattice passes and before the
+/// overlays): the rooms league mechanics added (`ExtraTerrainFeatures`). `0x1420bd890` lists the
+/// cells that are still empty and walkable (no ground, or a ground with `.gt` flags 4 and 8, on
+/// a corner without flag 8) row by row, discards a `below(n)` and shuffles the list (forward
+/// Fisher-Yates). Each room (`0x1420bde20`) draws one orientation with `below(8)` (a feature
+/// whose orientation list holds "any"), then goes to the first cell in list order where its
+/// rectangle lies inside the map on free cells: the corners under it whose ground (and the
+/// cell's) has `.gt` flag 8 or none take the cell's ground, then the room is placed with the
+/// cell's corner height (`0x141f8c8c0`). No cell fits: the room is skipped.
+pub fn place_league_rooms(map: &mut TileMap, master: &mut Master, files: &dyn Files, rooms: &[crate::generate::LeagueRoom], rng: &mut TerrainRng) -> Result<Vec<PlacedFillRoom>, GenError> {
+    for room in rooms {
+        for t in &room.tiles {
+            master.add_extra_tile(files, t)?;
+        }
+    }
+    let mut cells: Vec<(i32, i32)> = Vec::new();
+    for y in 0..map.height as i32 {
+        for x in 0..map.width as i32 {
+            if map.index(x, y).is_none_or(|i| map.cells[i].is_some()) {
+                continue;
+            }
+            let Some(k) = map.point_index(x, y) else { continue };
+            let p = &map.lattice[k];
+            let ok = p.ground.as_deref().is_none_or(|g| {
+                let f = map.gt_flags(g);
+                f & 4 != 0 && f & 8 != 0
+            });
+            if ok && p.flags & 8 == 0 {
+                cells.push((x, y));
+            }
+        }
+    }
+    let n = cells.len();
+    rng.below(n as u32);
+    for i in 0..n {
+        let k = rng.uniform((n - i) as u32) as usize;
+        cells.swap(i, i + k);
+    }
+    let mut f = Fill { map, master, files, rooms: HashMap::new(), placed: Vec::new(), height: None, wiggle: None };
+    for lr in rooms {
+        let (rw, rh) = {
+            let room = f.room(&lr.room)?;
+            (room.width() as u8, room.height() as u8)
+        };
+        let o = rng.below(8) as u8;
+        let (w, h) = oriented((rw, rh), o);
+        for &(x, y) in &cells {
+            let (mw, mh) = (f.map.width as i32, f.map.height as i32);
+            if !(x < mw && x + w <= mw && y < mh && y + h <= mh && f.free(x, y, w, h)) {
+                continue;
+            }
+            let k = f.map.point_index(x, y).unwrap();
+            let (ground, height) = (f.map.lattice[k].ground.clone(), f.map.lattice[k].height as i16);
+            // `0x141d02530`: both grounds missing or with `.gt` flag 8.
+            for py in y..=y + h {
+                for px in x..=x + w {
+                    let Some(i) = f.map.point_index(px, py) else { continue };
+                    let open = f.map.lattice[i].ground.as_deref().is_none_or(|g| f.map.gt_flags(g) & 8 != 0);
+                    if open {
+                        f.map.lattice[i].flags |= 1;
+                        if ground.is_some() {
+                            f.map.lattice[i].ground = ground.clone();
+                        }
+                    }
+                }
+            }
+            f.height = Some(height);
+            f.place_room(x, y, &lr.room, o, ground, true, rng)?;
+            break;
+        }
+    }
+    Ok(f.placed)
+}
