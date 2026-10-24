@@ -694,7 +694,8 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
         }
         None => Default::default(),
     };
-    let grid = crate::dungeon::layout(files, graph, removed, &set, overlap, fill_height, &file_groups, rng)?;
+    let unit: u32 = tsi.get("RoomUnitSize").and_then(|v| v.trim().parse().ok()).unwrap_or(9);
+    let grid = crate::dungeon::layout(files, graph, removed, &set, overlap, unit, fill_height, &file_groups, rng)?;
     if std::env::var("POE_DBG").is_ok() {
         for (i, r) in grid.rooms.iter().enumerate() {
             eprintln!("DBG room {i} {} o{} origin {:?} size {:?} special {}", r.path, r.orientation, r.origin, r.size, r.special);
@@ -708,12 +709,18 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
         _ => return Err(data("master names FillTiles without a TileSet")),
     };
     // `OuterFillHeightOverride` (master +0x161 set, value +0x153): the outer fill places plain.
+    // The league features' tiles join the tile set when the features are added (`0x141f8aed0`).
+    let league = files.league_rooms();
+    for lr in &league {
+        for t in &lr.tiles {
+            master.add_extra_tile(files, t)?;
+        }
+    }
     master.outer_fill_height = tsi.get("OuterFillHeightOverride").and_then(|v| v.trim().parse::<i8>().ok()).or_else(|| tsi.contains_key("OverrideSpawns").then_some(0));
     let ecf = match rel("EdgeCombination") {
         Some(p) => crate::dungeon_tiles::Ecf::parse(&crate::text::decode_utf16(&files.read(&p)?)),
         None => Default::default(),
     };
-    let unit: u32 = tsi.get("RoomUnitSize").and_then(|v| v.trim().parse().ok()).unwrap_or(9);
     let step = unit - grid.overlap;
     let mut map = TileMap::new(grid.w * step + grid.overlap, grid.h * step + grid.overlap);
     map.ground_flags = master.ground_flag_table(files)?;
@@ -729,7 +736,23 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
     }
     let edge_types = master.edge_type_table(files)?;
     let flag = |k: &str| tsi.get(k).is_some_and(|v| v.trim() != "0");
-    let pass = crate::dungeon_tiles::TilePass { master: &master, ecf: &ecf, unit, overlap: grid.overlap, edge_types: &edge_types, overlap_fixes: flag("AllowInteriorOverlapFixes"), doors_disabled: flag("DisableDoors"), grounds: [1, 2, 0].map(|i| (!graph.ground_types[i].is_empty()).then(|| graph.ground_types[i].clone())) };
+    // Pending league feature rooms are placed by the tile pass in mission slots; it borrows the
+    // master, so the placement works on a second one.
+    let host = if grid.pending.is_empty() {
+        None
+    } else {
+        let mut m = match (rel("TileSet"), rel("FillTiles")) {
+            (Some(t), Some(f)) => Master::load(files, &t, &f)?,
+            _ => return Err(data("league feature rooms need a tile set and fill tiles")),
+        };
+        for lr in &league {
+            for t in &lr.tiles {
+                m.add_extra_tile(files, t)?;
+            }
+        }
+        Some(crate::dungeon_tiles::Host { files, master: std::cell::RefCell::new(m) })
+    };
+    let pass = crate::dungeon_tiles::TilePass { master: &master, ecf: &ecf, unit, overlap: grid.overlap, edge_types: &edge_types, overlap_fixes: flag("AllowInteriorOverlapFixes"), doors_disabled: flag("DisableDoors"), grounds: [1, 2, 0].map(|i| (!graph.ground_types[i].is_empty()).then(|| graph.ground_types[i].clone())), host, hosted: Default::default() };
     // The graph's own grounds reach the lattice through the per-room settle; their `.gt` flags
     // (for example `CarverUpperGround`: 0x1f, which makes the fill treat it as none) are not in
     // the tile set's table unless a tile uses them.
@@ -765,7 +788,7 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
     // the listed cells, phase 2). The generator's room list (`+0x58`) is empty for `.dgr`.
     // `0x14209c150`: the pre-unique room, before the overlay context is built.
     let mut cells = cells;
-    let (mut pre_rooms, mut pre_wiggle) = (Vec::new(), Vec::new());
+    let (mut pre_rooms, mut pre_wiggle) = (pass.hosted.take(), Vec::new());
     // League mechanics' rooms come first (`0x14209a620`, before the injectors and the pre-unique room).
     if rel("FillTiles").is_some() && std::env::var("POE_NO_DGR_LEAGUE").is_err() {
         let league_rooms = files.league_rooms();

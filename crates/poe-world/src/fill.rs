@@ -593,11 +593,6 @@ pub fn place_league_rooms_dgr(
     cells: &mut Vec<crate::dungeon_tiles::GroundCell>,
     rng: &mut TerrainRng,
 ) -> Result<(Vec<PlacedFillRoom>, Vec<(i32, i32)>), GenError> {
-    for room in rooms {
-        for t in &room.tiles {
-            master.add_extra_tile(files, t)?;
-        }
-    }
     let n = cells.len();
     rng.below(n as u32);
     for i in 0..n {
@@ -667,6 +662,27 @@ pub fn place_league_rooms_dgr(
         }
         pending = left;
     }
+    let wiggle = f.wiggle.take().map(|w| w.0).unwrap_or_default();
+    Ok((f.placed, wiggle))
+}
+
+/// A league feature room put into a `missiontile` slot by the tile pass (`0x1420983d0`, then
+/// `0x141f8c8c0` with the slot's height and the lattice ground at the slot's corner). Returns the
+/// rooms placed (for the de-repetition pass) and the tiles the exit wiggle may move.
+#[allow(clippy::too_many_arguments)]
+pub fn place_hosted(
+    map: &mut TileMap,
+    master: &mut Master,
+    files: &dyn Files,
+    room_path: &str,
+    o: u8,
+    pos: (i32, i32),
+    height: i32,
+    ground: Option<String>,
+    rng: &mut TerrainRng,
+) -> Result<(Vec<PlacedFillRoom>, Vec<(i32, i32)>), GenError> {
+    let mut f = Fill { map, master, files, rooms: HashMap::new(), placed: Vec::new(), height: Some(height as i16), wiggle: Some((Vec::new(), Default::default())) };
+    f.place_room(pos.0, pos.1, room_path, o, ground, true, rng)?;
     let wiggle = f.wiggle.take().map(|w| w.0).unwrap_or_default();
     Ok((f.placed, wiggle))
 }

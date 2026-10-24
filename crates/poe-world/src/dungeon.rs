@@ -173,6 +173,10 @@ struct DungeonRoom {
     corners: [Option<String>; 4],
     /// Room data +9: no tag, one ground on all corners, no doors (a filler room).
     blank: bool,
+    /// The `.arm` side length (room data +0): the unit size the room is built for.
+    side: u32,
+    /// Slots with the `missiontile` feature (the key of the mission table, `0x141f99b20`).
+    missions: u32,
 }
 
 /// A room candidate (`RoomSet` entry): a room turned by `o`.
@@ -219,7 +223,16 @@ impl PlacedRoom {
     }
 }
 
+/// A league feature room waiting for a `missiontile` slot (the generator's pending list,
+/// `0x141f8ab50`): the `.arm` and the orientation drawn for it.
+#[derive(Debug, Clone)]
+pub struct Pending {
+    pub room: String,
+    pub orientation: u8,
+}
+
 /// The unit grid (`0x141ff05f0`'s 0x70-byte object).
+#[derive(Clone)]
 pub struct Grid {
     pub w: u32,
     pub h: u32,
@@ -230,6 +243,8 @@ pub struct Grid {
     pub overlap: u32,
     /// Door types whose two sides differ (`0x141d047b0`): their doors carry a chirality.
     pub chiral: std::collections::HashSet<String>,
+    /// League feature rooms queued for the mission rooms' `missiontile` slots.
+    pub pending: Vec<Pending>,
 }
 
 impl Grid {
@@ -333,7 +348,7 @@ impl FileGroups {
 
 /// The dungeon layout of a pruned `.dgr` graph (`0x1420ac3e0`); `overlap` is the master's
 /// `RoomOverlap`.
-pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet, overlap: u32, fill_height: Option<i32>, file_groups: &FileGroups, rng: &mut TerrainRng) -> Result<Grid, GenError> {
+pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet, overlap: u32, unit_size: u32, fill_height: Option<i32>, file_groups: &FileGroups, rng: &mut TerrainRng) -> Result<Grid, GenError> {
     let mut types = TerrainTypes::default();
     let mut rooms: Vec<DungeonRoom> = set
         .rooms
@@ -360,7 +375,8 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
                 _ => Default::default(),
             };
             let blank = r.tag.is_empty() && corners.iter().all(|c| *c == corners[0]) && exits.iter().all(|e: &Exit| e.door.is_none());
-            DungeonRoom { path: r.path.clone(), tag: if special { String::new() } else { r.tag.clone() }, generic, unique, special, list, chance, weight: r.weight, mask: r.orientations, units, exits, corners, blank }
+            let missions = arm.grid.iter().flatten().filter(|sl| matches!(sl, poe_data_tools::file_parsers::arm::types::Slot::K(k) if k.slot_tag.as_deref().is_some_and(|t| t.eq_ignore_ascii_case("missiontile")))).count() as u32;
+            DungeonRoom { path: r.path.clone(), tag: if special { String::new() } else { r.tag.clone() }, generic, unique, special, list, chance, weight: r.weight, mask: r.orientations, units, exits, corners, blank, side: arm.dimensions.side_length, missions }
         })
         .collect();
     for r in &rooms {
@@ -374,7 +390,7 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
         .map(|n| (0..graph.edges.len()).filter(|&e| !removed[e] && (graph.edges[e].from as usize == n || graph.edges[e].to as usize == n)).collect())
         .collect();
     // `overlap` is the master's `RoomOverlap` (master +0x14b, default 1), read by the caller.
-    let mut grid = Grid { w: graph.width, h: graph.height, cells: vec![0; (graph.width * graph.height) as usize], rooms: Vec::new(), overlap, chiral: Default::default() };
+    let mut grid = Grid { w: graph.width, h: graph.height, cells: vec![0; (graph.width * graph.height) as usize], rooms: Vec::new(), overlap, chiral: Default::default(), pending: Vec::new() };
     // Door types with a chirality: those of the rooms' doors and the graph's edges.
     let mut door_types: Vec<String> = rooms.iter().flat_map(|r| r.exits.iter().filter_map(|e| e.door.clone())).collect();
     door_types.extend(graph.edges.iter().map(|e| e.edge_type.to_ascii_lowercase()));
@@ -647,6 +663,7 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
     // reserved cells are freed and the filler rooms run again.
     filler_rooms(&rooms, &mut grid, &mut types, files, fill_height, rng)?;
     special_rooms(files, &rooms, &mut grid, &mut types, rng)?;
+    extra_features(files, &rooms, unit_size, &mut grid, &mut types, rng)?;
     for c in grid.cells.iter_mut() {
         if *c == 1 {
             *c = 0;
@@ -1978,6 +1995,145 @@ fn special_rooms(files: &dyn Files, rooms: &[DungeonRoom], grid: &mut Grid, type
         if place_special(files, rooms, &[r], grid, types, rng)?.is_none() {
             return Err(unsupported(format!("dungeon: failed to place special room {}", rooms[r].path)));
         }
+    }
+    Ok(())
+}
+
+/// `0x1420aacf0` for league features (`ExtraTerrainFeatures` rooms) in a room set with mission
+/// rooms: a 3x3 feature room is queued as a request (`0x1420abb90`), mission rooms of the room
+/// set (tag `mission`, built for the grid's unit size, keyed by their number of `missiontile`
+/// slots) are put over placed rooms until the requests are covered (`0x1420a7da0` with the
+/// shuffled rooms of a table entry; the grid is restored from a snapshot before each attempt),
+/// then each served request draws its orientation (`below(0x348)`) and joins the grid's pending
+/// list, to be placed in a `missiontile` slot by the tile pass (`0x1420983d0`). A feature room
+/// that is not 3x3, or with no mission table, would be placed as a dungeon room itself
+/// (`0x1420a7da0` on the `.arm`, only when its side length is the unit size; not ported).
+fn extra_features(files: &dyn Files, rooms: &[DungeonRoom], unit_size: u32, grid: &mut Grid, types: &mut TerrainTypes, rng: &mut TerrainRng) -> Result<(), GenError> {
+    let feats = files.league_rooms();
+    if feats.is_empty() {
+        return Ok(());
+    }
+    // The mission table (room set +0x130): by key, rooms in `.rs` order, built for this unit size.
+    let mut table: Vec<(u32, Vec<usize>)> = Vec::new();
+    for (i, r) in rooms.iter().enumerate() {
+        if r.tag.eq_ignore_ascii_case("mission") && r.missions > 0 && r.side == unit_size {
+            match table.binary_search_by_key(&r.missions, |e| e.0) {
+                Ok(k) => table[k].1.push(i),
+                Err(k) => table.insert(k, (r.missions, vec![i])),
+            }
+        }
+    }
+    let budget = feats.len();
+    let mut requests: Vec<crate::generate::LeagueRoom> = Vec::new();
+    for f in &feats {
+        let room = crate::generate::load_room(files, &f.room.to_ascii_lowercase())?;
+        if room.width() == 3 && room.height() == 3 && !table.is_empty() {
+            requests.push(f.clone());
+        } else if room.arm.dimensions.side_length == unit_size {
+            return Err(unsupported(format!("dungeon: feature room {} would be placed as a room", f.room)));
+        }
+    }
+    if requests.is_empty() {
+        return Ok(());
+    }
+    if budget < requests.len() {
+        return Err(unsupported("dungeon: more feature rooms than the budget"));
+    }
+    let nreq = requests.len();
+    let snapshot = grid.clone();
+    // One table entry's rooms shuffled (a discarded `below(n)`, then the forward Fisher-Yates)
+    // and offered to `0x1420a7da0`.
+    let place_group = |list: &Vec<usize>, grid: &mut Grid, types: &mut TerrainTypes, rng: &mut TerrainRng| -> Result<bool, GenError> {
+        let mut l = list.clone();
+        rng.below(l.len() as u32);
+        for i in 0..l.len() {
+            let k = rng.uniform((l.len() - i) as u32) as usize;
+            l.swap(i, i + k);
+        }
+        Ok(place_special(files, rooms, &l, grid, types, rng)?.is_some())
+    };
+    let mut rem = nreq;
+    let mut ei = 0;
+    'entries: while ei < table.len() {
+        let key = table[ei].0 as usize;
+        let total_groups = nreq / key;
+        let mut trial = total_groups.min(rem);
+        loop {
+            *grid = snapshot.clone();
+            rem = nreq;
+            let mut ok = true;
+            let mut j = 0;
+            if trial != 0 {
+                loop {
+                    if rem < key {
+                        break;
+                    }
+                    if !place_group(&table[ei].1, grid, types, rng)? {
+                        ok = false;
+                        break;
+                    }
+                    rem -= key;
+                    j += 1;
+                    if j >= trial {
+                        break;
+                    }
+                }
+            }
+            // Requests left: entries with fewer slots from the last one back (`0x1420ab6e0`),
+            // then every entry from the first (`0x1420ab7b0`).
+            'more: while rem != 0 {
+                if key > 1 {
+                    let mut idx = table.len();
+                    let mut again = false;
+                    while idx != 0 {
+                        idx -= 1;
+                        let k2 = table[idx].0 as usize;
+                        if k2 <= rem && k2 + 1 <= key && place_group(&table[idx].1, grid, types, rng)? {
+                            rem -= k2;
+                            if k2 == 0 || rem == 0 {
+                                break 'more;
+                            }
+                            again = true;
+                            break;
+                        }
+                    }
+                    if again {
+                        continue 'more;
+                    }
+                }
+                let mut placed = false;
+                for e in &table {
+                    if rem < e.0 as usize {
+                        break 'more;
+                    }
+                    if place_group(&e.1, grid, types, rng)? {
+                        rem -= e.0 as usize;
+                        placed = true;
+                        break;
+                    }
+                }
+                if !placed {
+                    break 'more;
+                }
+            }
+            if rem == 0 {
+                break 'entries;
+            }
+            if !ok {
+                break;
+            }
+            trial += 1;
+            if trial > total_groups {
+                break;
+            }
+        }
+        ei += 1;
+    }
+    // The requests served (all of them, or the first ones when the table ran out).
+    let served = if ei >= table.len() { nreq - rem } else { nreq };
+    for r in requests.into_iter().take(served) {
+        let v = rng.below(0x348);
+        grid.pending.push(Pending { room: r.room, orientation: crate::region::pick(0, v) });
     }
     Ok(())
 }
