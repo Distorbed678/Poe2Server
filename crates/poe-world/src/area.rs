@@ -766,9 +766,21 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
     // `0x14209c150`: the pre-unique room, before the overlay context is built.
     let mut cells = cells;
     let (mut pre_rooms, mut pre_wiggle) = (Vec::new(), Vec::new());
+    // League mechanics' rooms come first (`0x14209a620`, before the injectors and the pre-unique room).
+    if rel("FillTiles").is_some() && std::env::var("POE_NO_DGR_LEAGUE").is_err() {
+        let league_rooms = files.league_rooms();
+        // `0x14209a620`: a room set with mission rooms (`mission` tag) leaves the features without
+        // the priority flag (+0x60; not the stone circle) to the mission-tile slots of the rooms.
+        let has_missions = set.rooms.iter().any(|r| r.tag.eq_ignore_ascii_case("mission"));
+        if !league_rooms.is_empty() && !has_missions {
+            (pre_rooms, pre_wiggle) = crate::fill::place_league_rooms_dgr(&mut map, &mut master, files, &league_rooms, &mut cells, rng)?;
+        }
+    }
     if rel("Overlays").is_some() && std::env::var("POE_NO_PREUNIQUE").is_err() {
         if let Some(r) = set.rooms.iter().find(|r| r.tag.eq_ignore_ascii_case("preunique")) {
-            (pre_rooms, pre_wiggle) = crate::fill::place_pre_unique(&mut map, &mut master, files, &r.path, r.orientations, &mut cells, rng)?;
+            let (r2, w2) = crate::fill::place_pre_unique(&mut map, &mut master, files, &r.path, r.orientations, &mut cells, rng)?;
+            pre_rooms.extend(r2);
+            pre_wiggle.extend(w2);
         }
     }
     cells.sort_by_key(|c| c.pos);

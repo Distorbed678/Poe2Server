@@ -565,3 +565,108 @@ pub fn place_league_rooms(map: &mut TileMap, master: &mut Master, files: &dyn Fi
     }
     Ok(f.placed)
 }
+
+/// Squared distance between two rectangles `(x0, y0, x1, y1)` (`0x14209a540`; 0 when they overlap).
+fn rect_distance2(a: (i32, i32, i32, i32), b: (i32, i32, i32, i32)) -> i32 {
+    let dx = (a.0 - b.2).max(b.0 - a.2).max(0);
+    let dy = (a.1 - b.3).max(b.1 - a.3).max(0);
+    dx * dx + dy * dy
+}
+
+/// `0x14209a620` (the `.dgr` counterpart of [`place_league_rooms`], run inside the overlay block
+/// of `0x14209c4c0` before the room injectors and the pre-unique room): the ground-only cell
+/// list is shuffled (a discarded `below(n)`, then the forward Fisher-Yates), and the feature
+/// list goes through two passes (`0x14209a880`): pass 0 refuses a spot closer than 4 cells
+/// (squared distance <= 16) to a room placed before, pass 1 (the features that found no spot)
+/// has no such check. Per feature (`0x14209aca0`) one orientation is drawn (`below(8)` for an
+/// "any" feature), then the first cell of the list that is accessible, whose ground and corner
+/// ground are missing or have `.gt` flags 4 and 8, and whose rectangle lies free inside the
+/// region takes the room; the corners under it with no ground or one with flag 8 take the
+/// cell's ground, and the room is placed with the cell's height (`0x141f8c8c0`). The list order
+/// is kept for the pre-unique pass, which shuffles it again. The feature budget (`+0x144`) is
+/// the whole list for a job with one graph, so it never stops a feature here.
+pub fn place_league_rooms_dgr(
+    map: &mut TileMap,
+    master: &mut Master,
+    files: &dyn Files,
+    rooms: &[crate::generate::LeagueRoom],
+    cells: &mut Vec<crate::dungeon_tiles::GroundCell>,
+    rng: &mut TerrainRng,
+) -> Result<(Vec<PlacedFillRoom>, Vec<(i32, i32)>), GenError> {
+    for room in rooms {
+        for t in &room.tiles {
+            master.add_extra_tile(files, t)?;
+        }
+    }
+    let n = cells.len();
+    rng.below(n as u32);
+    for i in 0..n {
+        let k = rng.uniform((n - i) as u32) as usize;
+        cells.swap(i, i + k);
+    }
+    let mut f = Fill { map, master, files, rooms: HashMap::new(), placed: Vec::new(), height: None, wiggle: Some((Vec::new(), Default::default())) };
+    let mut pending: Vec<&crate::generate::LeagueRoom> = if std::env::var_os("POE_DGR_LEAGUE_SKIP").is_some() { Vec::new() } else { rooms.iter().collect() };
+    let mut rects: Vec<(i32, i32, i32, i32)> = Vec::new();
+    for pass in 0..2 {
+        if pending.is_empty() {
+            break;
+        }
+        let mut left = Vec::new();
+        for lr in pending {
+            let (rw, rh) = {
+                let room = f.room(&lr.room)?;
+                (room.width() as u8, room.height() as u8)
+            };
+            let o = rng.below(8) as u8;
+            let (w, h) = oriented((rw, rh), o);
+            let mut done = false;
+            for c in cells.iter() {
+                let (x, y) = c.pos;
+                if !c.accessible {
+                    continue;
+                }
+                let flags_ok = |g: Option<&str>, m: &TileMap| g.is_none_or(|g| m.gt_flags(g) & 12 == 12);
+                if !flags_ok(c.ground.as_deref(), &*f.map) {
+                    continue;
+                }
+                let Some(k) = f.map.point_index(x, y) else { continue };
+                if !flags_ok(f.map.lattice[k].ground.as_deref(), &*f.map) {
+                    continue;
+                }
+                let (mw, mh) = (f.map.width as i32, f.map.height as i32);
+                if !(x < mw && x + w <= mw && y < mh && y + h <= mh && f.free(x, y, w, h)) {
+                    continue;
+                }
+                let rect = (x, y, x + w, y + h);
+                if pass == 0 && rects.iter().any(|&r| rect_distance2(r, rect) <= 16) {
+                    continue;
+                }
+                for py in y..=y + h {
+                    for px in x..=x + w {
+                        let Some(i) = f.map.point_index(px, py) else { continue };
+                        let open = f.map.lattice[i].ground.as_deref().is_none_or(|g| f.map.gt_flags(g) & 8 != 0);
+                        if open {
+                            f.map.lattice[i].flags |= 1;
+                            if c.ground.is_some() {
+                                f.map.lattice[i].ground = c.ground.clone();
+                            }
+                        }
+                    }
+                }
+                f.height = Some(c.height as i16);
+                f.place_room(x, y, &lr.room, o, c.ground.clone(), c.accessible, rng)?;
+                rects.push(rect);
+                if std::env::var_os("POE_DBG_LEAGUE").is_some() { eprintln!("league dgr: pass {pass} room placed at ({x},{y}) o{o} size {w}x{h} ground {:?} h {} (cell {} of {})", c.ground, c.height, cells.iter().position(|d| d.pos == c.pos).unwrap_or(0), cells.len()); }
+                done = true;
+                break;
+            }
+            if !done {
+                if std::env::var_os("POE_DBG_LEAGUE").is_some() { eprintln!("league dgr: pass {pass} room NOT placed o{o}"); }
+                left.push(lr);
+            }
+        }
+        pending = left;
+    }
+    let wiggle = f.wiggle.take().map(|w| w.0).unwrap_or_default();
+    Ok((f.placed, wiggle))
+}
