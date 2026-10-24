@@ -245,14 +245,12 @@ impl Pass<'_> {
     }
 
     fn below_strip(&mut self, (x0, y0, x1, _): (i32, i32, i32, i32), rng: &mut TerrainRng) -> Result<(), GenError> {
-        if std::env::var("POE_DBG_LAT").is_ok() { for y in 0..y0 + 6 { eprintln!("LAT {y} {}", (0..=self.w).map(|x| format!("{}", self.height(x, y))).collect::<Vec<_>>().join("")); } }
         let mut x = x0;
         while x != 0 && self.occupied(x - 1, y0) {
             x -= 1;
         }
         while x <= x1 {
             let h0 = self.height(x, 0);
-            if std::env::var("POE_DBG_STRIP").is_ok() { eprintln!("BELOW x={x} y0={y0} h(x,y0)={h0} flags={:?} h(x,0)={}", self.point(x, y0).map(|p| p.flags), self.height(x, 0)); }
             let mut top = y0;
             if top == 0 {
                 x += 1;
@@ -370,7 +368,7 @@ impl Pass<'_> {
     }
 
     /// Left of the region (side 3), rows top to bottom; the mirror of `right_strip`.
-    fn left_strip(&mut self, (x0, _, x1, _): (i32, i32, i32, i32), rng: &mut TerrainRng) -> Result<(), GenError> {
+    fn left_strip(&mut self, (x0, _, _, _): (i32, i32, i32, i32), rng: &mut TerrainRng) -> Result<(), GenError> {
         let mut y = 0;
         while y < self.h {
             let h0 = self.height(x0, y);
@@ -408,8 +406,6 @@ impl Pass<'_> {
                     y += 1;
                     continue;
                 };
-                if std::env::var("POE_DBG_STRIP").is_ok() && y == 36 { for yy in 30..44 { eprintln!("LATL y={yy} {:?}", (0..9).map(|xx| (self.height(xx, yy), self.point(xx, yy).map_or(0, |p| p.flags))).collect::<Vec<_>>()); } }
-                if std::env::var("POE_DBG_STRIP").is_ok() { eprintln!("STRIPL y={y} x0={x0} x={x} h(x0)={} h(x)={} h(0)={} h(x0-1)={}", h0, self.height(x, y), self.height(0, y), self.height(x0 - 1, y)); }
                 if tdt.size.1 as i32 + y <= self.h {
                     let mut xx = 0;
                     while xx < x {
@@ -425,7 +421,7 @@ impl Pass<'_> {
         Ok(())
     }
 
-    fn right_strip(&mut self, (x0, _, x1, _): (i32, i32, i32, i32), rng: &mut TerrainRng) -> Result<(), GenError> {
+    fn right_strip(&mut self, (_, _, x1, _): (i32, i32, i32, i32), rng: &mut TerrainRng) -> Result<(), GenError> {
         let mut y = 0;
         while y < self.h {
             let h0 = self.height(x1, y);
@@ -504,12 +500,9 @@ pub fn outer_buffer(
         (margins.left + region.width) as i32,
         (margins.top + region.height) as i32,
     );
-    let dbg = |m: &TileMap, tag: &str| { if std::env::var("POE_DBG_ROUND").is_ok() { eprintln!("CELL {tag}: {:?} corners {:?}", m.index(3, 33).and_then(|i| m.cells[i].as_ref()).map(|c| (c.height, c.offset, c.orientation)), m.tile_corner_heights(3, 33)); } };
-    dbg(&map, "before fill");
     if let Some(g) = outer_ground {
         fill_black(&mut map, rect, g, repair, master, files)?;
     }
-    dbg(&map, "after fill");
     let mut pass = Pass { map: &mut map, master, files, edges, w: w as i32, h: h as i32 };
     pass.extend_lattice(rect);
     pass.below_strip(rect, rng)?;
@@ -632,7 +625,6 @@ fn fill_black(map: &mut TileMap, rect: (i32, i32, i32, i32), ground: &str, repai
         if !fits(map, x, y) {
             return;
         }
-        if std::env::var("POE_DBG_ROUND").is_ok() && x >= -1 && x <= 5 && (y0 + y) >= 28 && (y0 + y) <= 40 { eprintln!("PLACE ({},{}) ht {ht} corners {:?}", x0 + x, y0 + y, map.tile_corner_heights(x0 + x, y0 + y)); }
         for py in y..=y + th {
             for px in x..=x + tw {
                 if let Some(k) = map.point_index(x0 + px, y0 + py) {
@@ -687,65 +679,19 @@ fn fill_black(map: &mut TileMap, rect: (i32, i32, i32, i32), ground: &str, repai
         fixed.push((x, y));
     }
     // `0x141fd71c0` rounds.
-    let dump = |map: &TileMap, tag: &str, ox: i32, oy: i32, w: i32, h: i32| {
-        if std::env::var("POE_DBG_LATDUMP").is_ok() {
-            for y in 0..=h {
-                let row: Vec<String> = (0..=w).map(|x| match map.point_index(ox + x, oy + y) { Some(k) => format!("{}.{}", map.lattice[k].height, map.lattice[k].flags & 3), None => "?".into() }).collect();
-                eprintln!("OURS {tag} {y} {}", row.join(" "));
-            }
-        }
-    };
-    dump(map, "round", x0, y0, w, h);
-    dump(map, "roundfull", 0, 0, map.width as i32, map.height as i32);
-    if let Ok(v) = std::env::var("POE_DBG_PT") {
-        let v: Vec<i32> = v.split(',').map(|a| a.parse().unwrap()).collect();
-        for (i, p) in map.pieces.iter().enumerate() {
-            let (tw, th) = TileMap::oriented_size(p.size, p.orientation);
-            if v[0] >= p.x && v[0] <= p.x + tw && v[1] >= p.y && v[1] <= p.y + th {
-                let c = map.index(p.x, p.y).and_then(|k| map.cells[k].as_ref());
-                eprintln!("PIECE#{i} ({},{}) {tw}x{th} o{} h{:?} {}", p.x, p.y, p.orientation, c.map(|c| c.height), p.path);
-                let tdt = master.header(files, &p.path.to_ascii_lowercase()).unwrap().clone();
-                eprintln!("   point_grounds {:?} point_heights {:?}", tdt.point_grounds, tdt.point_heights);
-                for g in tdt.point_grounds.iter().flatten() { eprintln!("   gt_flags({g}) = {}", map.gt_flags(&g.to_ascii_lowercase())); }
-                if let Some(k) = map.point_index(v[0], v[1]) { eprintln!("   lattice ground at point {:?} flags {} h {}", map.lattice[k].ground, map.lattice[k].flags, map.lattice[k].height); }
-            }
-        }
-    }
-    if std::env::var("POE_DBG_LATDUMP").is_ok() {
-        eprintln!("OURSTILE dzero {}", tdt.point_heights.iter().all(|&d| d == 0));
-        for &(x, y) in &fixed {
-            if let Some(c) = map.index(x0 + x, y0 + y).and_then(|i| map.cells[i].as_ref()) {
-                if c.offset == (0, 0) {
-                    let (pw, ph) = (c.orientation, 0);
-                    let _ = (pw, ph);
-                    if let Some(pi) = map.piece_at[map.index(x0 + x, y0 + y).unwrap()] {
-                        let p = &map.pieces[pi];
-                        let (tw, th) = TileMap::oriented_size(p.size, p.orientation);
-                        eprintln!("OURSTILE {} {} {} {} {}", p.x, p.y, tw, th, c.height);
-                    }
-                }
-            }
-        }
-    }
     for _ in 0..15 {
         let mut small = true;
         let mut changes: Vec<((i32, i32), i32)> = Vec::new();
         for &(x, y) in &fixed {
             let ht = crate::generate::middle(&map.tile_corner_heights(x0 + x, y0 + y)).unwrap_or(0);
             let cur = map.index(x0 + x, y0 + y).and_then(|i| map.cells[i].as_ref()).map_or(0, |c| c.height as i32);
-            if std::env::var("POE_DBG_ROUND2").is_ok() && (x0 + x) >= 90 && (x0 + x) <= 99 && (y0 + y) >= 2 && (y0 + y) <= 8 && map.index(x0 + x, y0 + y).and_then(|i| map.cells[i].as_ref()).is_some_and(|c| c.offset == (0, 0)) { eprintln!("R2 tile ({},{}) corners {:?} ht {ht} cur {cur}", x0 + x, y0 + y, map.tile_corner_heights(x0 + x, y0 + y)); }
-            if std::env::var("POE_DBG_ROUND").is_ok() && (x0 + x, y0 + y) == (3, 33) { eprintln!("ROUND tile (3,33) corners {:?} ht {ht} cur {cur}", map.tile_corner_heights(x0 + x, y0 + y)); }
             if ht != cur {
                 changes.push(((x, y), ht));
                 if (ht - cur).abs() > 1 {
                     small = false;
                 }
-                if std::env::var("V3").is_ok() && map.index(x0 + x, y0 + y).and_then(|i| map.cells[i].as_ref()).is_some_and(|c| c.offset == (0, 0)) {
-                    map.set_heights(x0 + x, y0 + y, &tdt, ht as i16);
-                }
             }
         }
-        if std::env::var("POE_DBG_ROUND").is_ok() { eprintln!("ROUNDS fixed {} changes {} small {small} sample {:?}", fixed.len(), changes.len(), &changes[..changes.len().min(6)]); }
         if changes.is_empty() {
             break;
         }
@@ -754,10 +700,9 @@ fn fill_black(map: &mut TileMap, rect: (i32, i32, i32, i32), ground: &str, repai
                 map.set_heights(x0 + x, y0 + y, &tdt, ht as i16);
             }
         }
-        if small && std::env::var("V1").is_err() {
+        if small {
             break;
         }
     }
-    dump(map, "afterround", 0, 0, map.width as i32, map.height as i32);
     Ok(())
 }
