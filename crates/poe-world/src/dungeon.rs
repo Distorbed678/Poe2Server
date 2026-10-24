@@ -2201,9 +2201,10 @@ fn place_special(files: &dyn Files, rooms: &[DungeonRoom], entries: &[usize], gr
             for (o, v) in variants.iter().enumerate() {
                 let Some((size, exits)) = v else { continue };
                 if *size == p.size && special_fits(files, &p.exits, exits, types)? {
-                    match exact.iter_mut().find(|e| e.0 == i) {
-                        Some(e) => e.1.push((si, o as u8)),
-                        None => exact.push((i, vec![(si, o as u8)])),
+                    // `0x1420cf1d0`: the entries are kept sorted by room index.
+                    match exact.binary_search_by_key(&i, |e| e.0) {
+                        Ok(k) => exact[k].1.push((si, o as u8)),
+                        Err(k) => exact.insert(k, (i, vec![(si, o as u8)])),
                     }
                     break;
                 }
@@ -2277,6 +2278,11 @@ fn place_special(files: &dyn Files, rooms: &[DungeonRoom], entries: &[usize], gr
         let exits = grid.turned(r.units.0, r.units.1, &r.exits, o);
         grid.stamp(PlacedRoom { path: r.path.clone(), node: None, origin: pos, size, orientation: o, exits, extra_door: None, height, accessible: true, blocked: false, extra_pct: 0, door_type: None, special: true, subgraph: None })?;
         return Ok(Some(grid.rooms.len() - 1));
+    }
+    if std::env::var_os("POE_DBG_LEAGUE").is_some() {
+        for (i, v) in &exact {
+            eprintln!("exact room {} {:?} o{} size {:?} exits {:?}: {:?}", i, grid.rooms[*i].path, grid.rooms[*i].orientation, grid.rooms[*i].size, grid.rooms[*i].exits, v.iter().map(|(si, o)| (rooms[*si].path.clone(), *o, rooms[*si].mask)).collect::<Vec<_>>());
+        }
     }
     let k = rng.below(exact.len() as u32) as usize;
     let v = rng.below(exact[k].1.len() as u32) as usize;
