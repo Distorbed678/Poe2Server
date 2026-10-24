@@ -322,8 +322,8 @@ pub(crate) fn quarter_turn(view: &dyn EdgeView, node: usize, sides: &[usize; 4],
 }
 
 /// Fixed axes of a node (`+0x8b`/`+0x8c`, the `.tgr` node values 9 and 10).
-fn fixed_axes(_graph: &Graph, lg: &LayoutGraph, n: usize) -> (bool, bool) {
-    lg.nodes[n].axes
+fn fixed_axes(graph: &Graph, lg: &LayoutGraph, n: usize) -> (bool, bool) {
+    lg.nodes[n].orig.and_then(|o| graph.nodes.get(o)).map_or((false, false), |n| (n.values.get(9).copied().unwrap_or(0) != 0, n.values.get(10).copied().unwrap_or(0) != 0))
 }
 
 /// Places the tiles of `nodes` (in order) and rewires the layout graph to their exits.
@@ -333,20 +333,12 @@ pub fn place_node_tiles(lg: &mut LayoutGraph, graph: &Graph, nodes: &[usize], ma
     for &n in nodes {
         let view = LayoutView { lg, graph };
         let t = choose(&view, n, master, map, &chosen, tiles, types, files, rng)?;
-        if std::env::var_os("POE_DEBUG_CANDS").is_some() {
-            eprintln!("tile node {n} at {:?}: {} o{} at {:?} size {:?}", lg.nodes[n].pos, master.tiles.tiles[t.tile].path.rsplit('/').next().unwrap_or(""), t.orientation, t.pos, t.size);
-        }
         chosen.push(t);
     }
     if chosen.is_empty() {
         return Ok(chosen);
     }
     repel(lg, graph, &mut chosen, map, tiles, types, files)?;
-    if std::env::var_os("POE_DEBUG_CANDS").is_some() {
-        for t in &chosen {
-            eprintln!("tile node {} after repel at {:?}", t.node, t.pos);
-        }
-    }
     for t in &chosen {
         place(lg, graph.region, t, master, map, types, files)?;
     }
@@ -390,9 +382,6 @@ fn repel(lg: &mut LayoutGraph, graph: &Graph, chosen: &mut [NodeTile], map: &Til
         for r in &rects {
             if r.node != n {
                 let v = repel_push(r, lg.nodes[r.node].pos, lg.nodes[n].pos);
-                if std::env::var_os("POE_DEBUG_CANDS").is_some() && v != (0, 0) {
-                    eprintln!("  rect of node {} {:?} (node at {:?}) pushes node {n} at {:?} by {v:?}", r.node, (r.x0, r.y0, r.x1, r.y1), lg.nodes[r.node].pos, lg.nodes[n].pos);
-                }
                 acc = (acc.0 + v.0, acc.1 + v.1);
             }
         }
@@ -411,9 +400,6 @@ fn repel(lg: &mut LayoutGraph, graph: &Graph, chosen: &mut [NodeTile], map: &Til
     }
     for (n, push) in node_push.into_iter().enumerate() {
         let Some(push) = push else { continue };
-        if std::env::var_os("POE_DEBUG_CANDS").is_some() && push != (0, 0) {
-            eprintln!("repel push node {n} at {:?} by {push:?} fixed {:?} node {:?}", lg.nodes[n].pos, fixed_axes(graph, lg, n), lg.nodes[n]);
-        }
         let (x, y) = lg.nodes[n].pos;
         let inside = x >= 0 && y >= 0 && x < wc && y < hc;
         let (fx, fy) = fixed_axes(graph, lg, n);
@@ -507,7 +493,7 @@ fn place(lg: &mut LayoutGraph, region: u8, t: &NodeTile, master: &Master, map: &
             first = false;
         } else {
             let nn = lg.nodes.len();
-            lg.nodes.push(LNode { pos: end, slots: [Some(e), None, None, None], fixed: true, virtual_end: false, orig: None, axes: (false, false) });
+            lg.nodes.push(LNode { pos: end, slots: [Some(e), None, None, None], fixed: true, virtual_end: false, orig: None });
             if which == 0 { lg.edges[e].from = nn } else { lg.edges[e].to = nn }
             lg.nodes[node].slots[slot] = None;
         }
@@ -678,8 +664,7 @@ pub fn virtual_junction(lg: &mut LayoutGraph, n: usize, rng: &mut TerrainRng) ->
     for &k in live.iter().skip(1) {
         let e = slots[k].unwrap();
         let nn = lg.nodes.len();
-        let axes = lg.nodes[n].axes;
-        lg.nodes.push(LNode { pos: node, slots: [Some(e), None, None, None], fixed: false, virtual_end: false, orig: None, axes });
+        lg.nodes.push(LNode { pos: node, slots: [Some(e), None, None, None], fixed: false, virtual_end: false, orig: None });
         if lg.edges[e].from == n { lg.edges[e].from = nn } else { lg.edges[e].to = nn }
         lg.nodes[n].slots[k] = None;
         end_nodes.push(nn);

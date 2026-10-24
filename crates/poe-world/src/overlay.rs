@@ -216,10 +216,15 @@ impl Overlays {
                         rooms.len() - 1
                     }
                 };
-                let poe_data_tools::file_parsers::arm::types::Slot::K(k) = &rooms[idx].1.arm.root_slot else {
-                    return Err(GenError::Unsupported(format!("overlay room {} has no root key", e.path)));
+                // A room whose root slot is not a key (`S`: only doodads and points) matches a
+                // blank key of its grid's size: no edges, no grounds, no heights.
+                let root = match &rooms[idx].1.arm.root_slot {
+                    poe_data_tools::file_parsers::arm::types::Slot::K(k) => slot_key(k),
+                    _ => {
+                        let arm = &rooms[idx].1.arm;
+                        TileKey { size: (arm.grid.first().map_or(1, |r| r.len()) as u8, arm.grid.len() as u8), ..TileKey::default() }
+                    }
                 };
-                let root = slot_key(k);
                 for o in 0..8u8 {
                     if e.orientations & (1 << o) == 0 {
                         continue;

@@ -231,9 +231,6 @@ pub struct LNode {
     pub virtual_end: bool,
     /// The `.tgr` node this is (None for nodes made later).
     pub orig: Option<usize>,
-    /// `+0x8b` / `+0x8c`: the node's x / y does not move in the repulsion (`.tgr` values 9, 10);
-    /// the virtual split copies them to the nodes it makes.
-    pub axes: (bool, bool),
 }
 
 /// An edge of the layout graph.

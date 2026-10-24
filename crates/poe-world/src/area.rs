@@ -672,7 +672,10 @@ fn generate_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: 
             let mut window = built.map.window(origin, w + m.left + m.right, h + m.top + m.bottom);
             let rect = (m.left as i32, m.top as i32, (m.left + w) as i32, (m.top + h) as i32);
             let edges = inner.master.edge_type_table(files)?;
-            crate::outer_buffer::outer_buffer_window(&mut window, rect, g.as_deref(), true, &mut inner.master, files, &edges, rng)?;
+            crate::outer_buffer::outer_buffer_window(&mut window, rect, g.as_deref(), true, &mut inner.master, files, &edges, rng).map_err(|e| match e {
+                GenError::Unsupported(s) => GenError::Unsupported(format!("{s} (outer buffer of the subgraph window at {origin:?}, {}x{}, margins {m:?})", w + m.left + m.right, h + m.top + m.bottom)),
+                e => e,
+            })?;
             built.map.paste(&window, origin);
         }
         for (i, was) in before.iter().enumerate() {
@@ -1191,8 +1194,7 @@ fn build_tgr(files: &dyn crate::generate::Files, graph: &Graph, removed: Vec<boo
             virtual_end |= types.edge(files, &graph.edges[ei as usize].edge_type)?.virtual_edge;
         }
         let fixed = placed.iter().any(|p| p.node == i);
-        let axes = (graph.nodes[i].values.get(9).copied().unwrap_or(0) != 0, graph.nodes[i].values.get(10).copied().unwrap_or(0) != 0);
-        lg.nodes.push(LNode { pos: placed_graph.nodes[i], slots, fixed, virtual_end, orig: Some(i), axes });
+        lg.nodes.push(LNode { pos: placed_graph.nodes[i], slots, fixed, virtual_end, orig: Some(i) });
     }
     for (gi, e) in graph.edges.iter().enumerate() {
         let ri = route_index[gi];
@@ -1227,7 +1229,7 @@ fn build_tgr(files: &dyn crate::generate::Files, graph: &Graph, removed: Vec<boo
                 first = false;
             } else {
                 let nn = lg.nodes.len();
-                lg.nodes.push(LNode { pos, slots: [Some(e), None, None, None], fixed: true, virtual_end: false, orig: None, axes: (false, false) });
+                lg.nodes.push(LNode { pos, slots: [Some(e), None, None, None], fixed: true, virtual_end: false, orig: None });
                 if which == 0 { lg.edges[e].from = nn } else { lg.edges[e].to = nn }
                 lg.nodes[node].slots[k] = None;
             }

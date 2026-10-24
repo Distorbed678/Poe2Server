@@ -279,6 +279,13 @@ impl TileMap {
     /// tiles of this map's set) and corners.
     pub fn paste(&mut self, sub: &TileMap, origin: (i32, i32)) {
         let base = self.pieces.len();
+        // The client's ground and edge tables are global: a subgraph's flags stay known afterwards.
+        for (g, f) in &sub.ground_flags {
+            self.ground_flags.entry(g.clone()).or_insert(*f);
+        }
+        for (e, f) in &sub.edge_flags {
+            self.edge_flags.entry(e.clone()).or_insert(*f);
+        }
         self.doodads.extend(sub.doodads.iter().map(|d| shifted(d, origin)));
         self.pieces.extend(sub.pieces.iter().map(|p| Piece { x: p.x + origin.0, y: p.y + origin.1, tile: None, ..p.clone() }));
         for y in 0..sub.height as i32 {
@@ -922,7 +929,7 @@ pub fn room_pass_oriented(
             let list = master.tiles.candidates(&feature, &key);
             if list.is_empty() {
                 return Err(GenError::Unsupported(format!(
-                    "no tile for room cell ({x},{y}) feature {feature:?}"
+                    "no tile for room cell ({x},{y}) feature {feature:?} key {key:?}"
                 )));
             }
             let total = list.iter().map(|c| c.weight).sum();
