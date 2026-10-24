@@ -201,7 +201,10 @@ pub fn generate_probed_files(gd: &GameData, files: &dyn crate::generate::Files, 
     }
     // `phase_cad0`: league mechanic rolls come before the topology choice.
     crate::league::roll_area(gd, area_id, rng);
-    let sub = rng.below(u32::MAX);
+    // `0x141ff90f0`: the sub-seed is drawn unless the area's kind (`+0x1b4`, the unnamed i32
+    // column 45 of `WorldAreas`) is 0x21, a world-map panel: it then comes from the caller's
+    // seed word and the main stream is not touched (unforced choice not ported: 0).
+    let sub = if area_kind(gd, area_id) == Some(0x21) { 0 } else { rng.below(u32::MAX) };
     // A forced topology indexes the raw list (all league modes, `0x141ff9280`); the client
     // throws for an index past its end ("Cannot force graph"). Without one it draws from the
     // mode-filtered list.
@@ -244,6 +247,13 @@ pub fn generate_probed_files(gd: &GameData, files: &dyn crate::generate::Files, 
     let doodads = crate::doodads::resolve(gd, &files, rng, map.doodads.clone());
     let doodad_draws = logged.and_then(|n| rng.log.as_ref().map(|l| l[n..].to_vec())).unwrap_or_default();
     Ok(Generated { graph: dgr, map, doodads, draws, doodad_draws })
+}
+
+/// The area kind of a `WorldAreas` row (area record `+0x1b4`: 0x20/0x21/0x23 are world-map panels).
+fn area_kind(gd: &GameData, area_id: &str) -> Option<i64> {
+    let areas = gd.table("WorldAreas").ok()?;
+    let area = areas.find_by_str("Id", area_id).ok()??;
+    area.get_index(45).ok()?.as_int()
 }
 
 /// The `TerrainPlugins` row name of a `WorldAreas` row (`0x141d04820` registers the plugins by
@@ -303,6 +313,17 @@ fn random_offsets(graph: &mut Graph, rng: &mut TerrainRng) {
         let dy = if y0 < y1 { y0 + rng.range(0, (y1 - y0) as u32) as i32 } else { y0 };
         n.x += dx;
         n.y += dy;
+    }
+    // `0x141fea420` / `0x141fee6e0` (right after the offsets, all nodes): a room type holding a
+    // comma list (`Gates_N, Gates_FN`) keeps one entry, `below(count)`.
+    for n in &mut graph.nodes {
+        if n.room_type.contains(',') {
+            let entries: Vec<&str> = n.room_type.split(',').map(str::trim).collect();
+            if entries.len() > 1 {
+                let k = rng.below(entries.len() as u32) as usize;
+                n.room_type = entries[k].to_string();
+            }
+        }
     }
 }
 
