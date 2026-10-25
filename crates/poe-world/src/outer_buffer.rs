@@ -670,6 +670,9 @@ fn fill_black(map: &mut TileMap, rect: (i32, i32, i32, i32), ground: &str, repai
     };
     for y in -a..h {
         for x in -a..w {
+            if map.index(x0 + x, y0 + y).is_none() {
+                continue;
+            }
             let cell = map.index(x0 + x, y0 + y).and_then(|i| map.cells[i].as_ref());
             match cell {
                 None => scan(map, (x, y), &mut waiting, &mut ready),
@@ -690,7 +693,7 @@ fn fill_black(map: &mut TileMap, rect: (i32, i32, i32, i32), ground: &str, repai
         if waiting.len() == before && ready.is_empty() {
             if std::env::var("POE_DBG").is_ok() {
                 let filled = (0..h).flat_map(|y| (0..w).map(move |x| (x, y))).filter(|&(x, y)| map.index(x0 + x, y0 + y).is_some_and(|i| map.cells[i].is_some())).count();
-                eprintln!("DBG stuck rect {:?} map {}x{} filled {} waiting {} first {:?}", rect, map.width, map.height, filled, waiting.len(), waiting.first());
+                eprintln!("DBG stuck rect {:?} map {}x{} filled {} waiting {} first {:?} tile {}x{} a {} all {:?}", rect, map.width, map.height, filled, waiting.len(), waiting.first(), tw, th, a, waiting);
             }
             return Err(GenError::Unsupported("could not fix heights in dungeon".into()));
         }
