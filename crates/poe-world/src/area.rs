@@ -702,7 +702,7 @@ fn generate_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: 
         if std::env::var_os("POE_DBG_WIN").is_some() {
             for y in at.1 - 1..at.1 + 14 {
                 let row: String = (at.0 - 1..at.0 + 14).map(|x| match built.map.index(x, y) { Some(i) if built.map.cells[i].is_some() => '#', Some(_) => '.', None => ' ' }).collect();
-                eprintln!("WIN {file} {y}: {row}");
+                eprintln!("WIN {file} at {at:?} {y}: {row}");
             }
         }
         let inner = if is_dgr {

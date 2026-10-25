@@ -1257,6 +1257,13 @@ impl Derepeat<'_> {
             })
             .copied()
             .collect();
+        if std::env::var("POE_DBG_REPICK").is_ok() {
+            let all = self.master.tiles.candidates("", &key);
+            eprintln!("REPICK {pos:?} list {} dir {dir} n {npath} o{no} key {key:?}", list.len());
+            for c in all {
+                eprintln!("   cand {} o{} w{} mirrors {} nb {}", self.master.tiles.tiles[c.tile].path, c.orientation, c.weight, mirrors(map, self.master, pos, c.tile, c.orientation, false), self.master.tiles.tiles[c.tile].path.eq_ignore_ascii_case(&npath) && MIRROR[c.orientation as usize][!dir & 1] == no);
+            }
+        }
         if !list.is_empty() {
             let total = list.iter().map(|c| c.weight).sum();
             let c = pick(&list, rng.below(total)).unwrap();
@@ -1397,7 +1404,10 @@ pub fn derepeat_pass(map: &mut TileMap, master: &Master, rooms: &[RoomPlacement]
                 continue;
             }
             let key = TileKey::from_tdt(&def.tdt).oriented(map.pieces[p].orientation);
-            if uniform_ground(&key, "") || d.touches_override(map, (x, y), size) {
+            // `0x141fd5c50`: no edge but wildcards (`.et` flag 0x80, `0x141ef23f0`), one ground.
+            let wild = |e: &Option<String>| e.as_ref().is_none_or(|e| map.edge_flags.get(&e.to_ascii_lowercase()).is_some_and(|f| f & 0x80 != 0));
+            let uniform = key.edges.iter().all(wild) && key.grounds.iter().all(|g| *g == key.grounds[0]);
+            if uniform || d.touches_override(map, (x, y), size) {
                 continue;
             }
             let (path, o) = (map.pieces[p].path.clone(), map.pieces[p].orientation);
