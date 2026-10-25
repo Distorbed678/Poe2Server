@@ -79,6 +79,11 @@ pub fn roll_area(gd: &GameData, area_id: &str, rng: &mut TerrainRng) -> Rolled {
     if !area.get("IsMapArea").ok().and_then(|v| v.as_bool()).unwrap_or(false) {
         return rolled;
     }
+    // `0x141ffcad0`: a map whose `EndgameMaps` row sets its last bool (column 28, row +0xf0: the
+    // Jade Isles, the Copper Citadel, the unique maps) rolls nothing.
+    if endgame_no_rolls(gd, area.index()) {
+        return rolled;
+    }
     let Some(chances) = area.get("LeagueChances").ok().and_then(|v| v.as_row()) else { return rolled };
     let Ok(table) = gd.table("WorldAreaLeagueChances") else { return rolled };
     let Some(row) = table.row(chances) else { return rolled };
@@ -93,6 +98,12 @@ pub fn roll_area(gd: &GameData, area_id: &str, rng: &mut TerrainRng) -> Rolled {
         eprintln!("league rolls {:?} chances {:?}", rolled, ROLLS.iter().map(|r| (col(r.1), r.2.map_or(0, col))).collect::<Vec<_>>());
     }
     rolled
+}
+
+/// The `EndgameMaps` row of the `WorldAreas` row `area` (column 0) has column 28 set.
+fn endgame_no_rolls(gd: &GameData, area: usize) -> bool {
+    let Ok(t) = gd.table("EndgameMaps") else { return false };
+    (0..).map_while(|r| t.row(r)).any(|r| r.get_index(0).ok().and_then(|v| v.as_row()) == Some(area) && matches!(r.get_index(28), Ok(Value::Bool(true))))
 }
 
 /// The rooms the rolled mechanics add to the generator's pre-unique list (`ExtraTerrainFeatures`

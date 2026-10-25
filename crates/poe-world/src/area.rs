@@ -890,6 +890,7 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
         }
     }
     let (cells, moved) = pass.run(&grid, &rooms, &mut map, rng)?;
+    let settle_grounds = pass.grounds.clone();
     if let Ok(path) = std::env::var("POE_DUMP_PIECES") {
         let mut out = String::new();
         for p in &map.pieces {
@@ -976,6 +977,12 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
     }
     if let Some(o) = &mut overlays {
         o.run(1, &mut map, &mut master, &mut types, files, rng)?;
+    }
+    // The rooms' lattice settle (`0x142099e90`) gives a ground again to the corners the overlay
+    // rooms cleared and left without one (MapFrozenFalls: a bend overlay's far corners keep the
+    // graph's `upper_ground.gt`, which the fill reads); verified on the client's fill groups.
+    if std::env::var_os("POE_NO_RESETTLE").is_none() {
+        crate::dungeon_tiles::settle_rooms(&settle_grounds, unit, grid.overlap, &grid, &rooms, &mut map);
     }
     dbg_cell(&map, "post-overlay1");
     if let Ok(path) = std::env::var("POE_DUMP_LAT2") {

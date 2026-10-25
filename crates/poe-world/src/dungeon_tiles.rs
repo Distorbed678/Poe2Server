@@ -154,7 +154,7 @@ fn mark_ground(map: &mut TileMap, cells: &mut Vec<GroundCell>, pos: (i32, i32), 
     if let Ok(v) = std::env::var("POE_DBG_MARK") {
         let c: Vec<i32> = v.split(',').filter_map(|s| s.parse().ok()).collect();
         if c.len() == 2 && (pos.0..pos.0 + w).contains(&c[0]) && (pos.1..pos.1 + h).contains(&c[1]) {
-            eprintln!("MARK {pos:?} {w}x{h} grounds {:?} heights {:?}", key.grounds, key.heights);
+            eprintln!("MARK {pos:?} {w}x{h} grounds {:?} heights {:?} lattice {:?}", key.grounds, key.heights, map.point_index(c[0], c[1]).map(|i| map.lattice[i].clone()));
         }
     }
     for y in pos.1..=pos.1 + h {
@@ -172,7 +172,14 @@ fn mark_ground(map: &mut TileMap, cells: &mut Vec<GroundCell>, pos: (i32, i32), 
             if let Some(i) = map.index(x, y) {
                 map.grounds[i] = key.grounds[0].clone();
             }
-            cells.push(GroundCell { pos: (x, y), ground: key.grounds[0].clone(), accessible, height });
+            let ground = key.grounds[0].clone().or_else(|| {
+                if std::env::var_os("POE_MARK_LAT").is_none() {
+                    return None;
+                }
+                let p = &map.lattice[map.point_index(x, y)?];
+                (p.flags & 1 != 0).then(|| p.ground.clone()).flatten()
+            });
+            cells.push(GroundCell { pos: (x, y), ground, accessible, height });
         }
     }
 }
@@ -343,7 +350,14 @@ impl TilePass<'_> {
     /// point is set either way. A room leaves out its first row/column when it is not on the
     /// grid's first unit and its last when its origin is not on the last unit (overlap only).
     fn settle_rooms(&self, grid: &crate::dungeon::Grid, rooms: &HashMap<String, Room>, map: &mut TileMap) {
-        let step = (self.unit - self.overlap) as i32;
+        settle_rooms(&self.grounds, self.unit, self.overlap, grid, rooms, map);
+    }
+}
+
+/// See [`TilePass::settle_rooms`]; `grounds` are the graph's default, low and high grounds.
+pub fn settle_rooms(grounds: &[Option<String>; 3], unit: u32, overlap: u32, grid: &crate::dungeon::Grid, rooms: &HashMap<String, Room>, map: &mut TileMap) {
+    {
+        let step = (unit - overlap) as i32;
         let height_of = |map: &TileMap, x: i32, y: i32| -> i32 {
             map.point_index(x, y).map_or(0, |i| {
                 let h = map.lattice[i].height as i32;
@@ -363,7 +377,7 @@ impl TilePass<'_> {
             let (w, h) = (room.width() as i32, room.height() as i32);
             let (w, h) = if p.orientation & 1 == 1 && p.orientation < 8 { (h, w) } else { (w, h) };
             let (mut x0, mut y0, mut x1, mut y1) = (0, 0, w + 1, h + 1);
-            if self.overlap != 0 {
+            if overlap != 0 {
                 x0 = (p.origin.0 != 0) as i32;
                 y0 = (p.origin.1 != 0) as i32;
                 x1 -= (p.origin.0 < grid.w as i32 - 1) as i32;
@@ -374,7 +388,7 @@ impl TilePass<'_> {
                 poe_data_tools::file_parsers::arm::types::Slot::K(k) if (room.arm.tag.is_empty() || std::env::var_os("POE_OWN_TAG").is_some() || (p.special && std::env::var("POE_NO_SPECIAL_OWN").is_err())) && room.arm.thingies.iter().all(|t| t.et_file.is_none()) && k.corners.iter().all(|c| c.ground == k.corners[0].ground) && uniform_walk(room) => k.corners[0].ground.clone(),
                 _ => None,
             };
-            let base = self.grounds[0].clone();
+            let base = grounds[0].clone();
             if std::env::var_os("POE_DBG_OWNTAG").is_some() && own.is_some() && !room.arm.tag.is_empty() && !p.special { eprintln!("OWNTAG {} tag {:?} ground {:?} base {:?}", p.path, room.arm.tag, own, base); }
             if let Ok(v) = std::env::var("POE_DBG_SETTLE") {
                 let xy: Vec<i32> = v.split(',').filter_map(|t| t.parse().ok()).collect();
@@ -393,10 +407,10 @@ impl TilePass<'_> {
                     let mut g = ground.clone();
                     if g.as_deref() != Some("metadata/terrain/impassable_ground.gt") {
                         let hh = height_of(map, px, py);
-                        if self.grounds[2].is_some() && hh == max_h {
-                            g = self.grounds[2].clone();
-                        } else if self.grounds[1].is_some() && hh == min_h {
-                            g = self.grounds[1].clone();
+                        if grounds[2].is_some() && hh == max_h {
+                            g = grounds[2].clone();
+                        } else if grounds[1].is_some() && hh == min_h {
+                            g = grounds[1].clone();
                         }
                     }
                     map.lattice[i].ground = g.map(|g| g.to_ascii_lowercase().replace('\\', "/"));
@@ -406,6 +420,9 @@ impl TilePass<'_> {
         }
     }
 
+}
+
+impl TilePass<'_> {
     /// `0x1420983d0`: a room's slots row by row.
     #[allow(clippy::too_many_arguments)]
     fn room(&self, p: &crate::dungeon::PlacedRoom, room: &Room, map: &mut TileMap, borders: &mut Vec<((i32, i32), Border)>, cells: &mut Vec<GroundCell>, moved: &mut Vec<(i32, i32)>, pending: &mut Vec<crate::dungeon::Pending>, rng: &mut TerrainRng) -> Result<(), GenError> {
