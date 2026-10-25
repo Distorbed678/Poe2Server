@@ -790,7 +790,7 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
     let grid = crate::dungeon::layout(files, graph, removed, &set, overlap, unit, fill_height, &file_groups, rng)?;
     if std::env::var("POE_DBG").is_ok() {
         for (i, r) in grid.rooms.iter().enumerate() {
-            eprintln!("DBG room {i} {} o{} origin {:?} size {:?} special {}", r.path, r.orientation, r.origin, r.size, r.special);
+            eprintln!("DBG room {i} {} o{} origin {:?} size {:?} special {} acc {} node {:?}", r.path, r.orientation, r.origin, r.size, r.special, r.accessible, r.node);
         }
     }
     let mut master = match (rel("TileSet"), rel("FillTiles")) {
@@ -951,8 +951,11 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
     }
     derepeat_pass(&mut map, &master, &placements, rng);
     dbg_cell(&map, "post-derepeat");
-    let subgraphs = grid.rooms.iter().filter_map(|r| Some((r.subgraph.clone()?, (r.origin.0 * step as i32, r.origin.1 * step as i32)))).collect();
     drop(placements);
+    // `0x141ff2090` (post-unique tiles, per region after the de-repetition: the village graphs of
+    // G1_13_2 place `Fields_01`-style tiles of the tile set's own list here).
+    crate::postunique::run(&mut map, &mut master, files, rng)?;
+    let subgraphs = grid.rooms.iter().filter_map(|r| Some((r.subgraph.clone()?, (r.origin.0 * step as i32, r.origin.1 * step as i32)))).collect();
     Ok(Built { map, master, tsi_bytes, tsi, subgraphs })
 }
 

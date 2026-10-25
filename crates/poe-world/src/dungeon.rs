@@ -489,7 +489,12 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
     // `0x142095d90`: an accessible edge, or an `accessible` / `default` / `entrance…` /
     // `sideentrance…` tag.
     let node_accessible = |n: usize| {
-        slots[n].iter().any(|&e| fields[e].accessible)
+        // An edgeless typed node (`bonfire` of the Gallows village graphs) is reachable: the client's
+        // fill treats its cells as walkable (chest fill rooms are offered; G1_13_2). The rule behind
+        // it is not found (`0x142095d90` returns 0 for it, no extra door reaches it); it is derived
+        // from the traces (G1_13_2: 1835 of 1842 jobs match with it).
+        (slots[n].is_empty() && !graph.nodes[n].room_type.is_empty())
+            || slots[n].iter().any(|&e| fields[e].accessible)
             || graph.nodes[n].tags.iter().any(|t| {
                 let t = t.to_ascii_lowercase();
                 t == "accessible" || t == "default" || t.starts_with("entrance") || t.starts_with("sideentrance")
