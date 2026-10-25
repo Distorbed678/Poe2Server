@@ -521,8 +521,26 @@ pub fn outer_buffer(
     if let Some(g) = outer_ground {
         fill_black(&mut map, rect, g, repair, master, files)?;
     }
+    // `ForceOuterGT`: the margins are not tiled from the border outwards; every empty cell takes
+    // the outer ground's first fill tile (the world maps' ring of `black_nofog.tdt`).
+    if master.force_outer_gt {
+        if let Some(g) = outer_ground {
+            if let Some((path, o)) = master.first_fill_tile(files, Some(g))? {
+                let o = if o == 8 { 0 } else { o };
+                let tdt = master.header(files, &path)?.clone();
+                for y in 0..h as i32 {
+                    for x in 0..w as i32 {
+                        if map.index(x, y).is_some_and(|i| map.cells[i].is_none()) {
+                            map.place(x, y, &path, &tdt, o, 0, None);
+                        }
+                    }
+                }
+                return Ok(map);
+            }
+        }
+    }
     preload_headers(&map, master, files)?;
-    let mut pass = Pass { map: &mut map, master, files, edges, w: w as i32, h: h as i32 };
+        let mut pass = Pass { map: &mut map, master, files, edges, w: w as i32, h: h as i32 };
     pass.extend_lattice(rect);
     pass.below_strip(rect, rng)?;
     pass.above_strip(rect, rng)?;

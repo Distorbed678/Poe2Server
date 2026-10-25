@@ -628,6 +628,9 @@ pub struct Master {
     /// `.tsi` `OuterFillHeightOverride`: the height of the outer fill's plain placement, which
     /// also replaces the height repair (master +0x153 / +0x161).
     pub outer_fill_height: Option<i8>,
+    /// `.tsi` `ForceOuterGT`: the outer buffer's margin corners take the master's outer ground
+    /// (world maps: the ring is `black_nofog.tdt`, the `BlackInsideWall` fill group).
+    pub force_outer_gt: bool,
 }
 
 /// Reads a `.tdt`, applying an inheriting tile's overrides to its parent chain.
@@ -675,7 +678,7 @@ fn collect_tst(files: &dyn Files, path: &str, out: &mut Vec<poe_data_tools::file
 impl Master {
     /// A master without tile set or fill tiles (container graphs, whose `.tsi` names neither).
     pub fn empty() -> Self {
-        Self { tiles: TileSet::new(Vec::new()), fills: HashMap::new(), headers: HashMap::new(), ground_names: HashMap::new(), outer_fill_height: None }
+        Self { tiles: TileSet::new(Vec::new()), fills: HashMap::new(), headers: HashMap::new(), ground_names: HashMap::new(), outer_fill_height: None, force_outer_gt: false }
     }
 
     pub fn load(files: &dyn Files, tst: &str, gft: &str) -> Result<Self, GenError> {
@@ -735,6 +738,7 @@ impl Master {
             headers,
             ground_names: HashMap::new(),
             outer_fill_height: None,
+            force_outer_gt: false,
         })
     }
 

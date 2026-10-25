@@ -365,10 +365,11 @@ impl TilePass<'_> {
             }
             // A blank room (no tag, doors or second ground) carries its ground.
             let own = match &room.arm.root_slot {
-                poe_data_tools::file_parsers::arm::types::Slot::K(k) if (room.arm.tag.is_empty() || (p.special && std::env::var("POE_NO_SPECIAL_OWN").is_err())) && room.arm.thingies.iter().all(|t| t.et_file.is_none()) && k.corners.iter().all(|c| c.ground == k.corners[0].ground) && uniform_walk(room) => k.corners[0].ground.clone(),
+                poe_data_tools::file_parsers::arm::types::Slot::K(k) if (room.arm.tag.is_empty() || std::env::var_os("POE_OWN_TAG").is_some() || (p.special && std::env::var("POE_NO_SPECIAL_OWN").is_err())) && room.arm.thingies.iter().all(|t| t.et_file.is_none()) && k.corners.iter().all(|c| c.ground == k.corners[0].ground) && uniform_walk(room) => k.corners[0].ground.clone(),
                 _ => None,
             };
             let base = self.grounds[0].clone();
+            if std::env::var_os("POE_DBG_OWNTAG").is_some() && own.is_some() && !room.arm.tag.is_empty() && !p.special { eprintln!("OWNTAG {} tag {:?} ground {:?} base {:?}", p.path, room.arm.tag, own, base); }
             if let Ok(v) = std::env::var("POE_DBG_SETTLE") {
                 let xy: Vec<i32> = v.split(',').filter_map(|t| t.parse().ok()).collect();
                 if xy.len() == 2 && (x0..x1).contains(&(xy[0] - p.origin.0 * step)) && (y0..y1).contains(&(xy[1] - p.origin.1 * step)) {
