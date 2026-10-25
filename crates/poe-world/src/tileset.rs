@@ -249,6 +249,15 @@ impl TileSet {
         // of its corners (a ground without `.gt` flag 1) zeroed, again.
         let feature = feature.to_ascii_lowercase();
         let mut k = key.clone();
+        if std::env::var_os("POE_NO_KEYNORM").is_none() {
+            // A ground with `.gt` flag 0x10 is no ground in a tile's key (`add` stores it as none):
+            // the lookup key is read the same way.
+            for g in k.grounds.iter_mut() {
+                if g.as_ref().is_some_and(|p| self.flags.get(p).copied().unwrap_or(0) & 0x10 != 0) {
+                    *g = None;
+                }
+            }
+        }
         loop {
             let probe = (feature.clone(), k);
             if let Some(l) = self.index.get(&probe).filter(|l| !l.is_empty()) {

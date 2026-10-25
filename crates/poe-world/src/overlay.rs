@@ -258,6 +258,11 @@ impl Overlays {
         let (width, height) = (map.width as i32, map.height as i32);
         let mut s = Self { passes: built, rooms, occupied: vec![0; (width * height) as usize], width, height, dungeon: false, wiggle: Vec::new(), counts: HashMap::new(), placed: Vec::new(), fill_rooms: Vec::new(), overlay_blank: overlay_blank.map(|p| p.to_ascii_lowercase()) };
         if s.passes.iter().any(|p| p.0.phases & 3 != 0) {
+            if std::env::var_os("POE_DBG_RECTS").is_some() {
+                for r in rooms_placed.iter().filter(|r| r.feature || r.described) {
+                    eprintln!("RECT {:?} feature {} described {} inset {}", r.rect, r.feature, r.described, r.inset);
+                }
+            }
             for r in rooms_placed {
                 if r.described {
                     s.mark(r.rect, 0x10);
@@ -325,6 +330,11 @@ impl Overlays {
                 self.place(phase, &groups, cands, map, master, types, files, rng)?;
             } else {
                 for (gi, g) in groups.iter().enumerate() {
+                    // A group whose rooms have all reached their limit is not collected (the
+                    // second orientation group of `overlay_seagullsoncorpse`, G4_13).
+                    if std::env::var_os("POE_OVERLAY_LIMIT_SKIP").is_some() && !g.rooms.is_empty() && g.rooms.iter().all(|r| r.limit != 0 && self.counts.get(&r.room).copied().unwrap_or(0) >= r.limit as u32) {
+                        continue;
+                    }
                     let mut cands = Candidates::default();
                     self.collect(g, gi, map, master, types, files, &mut cands)?;
                     self.place(phase, &groups, cands, map, master, types, files, rng)?;
@@ -408,6 +418,11 @@ impl Overlays {
             for (gi, g) in groups.iter().enumerate() {
                 let n = cands.0.values().filter(|c| c.1.iter().any(|x| x.0 == gi)).count();
                 eprintln!("  group {gi} size {:?} flags {:#x} total {} positions {n} key {:?}", g.key.size, g.flags, g.total, g.key);
+                if std::env::var("POE_DBG_OVERLAY").as_deref() == Ok("2") {
+                    for r in &g.rooms {
+                        eprintln!("    room {} w{} limit {} o{:#x}", self.rooms[r.room].0, r.weight, r.limit, r.orientations);
+                    }
+                }
             }
         }
         while !cands.0.is_empty() {
@@ -722,7 +737,7 @@ pub fn room_fits(map: &TileMap, pos: (i32, i32), key: &TileKey, wild: bool, marg
     let key_ground = |i: usize| key.grounds[i].clone().filter(|g| map.gt_flags(g) & 0x10 == 0);
     // `0x141f9cfc0`
     let mut odd = 0;
-    if std::env::var("POE_DBG_FITG").is_ok() && pos == (0, 27) { eprintln!("FITG {:?} lattice {:?} key {:?} flags {:?}", pos, corners.iter().map(|&(cx, cy)| corner(map, cx, cy).0).collect::<Vec<_>>(), key.grounds, map.ground_flags.iter().filter(|(k, _)| k.contains("black_inside") || k.contains("cavern_abyss")).collect::<Vec<_>>()); }
+    if std::env::var("POE_DBG_FITG").ok().is_some_and(|v| v == format!("{},{}", pos.0, pos.1)) { eprintln!("FITG {:?} lattice {:?} key {:?} flags {:?}", pos, corners.iter().map(|&(cx, cy)| corner(map, cx, cy).0).collect::<Vec<_>>(), key.grounds, map.ground_flags.iter().filter(|(k, _)| k.contains("black_inside") || k.contains("cavern_abyss")).collect::<Vec<_>>()); }
     for (s, &(cx, cy)) in corners.iter().enumerate() {
         let (a, _) = corner(map, cx, cy);
         let b = key_ground(s);

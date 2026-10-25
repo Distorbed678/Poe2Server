@@ -240,7 +240,7 @@ fn keep_off_border(pos: &mut (i32, i32), size: (i32, i32), edges: &[Option<Strin
 
 /// `0x1420c87a0` for a room-less node: draws its tile and position.
 #[allow(clippy::too_many_arguments)]
-fn choose(view: &LayoutView, node: usize, master: &Master, map: &TileMap, chosen: &[NodeTile], tiles: (i32, i32), types: &mut TerrainTypes, files: &dyn Files, rng: &mut TerrainRng) -> Result<NodeTile, GenError> {
+fn choose(view: &LayoutView, node: usize, master: &Master, map: &TileMap, tiles: (i32, i32), types: &mut TerrainTypes, files: &dyn Files, rng: &mut TerrainRng) -> Result<NodeTile, GenError> {
     let (mut sides, mut key) = node_key(view, node, types, files)?;
     let node_o = view.gnode(node).map_or(8, |n| node_orientation(&n.orientation));
     // `0x1420c5540` inside `0x1420c76d0`: no tile of the feature has the key's edges, so one
@@ -280,8 +280,10 @@ fn choose(view: &LayoutView, node: usize, master: &Master, map: &TileMap, chosen
         let px = sx.max(0).min(tiles.0 - w);
         let py = sy.max(0).min(tiles.1 - h);
         let inside = px >= 0 && py >= 0 && px + w <= tiles.0 && py + h <= tiles.1;
-        let overlaps = chosen.iter().any(|p| px < p.pos.0 + p.size.0 as i32 && p.pos.0 < px + w && py < p.pos.1 + p.size.1 as i32 && p.pos.1 < py + h);
-        if inside && map.free(px, py, w, h) && !overlaps {
+        // No rectangle test against the tiles chosen before: the map is still empty (`0x1420c87a0`
+        // tests its cells), and the settle in `place` separates overlapping tiles (G3_1 topology 5
+        // draws two `SandEdge_Water_St_01` for nodes 2 cells apart).
+        if inside && map.free(px, py, w, h) {
             let mut key = TileKey::from_tdt(&master.tiles.tiles[c.tile].tdt).oriented(c.orientation);
             let mut pos = (px, py);
             keep_off_border(&mut pos, (w, h), &key.edges.clone(), max_size, tiles, types, files)?;
@@ -338,7 +340,7 @@ pub fn place_node_tiles(lg: &mut LayoutGraph, graph: &Graph, nodes: &[usize], ma
     let mut chosen: Vec<NodeTile> = Vec::new();
     for &n in nodes {
         let view = LayoutView { lg, graph };
-        let t = choose(&view, n, master, map, &chosen, tiles, types, files, rng)?;
+        let t = choose(&view, n, master, map, tiles, types, files, rng)?;
         chosen.push(t);
     }
     if chosen.is_empty() {

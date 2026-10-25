@@ -333,13 +333,21 @@ impl TileMap {
                     self.cells[j] = sub.cells[i].clone();
                     self.grounds[j] = sub.grounds[i].clone();
                     self.piece_at[j] = sub.piece_at[i].map(|p| p + base);
+                } else if let (Some(c), Some(p)) = (&sub.cells[i], sub.piece_at[i]) {
+                    // A subgraph larger than its reserved rectangle (G3_1's `End_S_E_1` is 60 wide
+                    // in a 57 wide slot): the cells beyond the map are kept like a tile's overhang.
+                    self.spill.push(Spill::Cell(x + origin.0, y + origin.1, p + base, c.clone()));
                 }
             }
         }
         for y in 0..=sub.height as i32 {
             for x in 0..=sub.width as i32 {
-                if let (Some(i), Some(j)) = (sub.point_index(x, y), self.point_index(x + origin.0, y + origin.1)) {
-                    self.lattice[j] = sub.lattice[i].clone();
+                if let Some(i) = sub.point_index(x, y) {
+                    if let Some(j) = self.point_index(x + origin.0, y + origin.1) {
+                        self.lattice[j] = sub.lattice[i].clone();
+                    } else if sub.lattice[i].flags & 1 != 0 {
+                        self.spill.push(Spill::Point(x + origin.0, y + origin.1, sub.lattice[i].ground.clone(), sub.lattice[i].height));
+                    }
                 }
             }
         }
@@ -620,6 +628,9 @@ pub struct Master {
     /// `.tsi` `OuterFillHeightOverride`: the height of the outer fill's plain placement, which
     /// also replaces the height repair (master +0x153 / +0x161).
     pub outer_fill_height: Option<i8>,
+    /// `.tsi` `ForceOuterGT`: the outer buffer's margin corners take the master's outer ground
+    /// (world maps: the ring is `black_nofog.tdt`, the `BlackInsideWall` fill group).
+    pub force_outer_gt: bool,
 }
 
 /// Reads a `.tdt`, applying an inheriting tile's overrides to its parent chain.
@@ -667,7 +678,7 @@ fn collect_tst(files: &dyn Files, path: &str, out: &mut Vec<poe_data_tools::file
 impl Master {
     /// A master without tile set or fill tiles (container graphs, whose `.tsi` names neither).
     pub fn empty() -> Self {
-        Self { tiles: TileSet::new(Vec::new()), fills: HashMap::new(), headers: HashMap::new(), ground_names: HashMap::new(), outer_fill_height: None }
+        Self { tiles: TileSet::new(Vec::new()), fills: HashMap::new(), headers: HashMap::new(), ground_names: HashMap::new(), outer_fill_height: None, force_outer_gt: false }
     }
 
     pub fn load(files: &dyn Files, tst: &str, gft: &str) -> Result<Self, GenError> {
@@ -727,6 +738,7 @@ impl Master {
             headers,
             ground_names: HashMap::new(),
             outer_fill_height: None,
+            force_outer_gt: false,
         })
     }
 
