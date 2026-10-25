@@ -176,7 +176,7 @@ pub fn generate_probed(gd: &GameData, area_id: &str, rng: &mut TerrainRng, force
 struct WithSpecialTiles<'a> {
     inner: &'a dyn crate::generate::Files,
     special: Vec<String>,
-    league: Vec<crate::generate::LeagueRoom>,
+    league: std::cell::RefCell<Vec<crate::generate::LeagueRoom>>,
 }
 
 impl crate::generate::Files for WithSpecialTiles<'_> {
@@ -187,7 +187,13 @@ impl crate::generate::Files for WithSpecialTiles<'_> {
         self.special.get(row).cloned()
     }
     fn league_rooms(&self) -> Vec<crate::generate::LeagueRoom> {
-        self.league.clone()
+        self.league.borrow().clone()
+    }
+    fn take_league(&self, room: &str) {
+        let mut l = self.league.borrow_mut();
+        if let Some(i) = l.iter().position(|r| r.room == room) {
+            l.remove(i);
+        }
     }
 }
 
@@ -240,7 +246,7 @@ pub fn generate_probed_files(gd: &GameData, files: &dyn crate::generate::Files, 
         extras.push(extra_job(gd, files, rng, KALGUUR_AREA)?);
     }
     let special: Vec<String> = gd.table("SpecialTiles").ok().map(|t| (0..).map_while(|r| t.row(r)).filter_map(|r| r.str("TDTFile").ok().map(String::from)).collect()).unwrap_or_default();
-    let files = WithSpecialTiles { inner: files, special, league: crate::league::extra_rooms(gd, &rolled) };
+    let files = WithSpecialTiles { inner: files, special, league: std::cell::RefCell::new(crate::league::extra_rooms(gd, &rolled)) };
     let map = generate_graph_probed(&files, &graph, rng, probe, &extras)?;
     let draws = rng.draws;
     let logged = rng.log.as_ref().map(Vec::len);
@@ -803,6 +809,8 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
         None => Default::default(),
     };
     let unit: u32 = tsi.get("RoomUnitSize").and_then(|v| v.trim().parse().ok()).unwrap_or(9);
+    // The features still on the generator's list when the graph starts (the layout below takes the ones its mission rooms serve).
+    let league = files.league_rooms();
     let grid = crate::dungeon::layout(files, graph, removed, &set, overlap, unit, fill_height, &file_groups, rng)?;
     if std::env::var("POE_DBG").is_ok() {
         for (i, r) in grid.rooms.iter().enumerate() {
@@ -818,7 +826,6 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
     };
     // `OuterFillHeightOverride` (master +0x161 set, value +0x153): the outer fill places plain.
     // The league features' tiles join the tile set when the features are added (`0x141f8aed0`).
-    let league = files.league_rooms();
     for lr in &league {
         for t in &lr.tiles {
             master.add_extra_tile(files, t)?;
@@ -920,7 +927,8 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
     let mut overlays = match rel("Overlays").filter(|_| std::env::var("POE_NO_DOV").is_err()) {
         Some(toy) => {
             // The generator's room list (`+0x58`): a feature room per placed room whose `.arm`
-            // has a tag; its inner rectangle (shrunk by the shared border when the room's own
+            // has a tag (a `special` room over a generic one does not count, but a mission room
+            // does: MapCreek's overlays skip the cells round `mission_02`); its inner rectangle (shrunk by the shared border when the room's own
             // overlap equals the master's) and the whole one are marked, nodes with tags too.
             let rects: Vec<crate::overlay::RoomRect> = grid
                 .rooms
@@ -930,7 +938,10 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
                     let (x0, y0) = (r.origin.0 * step as i32, r.origin.1 * step as i32);
                     let rect = (x0, y0, x0 + (r.size.0 * step + grid.overlap) as i32, y0 + (r.size.1 * step + grid.overlap) as i32);
                     let inset = if room.arm.dimensions.uint1.unwrap_or(1) == grid.overlap { grid.overlap as i32 } else { 0 };
-                    Some(crate::overlay::RoomRect { rect, feature: !room.arm.tag.is_empty() && !r.special, described: r.node.is_some_and(|n| !graph.nodes[n].tags.is_empty()), inset })
+                    if std::env::var_os("POE_DBG_LEAGUE").is_some() && (r.special || !room.arm.tag.is_empty()) {
+                        eprintln!("ROOMRECT {:?} {} special {} tag {:?} node {:?}", rect, r.path, r.special, room.arm.tag, r.node);
+                    }
+                    Some(crate::overlay::RoomRect { rect, feature: !room.arm.tag.is_empty() && (!r.special || room.arm.tag.eq_ignore_ascii_case("mission")), described: r.node.is_some_and(|n| !graph.nodes[n].tags.is_empty()), inset })
                 })
                 .collect();
             let mut o = crate::overlay::Overlays::new(files, &toy, &map, &mut master, &rects, files.special_tile(2))?;
@@ -1532,3 +1543,4 @@ fn build_tgr(files: &dyn crate::generate::Files, graph: &Graph, removed: Vec<boo
 
     Ok(Built { map, master, tsi_bytes, tsi, subgraphs: Vec::new() })
 }
+

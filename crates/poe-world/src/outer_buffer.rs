@@ -699,6 +699,7 @@ fn fill_black(map: &mut TileMap, rect: (i32, i32, i32, i32), ground: &str, repai
             }
         }
     }
+    let n_scan_fixed = fixed.len();
     while !waiting.is_empty() {
         for (x, y, ht) in ready.drain(..) {
             place(map, x, y, ht);
@@ -720,6 +721,9 @@ fn fill_black(map: &mut TileMap, rect: (i32, i32, i32, i32), ground: &str, repai
         place(map, x, y, ht);
         fixed.push((x, y));
     }
+    if std::env::var_os("POE_DBG_FILL").is_some() {
+        eprintln!("fill_black rect {:?} ground {} tile {} fixed {} ({:?}) placed-after-scan {}", rect, ground, path, fixed.len(), &fixed[..fixed.len().min(12)], n_scan_fixed);
+    }
     // `0x141fd71c0` rounds.
     for _ in 0..15 {
         let mut small = true;
@@ -733,6 +737,10 @@ fn fill_black(map: &mut TileMap, rect: (i32, i32, i32, i32), ground: &str, repai
                     small = false;
                 }
             }
+        }
+        if std::env::var_os("POE_DBG_FILL").is_some() {
+            let pre: Vec<_> = changes.iter().filter(|(c, _)| fixed.iter().position(|f| f == c).is_some_and(|i| i < n_scan_fixed)).collect();
+            eprintln!("round changes {} (of which pre-existing tiles {}) rect {:?}: {:?}", changes.len(), pre.len(), rect, &changes[..changes.len().min(6)]);
         }
         if changes.is_empty() {
             break;

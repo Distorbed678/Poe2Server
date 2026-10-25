@@ -66,6 +66,9 @@ pub trait Files {
     fn league_rooms(&self) -> Vec<LeagueRoom> {
         Vec::new()
     }
+    /// A graph placed (or queued) the feature room `room`: it leaves the generator's feature
+    /// list (`0x141f8b320`), so a later graph of the same job (subgraphs) does not place it again.
+    fn take_league(&self, _room: &str) {}
 }
 
 /// A room a league mechanic adds (`ExtraTerrainFeatures`): the `.arm`, the orientation mask of
