@@ -1095,6 +1095,10 @@ fn corridors(
         let impen = fields[e].impenetrable.eq_ignore_ascii_case("I");
         keys.push((priority(e), container, (impen, fields[e].impenetrability, hc, t), e));
     }
+    let mut marks: Vec<Option<(bool, bool)>> = vec![None; graph.edges.len()];
+    for k in &keys {
+        marks[k.3] = side_marks(files, types, graph, k.3)?;
+    }
     // Impenetrable first, then higher impenetrability, higher height change, type name.
     keys.sort_by(|a, b| {
         a.0.cmp(&b.0)
@@ -1145,7 +1149,7 @@ fn corridors(
         grow(&mut records, grid, rng);
         mark_used(grid, &mut records);
         for &e in b {
-            connect(graph, e, &fields[e], grid, &mut records, &mut paths, rng)?;
+            connect(graph, e, &fields[e], marks[e], grid, &mut records, &mut paths, rng)?;
         }
         compact(grid, &mut records, &mut paths);
     }
@@ -1175,6 +1179,9 @@ fn corridors(
     keys.sort_by_key(|k| rank(k));
     let generic: Vec<(u32, u32, Vec<Exit>)> = generic_shapes(grid, rooms);
     for key in &keys {
+        if std::env::var("POE_DBG_DOOR").is_ok() {
+            eprintln!("BKEYPASS @{} {key} branching {}", rng.log.as_ref().map_or(0, |l| l.len()), paths.iter().any(|c| &c.key == key && fields[c.edge].chance1 != 0));
+        }
         if !paths.iter().any(|c| &c.key == key && fields[c.edge].chance1 != 0) {
             continue;
         }
@@ -1182,7 +1189,7 @@ fn corridors(
         fill_placeholders(grid, &list, Some(key.clone()), rng)?;
         grow(&mut records, grid, rng);
         mark_used(grid, &mut records);
-        branch(graph, fields, key, &generic, grid, &mut records, &paths, rng)?;
+        branch(graph, fields, &marks, key, &generic, grid, &mut records, &paths, rng)?;
         compact(grid, &mut records, &mut paths);
     }
     extra_doors(grid, &generic, open_into_impenetrable(graph), rng)?;
@@ -1422,42 +1429,118 @@ fn mark_height(grid: &Grid, records: &mut [Record], cell: (i32, i32), height: i3
         return;
     }
     if !records[i].heights.contains(&height) {
+        if std::env::var("POE_DBG_HMARK").is_ok_and(|v| v == format!("{},{}", grid.rooms[i].origin.0, grid.rooms[i].origin.1)) {
+            eprintln!("HMARK room {i}{:?} from cell {cell:?} height {height} (had {:?})", grid.rooms[i].origin, records[i].heights);
+        }
         records[i].heights.push(height);
         records[i].heights.sort();
     }
 }
 
-/// `0x1420a2fb0` (doors without chirality): with an overlap, the corridor's height goes to the
-/// rooms outside `room`'s door-less positions.
-fn mark_around(grid: &Grid, records: &mut [Record], room: usize) {
+/// `0x141d047b0`: a door type whose two sides differ (a height change, two grounds, or a virtual
+/// type whose split types differ or are themselves asymmetric with equal chirality bits).
+fn asymmetric(files: &dyn Files, types: &mut TerrainTypes, path: &str) -> Result<bool, GenError> {
+    let et = types.edge(files, path)?.clone();
+    if et.height_change != 0 || et.grounds[0] != et.grounds[1] {
+        return Ok(true);
+    }
+    if !et.virtual_edge || et.splits[0].0 != et.splits[1].0 {
+        return Ok(et.virtual_edge);
+    }
+    Ok(asymmetric(files, types, &et.splits[0].0)? && et.splits[0].1 == et.splits[1].1)
+}
+
+/// The marking of `0x1420a2fb0` for edge `e`'s door type: `None` for a symmetric type (every
+/// door-less side), else which corridor sides mark (left ground, right ground: none or `.gt`
+/// flag 1).
+fn side_marks(files: &dyn Files, types: &mut TerrainTypes, graph: &Graph, e: usize) -> Result<Option<(bool, bool)>, GenError> {
+    let t = graph.edges[e].edge_type.to_ascii_lowercase();
+    if std::env::var("POE_OLD_MARK").is_ok() || !asymmetric(files, types, &t)? {
+        return Ok(None);
+    }
+    let grounds = types.edge(files, &t)?.grounds.clone();
+    let mut side = |g: &Option<String>| -> bool { g.as_ref().is_none_or(|g| types.ground(files, g).map_or(true, |f| f & 1 != 0)) };
+    Ok(Some((side(&grounds[0]), side(&grounds[1]))))
+}
+
+/// `0x1420a2fb0`: with an overlap, the corridor's height goes to the rooms outside `room`'s
+/// door-less positions; `room` lies between `next` (towards the start) and `prev` on the
+/// corridor. For an asymmetric door type (`marks`) only the sides at the corridor's left or
+/// right are marked (`0x1420a34c0`): side `k` = (1 + 2·chirality + side of the door) & 3 for the
+/// doors to `next` (chirality flipped) and `prev`, per marking ground.
+#[allow(clippy::too_many_arguments)]
+fn mark_around(grid: &Grid, records: &mut [Record], room: usize, next: usize, prev: usize, door: &str, chir: bool, marks: Option<(bool, bool)>) {
     if grid.overlap == 0 {
         return;
     }
+    if let Some((left, right)) = marks {
+        let r = &grid.rooms[room];
+        let (w, h) = (r.size.0, r.size.1);
+        let side = |u: u32| if u < w { 0 } else if u < w + h { 1 } else if u < 2 * w + h { 2 } else { 3 };
+        let (Some(&a), Some(&b)) = (shared_doors(grid, r, &grid.rooms[next], door, !chir).first(), shared_doors(grid, r, &grid.rooms[prev], door, chir).first()) else { return };
+        let (sa, sb) = (side(a), side(b));
+        for (on, c) in [(left, !chir), (right, chir)] {
+            if on {
+                let k = 1 + 2 * u32::from(c);
+                mark_side(grid, records, room, (k + sa) & 3);
+                mark_side(grid, records, room, (k + sb) & 3);
+            }
+        }
+        return;
+    }
+    for k in 0..4 {
+        mark_strip(grid, records, room, k);
+    }
+}
+
+/// `0x1420a34c0`: side `k` of the ring has no door: mark one strip; the ring side checked and
+/// the strip marked differ as in the client (ring side top, right, bottom, left marks the strip
+/// above, below, left, right).
+fn mark_side(grid: &Grid, records: &mut [Record], room: usize, k: u32) {
+    let r = &grid.rooms[room];
+    let (w, h) = (r.size.0 as usize, r.size.1 as usize);
+    let range = match k {
+        0 => 0..w,
+        1 => w..w + h,
+        2 => w + h..2 * w + h,
+        _ => 2 * w + h..r.exits.len(),
+    };
+    if r.exits[range].iter().any(|e| e.door.is_some()) {
+        return;
+    }
+    mark_strip(grid, records, room, k);
+}
+
+/// One strip of `0x1420a2fb0`'s plain marking: 0 above, 1 below, 2 left, 3 right of `room`.
+fn mark_strip(grid: &Grid, records: &mut [Record], room: usize, strip: u32) {
     let r = grid.rooms[room].clone();
     let (x, y, w, h) = (r.origin.0, r.origin.1, r.size.0 as i32, r.size.1 as i32);
     let n = r.exits.len() as i32;
     let mut mark = |idx: i32, cell: (i32, i32)| {
         let e = &r.exits[idx as usize];
         if e.door.is_none() {
+            if std::env::var("POE_DBG_HMARK").is_ok_and(|v| v == format!("{},{}", cell.0, cell.1)) {
+                eprintln!("HSRC room {room}{:?}{:?} ph {} height {} exit {idx} h {}", r.origin, r.size, r.is_placeholder(), r.height, e.height);
+            }
             mark_height(grid, records, cell, e.height + r.height);
         }
     };
-    if y != 0 {
+    if strip == 0 && y != 0 {
         for u in 0..w {
             mark(u, (x + u, y - 1));
         }
     }
-    if ((y + h) as u32) < grid.h {
+    if strip == 1 && ((y + h) as u32) < grid.h {
         for u in 0..w {
             mark(h - 1 + 2 * w - u, (x + u, y + h));
         }
     }
-    if x != 0 {
+    if strip == 2 && x != 0 {
         for u in 0..h {
             mark(n - u - 1, (x - 1, y + u));
         }
     }
-    if ((x + w) as u32) < grid.w {
+    if strip == 3 && ((x + w) as u32) < grid.w {
         for u in 0..h {
             mark(u + w, (x + w, y + u));
         }
@@ -1485,6 +1568,9 @@ fn branch_starts(grid: &Grid, records: &[Record], generic: &[(u32, u32, Vec<Exit
     for n in neighbours(grid, parent) {
         let rec = &records[n];
         let fits_height = if rec.heights.is_empty() { height == 0 } else { rec.heights.len() == 1 && rec.heights[0] == height };
+        if std::env::var("POE_DBG_DOOR").is_ok() {
+            eprintln!("  BSTART parent {parent}{:?} n {n}{:?}{:?} ph {} heights {:?} want {height} used {} impen {} can {}", grid.rooms[parent].origin, grid.rooms[n].origin, grid.rooms[n].size, grid.rooms[n].is_placeholder(), rec.heights, rec.used, rec.impen, can_branch(grid, generic, parent, n, height, door));
+        }
         if !fits_height || rec.used || rec.impen {
             continue;
         }
@@ -1526,15 +1612,16 @@ fn chance_count(chance: i32, n: usize, rng: &mut TerrainRng) -> usize {
 
 /// `0x1420a5680`: branches off the corridors of one type.
 #[allow(clippy::too_many_arguments)]
-fn branch(graph: &Graph, fields: &[EdgeFields], key: &str, generic: &[(u32, u32, Vec<Exit>)], grid: &mut Grid, records: &mut [Record], paths: &[Corridor], rng: &mut TerrainRng) -> Result<(), GenError> {
+fn branch(graph: &Graph, fields: &[EdgeFields], marks: &[Option<(bool, bool)>], key: &str, generic: &[(u32, u32, Vec<Exit>)], grid: &mut Grid, records: &mut [Record], paths: &[Corridor], rng: &mut TerrainRng) -> Result<(), GenError> {
     let branching = |n: u32| graph.nodes[n as usize].extra.get(1).is_some_and(|v| v != "0");
     for c in paths.iter().filter(|c| c.key == key) {
         let edge = &graph.edges[c.edge];
         // The first loop of `0x1420a5680`: the corner marking of `connect` again for every
         // inner room of the corridor. The placeholders of the branch pass are new (the unused
         // ones of the corridor pass left in `compact`), so they take their heights here.
+        let (door, chir) = (edge.edge_type.to_ascii_lowercase(), edge.values.get(1).copied().unwrap_or(0) != 0);
         for l in 1..c.rooms.len().saturating_sub(1) {
-            mark_around(grid, records, c.rooms[l]);
+            mark_around(grid, records, c.rooms[l], c.rooms[l + 1], c.rooms[l - 1], &door, chir, marks[c.edge]);
         }
         // The corridor's end rooms at branching nodes mark their neighbours.
         if branching(edge.to) {
@@ -1566,6 +1653,9 @@ fn branch(graph: &Graph, fields: &[EdgeFields], key: &str, generic: &[(u32, u32,
         let proto = BranchCand { room: 0, parent: 0, chance: f.chance2, depth: f.depth_limit - 1, height: c.height, impen, accessible: f.accessible, extra_pct: f.extra_door, extra_door: t };
         for i in first..end.max(first) {
             branch_starts(grid, records, generic, c.rooms[i], &proto, key, &mut list);
+        }
+        if std::env::var("POE_DBG_DOOR").is_ok() {
+            eprintln!("BRANCH @{} edge {} chance1 {} starts {}", rng.log.as_ref().map_or(0, |l| l.len()), c.edge, f.chance1, list.len());
         }
         if f.chance1 < 100 {
             let k = chance_count(f.chance1, list.len(), rng);
@@ -1660,7 +1750,7 @@ fn centre(r: &PlacedRoom) -> (i32, i32) {
 
 /// `0x1420a3a20`: an edge between the rooms under its nodes: A* over rooms (`0x1420a4330`),
 /// then doors along the path (`0x141fa8140`).
-fn connect(graph: &Graph, e: usize, f: &EdgeFields, grid: &mut Grid, records: &mut [Record], paths: &mut Vec<Corridor>, rng: &mut TerrainRng) -> Result<(), GenError> {
+fn connect(graph: &Graph, e: usize, f: &EdgeFields, marks: Option<(bool, bool)>, grid: &mut Grid, records: &mut [Record], paths: &mut Vec<Corridor>, rng: &mut TerrainRng) -> Result<(), GenError> {
     let edge = &graph.edges[e];
     let cell = |n: usize| (graph.nodes[n].x / 23, graph.nodes[n].y / 23);
     let (a, b) = (grid.state(cell(edge.from as usize)), grid.state(cell(edge.to as usize)));
@@ -1708,8 +1798,8 @@ fn connect(graph: &Graph, e: usize, f: &EdgeFields, grid: &mut Grid, records: &m
             if c != start && c != goal {
                 grid.rooms[c].accessible |= f.accessible;
             }
-            if prev2.is_some() {
-                mark_around(grid, records, p);
+            if let Some(p2) = prev2 {
+                mark_around(grid, records, p, c, p2, &door, chir, marks);
             }
         }
         prev2 = prev;
@@ -1875,6 +1965,10 @@ fn connectable(grid: &Grid, a: usize, b: usize, height: i32, door: &str, chir: b
 /// chirality `!chir` and `b` takes `chir` (`0x141f96730`).
 fn open_door(grid: &mut Grid, a: usize, b: usize, door: &str, chir: bool, either: bool, rng: &mut TerrainRng) -> Result<(), GenError> {
     let mut list = shared_doors(grid, &grid.rooms[a], &grid.rooms[b], door, chir);
+    if std::env::var("POE_DBG_DOOR").is_ok() {
+        let (ra, rb) = (&grid.rooms[a], &grid.rooms[b]);
+        eprintln!("DOOR @{} {a}{:?}{:?} ph {} -> {b}{:?}{:?} ph {} list {:?} chir {chir} {door}", rng.log.as_ref().map_or(0, |l| l.len()), ra.origin, ra.size, ra.is_placeholder(), rb.origin, rb.size, rb.is_placeholder(), list);
+    }
     if list.is_empty() {
         return Err(unsupported("dungeon: could not open doors"));
     }
