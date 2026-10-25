@@ -2157,6 +2157,7 @@ fn extra_features(files: &dyn Files, rooms: &[DungeonRoom], unit_size: u32, grid
     // The requests served (all of them, or the first ones when the table ran out).
     let served = if ei >= table.len() { nreq - rem } else { nreq };
     for r in requests.into_iter().take(served) {
+        files.take_league(&r.room);
         let v = rng.below(0x348);
         grid.pending.push(Pending { room: r.room, orientation: crate::region::pick(0, v) });
     }

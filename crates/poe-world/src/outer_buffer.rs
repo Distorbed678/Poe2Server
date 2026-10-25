@@ -717,6 +717,10 @@ fn fill_black(map: &mut TileMap, rect: (i32, i32, i32, i32), ground: &str, repai
                 }
             }
         }
+        if std::env::var_os("POE_DBG_FILL").is_some() {
+            let pre: Vec<_> = changes.iter().filter(|(c, _)| fixed.iter().position(|f| f == c).is_some_and(|i| i < n_scan_fixed)).collect();
+            eprintln!("round changes {} (of which pre-existing tiles {}) rect {:?}: {:?}", changes.len(), pre.len(), rect, &changes[..changes.len().min(6)]);
+        }
         if changes.is_empty() {
             break;
         }

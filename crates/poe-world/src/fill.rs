@@ -560,6 +560,7 @@ pub fn place_league_rooms(map: &mut TileMap, master: &mut Master, files: &dyn Fi
             }
             f.height = Some(height);
             f.place_room(x, y, &lr.room, o, ground, true, rng)?;
+            f.files.take_league(&lr.room);
             break;
         }
     }
@@ -651,6 +652,7 @@ pub fn place_league_rooms_dgr(
                 f.height = Some(c.height as i16);
                 f.place_room(x, y, &lr.room, o, c.ground.clone(), c.accessible, rng)?;
                 rects.push(rect);
+                f.files.take_league(&lr.room);
                 if std::env::var_os("POE_DBG_LEAGUE").is_some() { eprintln!("league dgr: pass {pass} room placed at ({x},{y}) o{o} size {w}x{h} ground {:?} h {} (cell {} of {})", c.ground, c.height, cells.iter().position(|d| d.pos == c.pos).unwrap_or(0), cells.len()); }
                 done = true;
                 break;
