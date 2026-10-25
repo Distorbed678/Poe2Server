@@ -172,6 +172,8 @@ pub struct RoomDef {
 
 pub struct RoomSet {
     pub rooms: Vec<RoomDef>,
+    /// The `.rs` file (empty for a graph without one).
+    pub path: String,
 }
 
 impl RoomSet {
@@ -196,7 +198,7 @@ impl RoomSet {
                 room,
             });
         }
-        Ok(Self { rooms })
+        Ok(Self { rooms, path: path.to_string() })
     }
 }
 

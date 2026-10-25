@@ -370,39 +370,61 @@ impl FileGroups {
     }
 }
 
+/// A room of the room set as the layout sees it.
+fn dungeon_room(r: &crate::rooms::RoomDef) -> DungeonRoom {
+    let arm = &r.room.arm;
+    let units = (arm.numbers1.first().copied().unwrap_or(1), arm.numbers1.get(1).copied().unwrap_or(1));
+    let exits: Vec<Exit> = arm
+        .thingies
+        .iter()
+        // Version > 29 puts a height override flag before the chirality.
+        .map(|t| Exit { door: t.et_file.as_ref().map(|s| s.to_ascii_lowercase()), height: t.int, chiral: if arm.version > 29 { t.bool2 } else { t.bool1 }.unwrap_or(false) })
+        .collect();
+    let tag = r.tag.to_ascii_lowercase();
+    let special = tag.starts_with("special");
+    let (list, chance) = match tag.strip_prefix("specialchance") {
+        Some(n) => (0xff, n.trim().parse().unwrap_or(100)),
+        None => (tag.strip_prefix("special").and_then(|n| n.trim().parse().ok()).unwrap_or(0xff), 100),
+    };
+    let generic = !special && !matches!(tag.as_str(), "shrine" | "mission" | "stonecircle" | "preunique") && !tag.starts_with("telepad_injector") && !tag.starts_with("room_injector") && !tag.starts_with("tile_injector");
+    let unique = arm.bools.first().copied().unwrap_or(false);
+    let corners: [Option<String>; 4] = match &arm.root_slot {
+        poe_data_tools::file_parsers::arm::types::Slot::K(k) => k.corners.clone().map(|c| c.ground.map(|g| g.to_ascii_lowercase().replace('\\', "/"))),
+        _ => Default::default(),
+    };
+    let blank = r.tag.is_empty() && corners.iter().all(|c| *c == corners[0]) && exits.iter().all(|e: &Exit| e.door.is_none());
+    if std::env::var_os("POE_DBG_BLANK").is_some() {
+        eprintln!("BLANKCAND {} tag {:?} armtag {:?} units {units:?} w{} doors {} corners0 {:?} blank {blank}", r.path, r.tag, arm.tag, r.weight, exits.iter().filter(|e| e.door.is_some()).count(), corners[0]);
+    }
+    let missions = arm.grid.iter().flatten().filter(|sl| matches!(sl, poe_data_tools::file_parsers::arm::types::Slot::K(k) if k.slot_tag.as_deref().is_some_and(|t| t.eq_ignore_ascii_case("missiontile")))).count() as u32;
+    DungeonRoom { path: r.path.clone(), tag: if special { String::new() } else { r.tag.clone() }, generic, unique, special, list, chance, weight: r.weight, mask: r.orientations, units, exits, corners, blank, side: arm.dimensions.side_length, missions }
+}
+
 /// The dungeon layout of a pruned `.dgr` graph (`0x1420ac3e0`); `overlap` is the master's
 /// `RoomOverlap`.
 pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet, overlap: u32, unit_size: u32, fill_height: Option<i32>, file_groups: &FileGroups, rng: &mut TerrainRng) -> Result<Grid, GenError> {
     let mut types = TerrainTypes::default();
-    let mut rooms: Vec<DungeonRoom> = set
-        .rooms
-        .iter()
-        .map(|r| {
-            let arm = &r.room.arm;
-            let units = (arm.numbers1.first().copied().unwrap_or(1), arm.numbers1.get(1).copied().unwrap_or(1));
-            let exits: Vec<Exit> = arm
-                .thingies
-                .iter()
-                // Version > 29 puts a height override flag before the chirality.
-                .map(|t| Exit { door: t.et_file.as_ref().map(|s| s.to_ascii_lowercase()), height: t.int, chiral: if arm.version > 29 { t.bool2 } else { t.bool1 }.unwrap_or(false) })
-                .collect();
-            let tag = r.tag.to_ascii_lowercase();
-            let special = tag.starts_with("special");
-            let (list, chance) = match tag.strip_prefix("specialchance") {
-                Some(n) => (0xff, n.trim().parse().unwrap_or(100)),
-                None => (tag.strip_prefix("special").and_then(|n| n.trim().parse().ok()).unwrap_or(0xff), 100),
-            };
-            let generic = !special && !matches!(tag.as_str(), "shrine" | "mission" | "stonecircle" | "preunique") && !tag.starts_with("telepad_injector") && !tag.starts_with("room_injector") && !tag.starts_with("tile_injector");
-            let unique = arm.bools.first().copied().unwrap_or(false);
-            let corners: [Option<String>; 4] = match &arm.root_slot {
-                poe_data_tools::file_parsers::arm::types::Slot::K(k) => k.corners.clone().map(|c| c.ground.map(|g| g.to_ascii_lowercase().replace('\\', "/"))),
-                _ => Default::default(),
-            };
-            let blank = r.tag.is_empty() && corners.iter().all(|c| *c == corners[0]) && exits.iter().all(|e: &Exit| e.door.is_none());
-            let missions = arm.grid.iter().flatten().filter(|sl| matches!(sl, poe_data_tools::file_parsers::arm::types::Slot::K(k) if k.slot_tag.as_deref().is_some_and(|t| t.eq_ignore_ascii_case("missiontile")))).count() as u32;
-            DungeonRoom { path: r.path.clone(), tag: if special { String::new() } else { r.tag.clone() }, generic, unique, special, list, chance, weight: r.weight, mask: r.orientations, units, exits, corners, blank, side: arm.dimensions.side_length, missions }
-        })
-        .collect();
+    let mut rooms: Vec<DungeonRoom> = set.rooms.iter().map(dungeon_room).collect();
+    // The filler lists hold the blank rooms of every room set of the area's topologies
+    // (MapSunTemple: `generate.rs` and `generate_R270.rs` both list `open_01`..`05`, so the
+    // client's totals are twice the weights); see `Files::area_room_sets`.
+    let sets = files.area_room_sets();
+    // A room listed by several sets keeps its place and sums its weights (the client's lists
+    // match one entry per room with the summed weight, not the sets one after the other).
+    let fillers: Vec<DungeonRoom> = if sets.len() > 1 && sets.iter().any(|p| p.eq_ignore_ascii_case(&set.path)) {
+        let mut v: Vec<DungeonRoom> = Vec::new();
+        for p in &sets {
+            for r in RoomSet::load(files, p)?.rooms.iter().map(dungeon_room).filter(|r| r.blank) {
+                match v.iter_mut().find(|e| e.path.eq_ignore_ascii_case(&r.path) && e.mask == r.mask) {
+                    Some(e) => e.weight += r.weight,
+                    None => v.push(r),
+                }
+            }
+        }
+        v
+    } else {
+        Vec::new()
+    };
     for r in &rooms {
         if r.exits.len() as u32 != 2 * (r.units.0 + r.units.1) {
             return Err(unsupported(format!("room {}: {} exits for {}x{} units", r.path, r.exits.len(), r.units.0, r.units.1)));
@@ -691,7 +713,7 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
     // rooms (`0x1420aa710`; the request-driven steps after it, `0x1420aab60` / `0x1420aacf0`
     // extra rooms and `0x1420abf60` shrines, have nothing to place for a plain area), then the
     // reserved cells are freed and the filler rooms run again.
-    filler_rooms(&rooms, &mut grid, &mut types, files, fill_height, rng)?;
+    filler_rooms(&rooms, &fillers, &mut grid, &mut types, files, fill_height, rng)?;
     special_rooms(files, &rooms, &mut grid, &mut types, rng)?;
     extra_features(files, &rooms, unit_size, &mut grid, &mut types, rng)?;
     for c in grid.cells.iter_mut() {
@@ -699,7 +721,7 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
             *c = 0;
         }
     }
-    filler_rooms(&rooms, &mut grid, &mut types, files, fill_height, rng)?;
+    filler_rooms(&rooms, &fillers, &mut grid, &mut types, files, fill_height, rng)?;
     if std::env::var("POE_DUMP_ROOMS").is_ok() {
         for (i, r) in grid.rooms.iter().enumerate() {
             eprintln!("ROOM {i} {} {} {} {} {} o{}", if r.path.is_empty() { "-" } else { &r.path }, r.origin.0, r.origin.1, r.size.0, r.size.1, r.orientation);
@@ -2446,7 +2468,7 @@ fn split_fits(grid: &Grid, rooms: &[DungeonRoom], size: (u32, u32), exits: &[Exi
 /// `0x1420b19f0`: room sides whose two corners share a ground spread it into the empty cells
 /// beyond (`0x1420b1bd0`, per room in order: right, bottom, left, top sides); grounds with
 /// `.gt` flag 2 first, each pass repeated while it places anything.
-fn filler_rooms(rooms: &[DungeonRoom], grid: &mut Grid, types: &mut TerrainTypes, files: &dyn Files, fill_height: Option<i32>, rng: &mut TerrainRng) -> Result<(), GenError> {
+fn filler_rooms(rooms: &[DungeonRoom], fillers: &[DungeonRoom], grid: &mut Grid, types: &mut TerrainTypes, files: &dyn Files, fill_height: Option<i32>, rng: &mut TerrainRng) -> Result<(), GenError> {
     let _ = types;
     let mut flags: std::collections::HashMap<String, u8> = std::collections::HashMap::new();
     let mut gt = |g: &str| -> Result<u8, GenError> {
@@ -2488,7 +2510,7 @@ fn filler_rooms(rooms: &[DungeonRoom], grid: &mut Grid, types: &mut TerrainTypes
                         // `0x1420b1bd0`: the master's `DungeonFillRoomHeightOverride` (+0x159 set, value
                         // +0x14d) replaces the height of every filler room.
                         let height = fill_height.unwrap_or(p.height + p.exits[k as usize].height);
-                        any |= spread(rooms, grid, pos, g.clone(), height, &mut gt, rng)?;
+                        any |= spread(if fillers.is_empty() { rooms } else { fillers }, grid, pos, g.clone(), height, &mut gt, rng)?;
                     }
                     Ok(any)
                 };

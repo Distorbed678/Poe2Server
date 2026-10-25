@@ -69,6 +69,12 @@ pub trait Files {
     /// A graph placed (or queued) the feature room `room`: it leaves the generator's feature
     /// list (`0x141f8b320`), so a later graph of the same job (subgraphs) does not place it again.
     fn take_league(&self, _room: &str) {}
+    /// The `RoomSet` files of the masters of all the area's topologies, each once, in topology
+    /// order: the client loads them into one store whose filler lists (`0x141f98bb0`, room set
+    /// +0x98 / +0xd8) take the blank rooms of every set.
+    fn area_room_sets(&self) -> Vec<String> {
+        Vec::new()
+    }
 }
 
 /// A room a league mechanic adds (`ExtraTerrainFeatures`): the `.arm`, the orientation mask of

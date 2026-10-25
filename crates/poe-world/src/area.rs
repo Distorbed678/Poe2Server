@@ -177,6 +177,7 @@ struct WithSpecialTiles<'a> {
     inner: &'a dyn crate::generate::Files,
     special: Vec<String>,
     league: std::cell::RefCell<Vec<crate::generate::LeagueRoom>>,
+    room_sets: Vec<String>,
 }
 
 impl crate::generate::Files for WithSpecialTiles<'_> {
@@ -194,7 +195,39 @@ impl crate::generate::Files for WithSpecialTiles<'_> {
         if let Some(i) = l.iter().position(|r| r.room == room) {
             l.remove(i);
         }
+    }    fn area_room_sets(&self) -> Vec<String> {
+        self.room_sets.clone()
     }
+}
+
+thread_local! {
+    static ROOM_SETS: std::cell::RefCell<std::collections::HashMap<String, Vec<String>>> = Default::default();
+}
+
+/// See [`crate::generate::Files::area_room_sets`]; cached per area.
+fn area_room_sets(gd: &GameData, files: &dyn crate::generate::Files, area_id: &str) -> Vec<String> {
+    if std::env::var_os("POE_OWN_ROOMSET_ONLY").is_some() {
+        return Vec::new();
+    }
+    if let Some(v) = ROOM_SETS.with(|c| c.borrow().get(area_id).cloned()) {
+        return v;
+    }
+    let mut out: Vec<String> = Vec::new();
+    for (path, _, _) in raw_topology_entries(gd, area_id).unwrap_or_default() {
+        let Ok(bytes) = files.read(&path) else { continue };
+        let Ok(g) = Graph::parse_bytes(&bytes) else { continue };
+        let Ok(tsi_bytes) = files.read(&g.master_file) else { continue };
+        let tsi = master_entries(&tsi_bytes, &g.master_file);
+        let dir = g.master_file.rsplit_once('/').map_or("", |d| d.0);
+        if let Some(v) = tsi.get("RoomSet") {
+            let p = if v.len() > 9 && v[..9].eq_ignore_ascii_case("metadata/") { v.to_string() } else { format!("{dir}/{v}") };
+            if !out.iter().any(|o| o.eq_ignore_ascii_case(&p)) {
+                out.push(p);
+            }
+        }
+    }
+    ROOM_SETS.with(|c| c.borrow_mut().insert(area_id.to_string(), out.clone()));
+    out
 }
 
 /// [`generate_probed`] with the file source given.
@@ -246,7 +279,8 @@ pub fn generate_probed_files(gd: &GameData, files: &dyn crate::generate::Files, 
         extras.push(extra_job(gd, files, rng, KALGUUR_AREA)?);
     }
     let special: Vec<String> = gd.table("SpecialTiles").ok().map(|t| (0..).map_while(|r| t.row(r)).filter_map(|r| r.str("TDTFile").ok().map(String::from)).collect()).unwrap_or_default();
-    let files = WithSpecialTiles { inner: files, special, league: std::cell::RefCell::new(crate::league::extra_rooms(gd, &rolled)) };
+    let room_sets = area_room_sets(gd, files, area_id);
+    let files = WithSpecialTiles { inner: files, special, league: std::cell::RefCell::new(crate::league::extra_rooms(gd, &rolled)), room_sets };
     let map = generate_graph_probed(&files, &graph, rng, probe, &extras)?;
     let draws = rng.draws;
     let logged = rng.log.as_ref().map(Vec::len);
@@ -801,7 +835,7 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
     // HideoutVampireManor: nodes that only hold subgraphs) name no `RoomSet`.
     let set = match rel("RoomSet") {
         Some(p) => RoomSet::load(files, &p)?,
-        None => RoomSet { rooms: Vec::new() },
+        None => RoomSet { rooms: Vec::new(), path: String::new() },
     };
     // `RoomOverlap` is master +0x14b; the parser's default is 1 (constructor `0x14292e190`).
     let overlap: u32 = tsi.get("RoomOverlap").and_then(|v| v.trim().parse().ok()).unwrap_or(1);
@@ -837,7 +871,7 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
             master.add_extra_tile(files, t)?;
         }
     }
-    master.outer_fill_height = tsi.get("OuterFillHeightOverride").and_then(|v| v.trim().parse::<i8>().ok()).or_else(|| tsi.contains_key("OverrideSpawns").then_some(0));
+    master.outer_fill_height = tsi.get("OuterFillHeightOverride").and_then(|v| v.trim().parse::<i8>().ok()).or_else(|| (tsi.contains_key("OverrideSpawns") && (tsi.contains_key("DefaultKillZone") || std::env::var_os("POE_OVSP_ANY").is_some())).then_some(0));
     master.force_outer_gt = tsi.get("ForceOuterGT").and_then(|v| v.trim().parse::<i32>().ok()).is_some_and(|v| v != 0);
     let ecf = match rel("EdgeCombination") {
         Some(p) => crate::dungeon_tiles::Ecf::parse(&crate::text::decode_utf16(&files.read(&p)?)),
@@ -1117,13 +1151,13 @@ fn build_tgr(files: &dyn crate::generate::Files, graph: &Graph, removed: Vec<boo
         _ => return Err(data("master names FillTiles without a TileSet")),
     };
     // `OuterFillHeightOverride` (master +0x161 set, value +0x153): the outer fill places plain.
-    master.outer_fill_height = tsi.get("OuterFillHeightOverride").and_then(|v| v.trim().parse::<i8>().ok()).or_else(|| tsi.contains_key("OverrideSpawns").then_some(0));
+    master.outer_fill_height = tsi.get("OuterFillHeightOverride").and_then(|v| v.trim().parse::<i8>().ok()).or_else(|| (tsi.contains_key("OverrideSpawns") && (tsi.contains_key("DefaultKillZone") || std::env::var_os("POE_OVSP_ANY").is_some())).then_some(0));
     master.force_outer_gt = tsi.get("ForceOuterGT").and_then(|v| v.trim().parse::<i32>().ok()).is_some_and(|v| v != 0);
     // Container graphs (`master_container.tsi` of MapKarst, MapDerelictMansion, P1_6,
     // HideoutVampireManor: nodes that only hold subgraphs) name no `RoomSet`.
     let set = match rel("RoomSet") {
         Some(p) => RoomSet::load(files, &p)?,
-        None => RoomSet { rooms: Vec::new() },
+        None => RoomSet { rooms: Vec::new(), path: String::new() },
     };
     let mut placed_graph = PlacedGraph { graph, nodes: nodes.iter().map(|n| n.pos).collect(), ends: vec![[None; 2]; graph.edges.len()], points: edge_points, removed };
     let mut types = TerrainTypes::default();
