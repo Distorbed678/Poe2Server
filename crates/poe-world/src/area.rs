@@ -351,6 +351,14 @@ fn prune(graph: &Graph, rng: &mut TerrainRng) -> Result<(Graph, Vec<bool>), GenE
         })
         .collect();
     let mut g = graph.clone();
+    // `0x141d1c580` gives each edge, in file order, the first free slot of both its nodes: a node's
+    // slots hold its edges by edge index (the node line lists them in its own order). `.dgr` only: sorting the
+    // `.tgr` slots loses 1,172 of the match sample's outdoor jobs.
+    if g.dungeon_defaults.is_some() {
+        for n in &mut g.nodes {
+            n.edges.sort();
+        }
+    }
     let mut dropped = vec![false; g.nodes.len()];
     for n in 0..g.nodes.len() {
         if drop_node[n] {
