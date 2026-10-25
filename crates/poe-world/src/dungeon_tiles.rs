@@ -151,6 +151,12 @@ pub struct GroundCell {
 /// each cell is listed with its ground for the fill.
 fn mark_ground(map: &mut TileMap, cells: &mut Vec<GroundCell>, pos: (i32, i32), key: &TileKey, height: i32, accessible: bool) {
     let (w, h) = (key.size.0 as i32, key.size.1 as i32);
+    if let Ok(v) = std::env::var("POE_DBG_MARK") {
+        let c: Vec<i32> = v.split(',').filter_map(|s| s.parse().ok()).collect();
+        if c.len() == 2 && (pos.0..pos.0 + w).contains(&c[0]) && (pos.1..pos.1 + h).contains(&c[1]) {
+            eprintln!("MARK {pos:?} {w}x{h} grounds {:?} heights {:?}", key.grounds, key.heights);
+        }
+    }
     for y in pos.1..=pos.1 + h {
         for x in pos.0..=pos.0 + w {
             if let Some(i) = map.point_index(x, y) {

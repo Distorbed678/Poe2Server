@@ -313,6 +313,36 @@ impl TileMap {
         }
     }
 
+    /// Marks the cells `outer` already holds from `origin` on as taken in this window (a
+    /// subgraph is generated straight into its parent's map, so the cells around its reserved
+    /// rectangle that the parent placed are not free). Returns the cells marked, for
+    /// [`TileMap::release`] before the window is pasted back.
+    pub fn inherit_cells(&mut self, outer: &TileMap, origin: (i32, i32)) -> Vec<(usize, Cell)> {
+        let mut marked = Vec::new();
+        for y in 0..self.height as i32 {
+            for x in 0..self.width as i32 {
+                if let (Some(i), Some(j)) = (self.index(x, y), outer.index(x + origin.0, y + origin.1)) {
+                    if self.cells[i].is_none() && outer.cells[j].is_some() {
+                        self.cells[i] = outer.cells[j].clone();
+                        marked.push((i, self.cells[i].clone().unwrap()));
+                    }
+                }
+            }
+        }
+        marked
+    }
+
+    /// Clears the cells [`TileMap::inherit_cells`] marked that the window's own passes did not
+    /// overwrite (a subgraph's border tile may cover the parent's cells: G2_4_1's
+    /// `kethentrance_01.tdt`).
+    pub fn release(&mut self, marked: &[(usize, Cell)]) {
+        for (i, c) in marked {
+            if self.piece_at[*i].is_none() && self.cells[*i].as_ref() == Some(c) {
+                self.cells[*i] = None;
+            }
+        }
+    }
+
     /// Writes a subgraph's window back at `origin`: its cells, pieces (no longer tile-set
     /// tiles of this map's set) and corners.
     pub fn paste(&mut self, sub: &TileMap, origin: (i32, i32)) {

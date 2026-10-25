@@ -402,6 +402,9 @@ pub fn fill_cells(
             (p.flags & 1 != 0).then(|| p.ground.clone()).flatten()
         });
         f.height = Some(c.height as i16);
+        if std::env::var_os("POE_DBG_FILL").is_some() {
+            eprintln!("FILLCELL {x},{y} {}x{} {:?} d{}", f.map.width, f.map.height, ground, rng.log.as_ref().map_or(0, Vec::len));
+        }
         f.cell(x, y, ground, c.accessible, rng)?;
     }
     let wiggle = f.wiggle.take().map(|w| w.0).unwrap_or_default();

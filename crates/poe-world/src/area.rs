@@ -665,6 +665,12 @@ fn generate_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: 
         // The region sits inside the subgraph master's `OuterBufferSize` margins.
         let m = Margins::parse(&crate::text::decode_utf16(&files.read(&sub.master_file)?));
         let at = (origin.0 + m.left as i32, origin.1 + m.top as i32);
+        if std::env::var_os("POE_DBG_WIN").is_some() {
+            for y in at.1 - 1..at.1 + 14 {
+                let row: String = (at.0 - 1..at.0 + 14).map(|x| match built.map.index(x, y) { Some(i) if built.map.cells[i].is_some() => '#', Some(_) => '.', None => ' ' }).collect();
+                eprintln!("WIN {file} {y}: {row}");
+            }
+        }
         let inner = if is_dgr {
             build_dungeon(files, &sub, &removed, rng, Some((&built.map, at)))?
         } else {
@@ -841,8 +847,12 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
     let mut map = TileMap::new(grid.w * step + grid.overlap, grid.h * step + grid.overlap);
     map.ground_flags = master.ground_flag_table(files)?;
     map.edge_flags = master.edge_flag_table(files)?;
+    let mut inherited = Vec::new();
     if let Some((outer, origin)) = window {
         map.copy_lattice(outer, origin);
+        if std::env::var_os("POE_NO_INHERIT").is_none() {
+            inherited = map.inherit_cells(outer, origin);
+        }
     }
     let mut rooms = std::collections::HashMap::new();
     for r in &grid.rooms {
@@ -968,6 +978,19 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
         o.run(1, &mut map, &mut master, &mut types, files, rng)?;
     }
     dbg_cell(&map, "post-overlay1");
+    if let Ok(path) = std::env::var("POE_DUMP_LAT2") {
+        use std::io::Write;
+        if let Ok(mut f) = std::fs::File::create(path) {
+            for y in 0..=map.height as i32 {
+                for x in 0..=map.width as i32 {
+                    if let Some(i) = map.point_index(x, y) {
+                        let p = &map.lattice[i];
+                        let _ = writeln!(f, "{x}\t{y}\t{}\t{}\t{}", p.ground.as_deref().unwrap_or("-"), p.height, p.flags);
+                    }
+                }
+            }
+        }
+    }
     let (mut fill_rooms, wiggle) = crate::fill::fill_cells(&mut map, &mut master, files, &cells, rng)?;
     fill_rooms.splice(0..0, pre_rooms);
     let wiggle = [pre_wiggle, wiggle].concat();
@@ -997,6 +1020,7 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
     // G1_13_2 place `Fields_01`-style tiles of the tile set's own list here).
     crate::postunique::run(&mut map, &mut master, files, rng)?;
     let subgraphs = grid.rooms.iter().filter_map(|r| Some((r.subgraph.clone()?, (r.origin.0 * step as i32, r.origin.1 * step as i32)))).collect();
+    map.release(&inherited);
     Ok(Built { map, master, tsi_bytes, tsi, subgraphs })
 }
 
