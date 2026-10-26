@@ -407,7 +407,7 @@ fn dungeon_room(r: &crate::rooms::RoomDef) -> DungeonRoom {
 
 /// The dungeon layout of a pruned `.dgr` graph (`0x1420ac3e0`); `overlap` is the master's
 /// `RoomOverlap`.
-pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet, overlap: u32, unit_size: u32, fill_height: Option<i32>, file_groups: &FileGroups, rng: &mut TerrainRng) -> Result<Grid, GenError> {
+pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet, overlap: u32, unit_size: u32, fill_height: Option<i32>, file_groups: &FileGroups, paired: Option<&[PlacedRoom]>, rng: &mut TerrainRng) -> Result<Grid, GenError> {
     let mut types = TerrainTypes::default();
     let mut rooms: Vec<DungeonRoom> = set.rooms.iter().map(dungeon_room).collect();
     // `0x141f99b20` → `0x141f9a830` → `0x141f98bb0`: the room set loader adds every room to the
@@ -480,6 +480,9 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
         .collect();
     // `overlap` is the master's `RoomOverlap` (master +0x14b, default 1), read by the caller.
     let mut grid = Grid { w: graph.width, h: graph.height, cells: vec![0; (graph.width * graph.height) as usize], rooms: Vec::new(), overlap, chiral: Default::default(), pending: Vec::new() };
+    if let Some(earlier) = paired {
+        paired_rooms(files, earlier, file_groups, &mut grid, rng)?;
+    }
     // Door types with a chirality: those of the rooms' doors and the graph's edges.
     let mut door_types: Vec<String> = rooms.iter().flat_map(|r| r.exits.iter().filter_map(|e| e.door.clone())).collect();
     door_types.extend(graph.edges.iter().map(|e| e.edge_type.to_ascii_lowercase()));
@@ -2140,6 +2143,52 @@ fn fill_placeholders(grid: &mut Grid, list: &[((u32, u32), u32)], door_type: Opt
             grid.stamp(PlacedRoom { path: String::new(), node: None, origin: (x, y), size: stamp, orientation: 0, exits: Vec::new(), extra_door: None, height: 0, accessible: false, blocked: chosen.is_none() && stamp == (1, 1) && size != (1, 1), extra_pct: 0, door_type: door_type.clone(), special: false, subgraph: None })?;
             x += size.0 as i32;
         }
+    }
+    Ok(())
+}
+
+/// `0x141f01710` / `0x141f029b0` (`PairedRoomLayoutPlugin`): each room of the earlier graph, in
+/// placement order, whose rectangle is inside this grid and free, and whose `.arm` is the first
+/// of a pair in the master's file groups (one group: its entries pair up in order, upper then
+/// lower; the master's own file groups, the same file for both graphs), puts the pair's second
+/// room here with the same origin, orientation, height and kind, after a `below(1)` over the one
+/// candidate (`0x1420a73d0`, no doors). Rooms without a partner are left out.
+fn paired_rooms(files: &dyn Files, earlier: &[PlacedRoom], groups: &FileGroups, grid: &mut Grid, rng: &mut TerrainRng) -> Result<(), GenError> {
+    if groups.groups.len() != 1 {
+        return Err(unsupported(format!("paired rooms: {} file groups (two groups split upper and lower: not ported)", groups.groups.len())));
+    }
+    let list = groups.groups.values().next().expect("one group");
+    let norm = |p: &str| p.to_ascii_lowercase().replace('\\', "/");
+    let mut pairs: Vec<(String, String)> = Vec::new();
+    let mut i = 0;
+    while i + 1 < list.len() {
+        let (a, b) = (&list[i], &list[i + 1]);
+        if a.to_ascii_lowercase().ends_with(".arm") && b.to_ascii_lowercase().ends_with(".arm") {
+            pairs.push((norm(a), b.clone()));
+            i += 2;
+        } else {
+            i += 1;
+        }
+    }
+    for r in earlier {
+        if r.path.is_empty() {
+            continue;
+        }
+        let (x, y) = r.origin;
+        if x < 0 || y < 0 || x as u32 + r.size.0 > grid.w || y as u32 + r.size.1 > grid.h {
+            continue;
+        }
+        if (0..r.size.1 as i32).any(|dy| (0..r.size.0 as i32).any(|dx| grid.state((x + dx, y + dy)).is_none_or(|s| s > 1))) {
+            continue;
+        }
+        let Some((_, lower)) = pairs.iter().find(|p| p.0 == norm(&r.path)) else { continue };
+        let arm = crate::generate::load_room(files, &lower.to_ascii_lowercase())?.arm;
+        let mut size = (arm.numbers1.first().copied().unwrap_or(1), arm.numbers1.get(1).copied().unwrap_or(1));
+        if r.orientation & 1 == 1 && r.orientation < 8 {
+            size = (size.1, size.0);
+        }
+        rng.below(1);
+        grid.stamp(PlacedRoom { path: lower.clone(), node: None, origin: r.origin, size, orientation: r.orientation, exits: Vec::new(), extra_door: None, height: r.height, accessible: r.accessible, blocked: r.blocked, extra_pct: 0, door_type: None, special: r.special, subgraph: None })?;
     }
     Ok(())
 }

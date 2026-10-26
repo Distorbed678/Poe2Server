@@ -75,6 +75,10 @@ pub trait Files {
     fn area_room_sets(&self) -> Vec<String> {
         Vec::new()
     }
+    /// The area's terrain plugin is `PairedRoomLayoutPlugin` (`0x141f01710`).
+    fn paired_rooms(&self) -> bool {
+        false
+    }
 }
 
 /// A room a league mechanic adds (`ExtraTerrainFeatures`): the `.arm`, the orientation mask of
@@ -175,6 +179,9 @@ pub struct TileMap {
     /// A subgraph window's ring of cells just outside it that the parent map already holds
     /// (the client's window is a view into the parent's map; the fill's one cell of slack sees them).
     outer_taken: std::collections::HashSet<(i32, i32)>,
+    /// The underlying map's cells (x0, y0, x1, y1), when known: a dungeon region with its
+    /// `OuterBufferSize` margins, or a window's parent's; cells outside are never free (`0x141d0d940`).
+    pub bounds: Option<(i32, i32, i32, i32)>,
     /// The doodads of the rooms placed in this map, in cells of this map (`crate::doodads`).
     pub doodads: Vec<crate::doodads::Doodad>,
 }
@@ -218,6 +225,7 @@ impl TileMap {
             edge_flags: HashMap::new(),
             spill: Vec::new(),
             outer_taken: Default::default(),
+            bounds: None,
             doodads: Vec::new(),
         }
     }
@@ -520,7 +528,7 @@ impl TileMap {
     }
 
     pub(crate) fn spilled(&self, x: i32, y: i32) -> bool {
-        self.outer_taken.contains(&(x, y)) || self.spill.iter().any(|s| matches!(s, Spill::Cell(sx, sy, _, _) if *sx == x && *sy == y))
+        self.bounds.is_some_and(|b| x < b.0 || y < b.1 || x >= b.2 || y >= b.3) || self.outer_taken.contains(&(x, y)) || self.spill.iter().any(|s| matches!(s, Spill::Cell(sx, sy, _, _) if *sx == x && *sy == y))
     }
 
     pub fn free(&self, x: i32, y: i32, w: i32, h: i32) -> bool {

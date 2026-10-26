@@ -178,6 +178,7 @@ struct WithSpecialTiles<'a> {
     special: Vec<String>,
     league: std::cell::RefCell<Vec<crate::generate::LeagueRoom>>,
     room_sets: Vec<String>,
+    paired: bool,
 }
 
 impl crate::generate::Files for WithSpecialTiles<'_> {
@@ -197,6 +198,9 @@ impl crate::generate::Files for WithSpecialTiles<'_> {
         }
     }    fn area_room_sets(&self) -> Vec<String> {
         self.room_sets.clone()
+    }
+    fn paired_rooms(&self) -> bool {
+        self.paired
     }
 }
 
@@ -280,7 +284,7 @@ pub fn generate_probed_files(gd: &GameData, files: &dyn crate::generate::Files, 
     }
     let special: Vec<String> = gd.table("SpecialTiles").ok().map(|t| (0..).map_while(|r| t.row(r)).filter_map(|r| r.str("TDTFile").ok().map(String::from)).collect()).unwrap_or_default();
     let room_sets = area_room_sets(gd, files, area_id);
-    let files = WithSpecialTiles { inner: files, special, league: std::cell::RefCell::new(crate::league::extra_rooms(gd, &rolled)), room_sets };
+    let files = WithSpecialTiles { inner: files, special, league: std::cell::RefCell::new(crate::league::extra_rooms(gd, area_id, &rolled)), room_sets, paired: area_plugin(gd, area_id).as_deref() == Some(PAIRED_PLUGIN) };
     let map = generate_graph_probed(&files, &graph, rng, probe, &extras)?;
     let draws = rng.draws;
     let logged = rng.log.as_ref().map(Vec::len);
@@ -308,6 +312,9 @@ fn area_plugin(gd: &GameData, area_id: &str) -> Option<String> {
 /// The plugin whose hook adds a second area to the generation, and that area (the client's
 /// hook, `0x141f03c40`, looks `G4_ship` up in `WorldAreas` by this literal).
 const SHIP_PLUGIN: &str = "ShipPlugin";
+/// The plugin whose layout hook copies an earlier graph's rooms into a later graph of the same
+/// grid size (MapKarst's abyss under the upper level).
+const PAIRED_PLUGIN: &str = "PairedRoomLayoutPlugin";
 const SHIP_AREA: &str = "G4_ship";
 const KALGUUR_HOST: &str = "G4_13";
 const KALGUUR_AREA: &str = "ExpeditionSubArea_Kalguur_Act4";
@@ -679,7 +686,7 @@ fn master_entries(bytes: &[u8], tsi_path: &str) -> std::collections::HashMap<Str
 /// A `.dgr` graph: the dungeon layout (`crate::dungeon`), then its tile pass
 /// (`crate::dungeon_tiles`).
 fn generate_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[bool], rng: &mut TerrainRng, extra: &[Graph], probe: &mut dyn FnMut(Stage)) -> Result<TileMap, GenError> {
-    let mut built = build_dungeon(files, graph, removed, rng, None)?;
+    let mut built = build_dungeon(files, graph, removed, rng, None, &[])?;
     // `0x141ff7e00` / `0x141ff05f0`: each `graph` node's subgraph is generated after the main
     // graph's fill and de-repetition, straight into its reserved rectangle of the map.
     let mut done: Vec<(Built, (i32, i32), Margins)> = Vec::new();
@@ -706,7 +713,10 @@ fn generate_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: 
             }
         }
         let inner = if is_dgr {
-            build_dungeon(files, &sub, &removed, rng, Some((&built.map, at)))?
+            {
+            let earlier: Vec<&(u32, u32, Vec<crate::dungeon::PlacedRoom>)> = built.layout.iter().chain(done.iter().filter_map(|d| d.0.layout.as_ref())).collect();
+            build_dungeon(files, &sub, &removed, rng, Some((&built.map, at)), &earlier)?
+        }
         } else {
             build_tgr(files, &sub, removed, rng, probe, Some((&built.map, at)))?
         };
@@ -726,7 +736,7 @@ fn generate_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: 
         let mut g = g.clone();
         random_offsets(&mut g, rng);
         let (g, rem) = prune(&g, rng)?;
-        job_built.push(build_dungeon(files, &g, &rem, rng, None)?);
+        job_built.push(build_dungeon(files, &g, &rem, rng, None, &[])?);
     }
     let mut job_maps: Vec<TileMap> = Vec::new();
     for b in job_built.into_iter().rev() {
@@ -821,11 +831,13 @@ struct Built {
     tsi: std::collections::HashMap<String, String>,
     /// Reserved subgraph rectangles: graph file and tile origin.
     subgraphs: Vec<(String, (i32, i32))>,
+    /// The dungeon layout's grid size and rooms (the paired-room plugin copies them).
+    layout: Option<(u32, u32, Vec<crate::dungeon::PlacedRoom>)>,
 }
 
 /// One dungeon graph up to its de-repetition: layout, tile pass, fill. `window` is the map and
 /// origin a subgraph is generated into (its corners start as the map's).
-fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[bool], rng: &mut TerrainRng, window: Option<(&TileMap, (i32, i32))>) -> Result<Built, GenError> {
+fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[bool], rng: &mut TerrainRng, window: Option<(&TileMap, (i32, i32))>, earlier: &[&(u32, u32, Vec<crate::dungeon::PlacedRoom>)]) -> Result<Built, GenError> {
     let tsi_path = graph.master_file.clone();
     let tsi_bytes = files.read(&tsi_path)?;
     let tsi = master_entries(&tsi_bytes, &tsi_path);
@@ -851,7 +863,14 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
     let unit: u32 = tsi.get("RoomUnitSize").and_then(|v| v.trim().parse().ok()).unwrap_or(9);
     // The features still on the generator's list when the graph starts (the layout below takes the ones its mission rooms serve).
     let league = files.league_rooms();
-    let grid = crate::dungeon::layout(files, graph, removed, &set, overlap, unit, fill_height, &file_groups, rng)?;
+    // `PairedRoomLayoutPlugin` (`0x141f01710`): the first earlier graph with the same grid size
+    // lends its rooms, each replaced by its `Pairs` partner.
+    let paired = if files.paired_rooms() && std::env::var_os("POE_NO_PAIRED").is_none() {
+        earlier.iter().find(|e| (e.0, e.1) == (graph.width, graph.height)).map(|e| e.2.as_slice())
+    } else {
+        None
+    };
+    let grid = crate::dungeon::layout(files, graph, removed, &set, overlap, unit, fill_height, &file_groups, paired, rng)?;
     if std::env::var("POE_DBG").is_ok() {
         for (i, r) in grid.rooms.iter().enumerate() {
             eprintln!("DBG room {i} {} o{} origin {:?} size {:?} special {} acc {} node {:?} height {} exits {:?}", r.path, r.orientation, r.origin, r.size, r.special, r.accessible, r.node, r.height, r.exits.iter().map(|e| (e.door.as_deref().map(|d| d.rsplit('/').next().unwrap_or("")), e.height)).collect::<Vec<_>>());
@@ -881,6 +900,15 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
     let mut map = TileMap::new(grid.w * step + grid.overlap, grid.h * step + grid.overlap);
     map.ground_flags = master.ground_flag_table(files)?;
     map.edge_flags = master.edge_flag_table(files)?;
+    if std::env::var_os("POE_NO_BOUNDS").is_none() {
+        map.bounds = match window {
+            Some((outer, at)) => outer.bounds.map(|b| (b.0 - at.0, b.1 - at.1, b.2 - at.0, b.3 - at.1)),
+            None => {
+                let m = Margins::parse(&crate::text::decode_utf16(&tsi_bytes));
+                Some((-(m.left as i32), -(m.top as i32), (map.width + m.right) as i32, (map.height + m.bottom) as i32))
+            }
+        };
+    }
     let mut inherited = Vec::new();
     if let Some((outer, origin)) = window {
         map.copy_lattice(outer, origin);
@@ -1071,7 +1099,7 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
     crate::postunique::run(&mut map, &mut master, files, rng)?;
     let subgraphs = grid.rooms.iter().filter_map(|r| Some((r.subgraph.clone()?, (r.origin.0 * step as i32, r.origin.1 * step as i32)))).collect();
     map.release(&inherited);
-    Ok(Built { map, master, tsi_bytes, tsi, subgraphs })
+    Ok(Built { map, master, tsi_bytes, tsi, subgraphs, layout: Some((grid.w, grid.h, grid.rooms.clone())) })
 }
 
 /// Everything after the topology choice, for one graph.
@@ -1615,6 +1643,6 @@ fn build_tgr(files: &dyn crate::generate::Files, graph: &Graph, removed: Vec<boo
     derepeat_pass(&mut map, &master, &rooms, rng);
     crate::postunique::run(&mut map, &mut master, files, rng)?;
 
-    Ok(Built { map, master, tsi_bytes, tsi, subgraphs: Vec::new() })
+    Ok(Built { map, master, tsi_bytes, tsi, subgraphs: Vec::new(), layout: None })
 }
 
