@@ -378,7 +378,12 @@ fn dungeon_room(r: &crate::rooms::RoomDef) -> DungeonRoom {
         .thingies
         .iter()
         // Version > 29 puts a height override flag before the chirality.
-        .map(|t| Exit { door: t.et_file.as_ref().map(|s| s.to_ascii_lowercase()), height: t.int, chiral: if arm.version > 29 { t.bool2 } else { t.bool1 }.unwrap_or(false) })
+        .map(|t| {
+            if std::env::var("POE_DBG_THINGY").is_ok() {
+                eprintln!("THINGY {} v{} et {:?} int {} b1 {:?} b2 {:?}", r.path, arm.version, t.et_file, t.int, t.bool1, t.bool2);
+            }
+            Exit { door: t.et_file.as_ref().map(|s| s.to_ascii_lowercase()), height: t.int, chiral: if arm.version > 29 { t.bool2 } else { t.bool1 }.unwrap_or(false) }
+        })
         .collect();
     let tag = r.tag.to_ascii_lowercase();
     let special = tag.starts_with("special");
@@ -581,6 +586,11 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
             match best_sides(graph, &slots[n], n) {
                 Some(sides) => {
                     let sides: [Exit; 4] = sides.map(|s| s.map_or(empty.clone(), exit_for));
+                    if std::env::var("POE_DBG_EXACT").is_ok() {
+                        for c in &all {
+                            eprintln!("EXACT {} o{} sides {:?} exits {:?}", rooms[c.room].path.rsplit('/').next().unwrap(), c.o, sides, c.exits);
+                        }
+                    }
                     let exact: Vec<Candidate> = all.iter().filter(|c| exact_sides(c, &sides, None)).cloned().collect();
                     if exact.is_empty() {
                         let mut loose = Vec::new();
@@ -778,7 +788,11 @@ fn exact_sides(c: &Candidate, sides: &[Exit; 4], mut loose: Option<&mut dyn FnMu
     let bounds = [0, w, w + h, 2 * w + h, c.exits.len() as u32];
     (0..4).all(|k| {
         let range = bounds[k] as usize..bounds[k + 1] as usize;
-        if c.exits[range.clone()].iter().any(|e| *e == sides[k]) {
+        // A door-less side matches a door-less exit of any height (the feature rooms of
+        // ExpeditionSubArea_Catacomb give their door-less exits heights -1..-4; the client offers
+        // all three rooms). Giving such exits height 0 everywhere loses ~1,000 sample jobs.
+        let same = |e: &Exit| if e.door.is_none() && sides[k].door.is_none() { e.chiral == sides[k].chiral } else { *e == sides[k] };
+        if c.exits[range.clone()].iter().any(same) {
             return true;
         }
         match &mut loose {
