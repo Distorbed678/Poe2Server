@@ -972,19 +972,28 @@ fn room_height(room: &Room, map: &TileMap, pos: (i32, i32), o: u8) -> Result<Opt
     let (rw, rh) = (room.width() as i32, room.height() as i32);
     let mut decided: Option<i32> = None;
     let mut votes: Vec<(i32, u32)> = Vec::new();
+    if std::env::var("POE_DBG_RH").is_ok() {
+        eprintln!("RHCALL {pos:?} o{o} {}x{} slots {:?}", rw, rh, room.arm.grid.iter().map(|r| r.iter().map(|s| matches!(s, poe_data_tools::file_parsers::arm::types::Slot::K(_)) as u8).collect::<Vec<_>>()).collect::<Vec<_>>());
+    }
     for row in 0..rh {
         for col in 0..rw {
-            let Slot::K(k) = &room.arm.grid[row as usize][col as usize] else { continue };
-            let (sw, sh) = (k.width as i32, k.height as i32);
-            // Slot +0x73: the corner the slot is listed at (SW 0, SE 1, NE 2, NW 3).
-            let anchor = {
-                use poe_data_tools::file_parsers::arm::types::Direction::*;
-                match k.origin {
-                    SE => 1,
-                    NE => 2,
-                    NW => 3,
-                    _ => 0,
+            // A `k` slot with its size, anchor and corners; a fill slot (`f`) counts as a 1x1
+            // slot with no grounds at height 0 (slot flags +0x70/+0x71 clear; thing_02.arm of
+            // ExpeditionLogBook_Basin, all `f`, takes the terrain's height in the client).
+            let (sw, sh, anchor, corners): (i32, i32, i32, [(i32, Option<String>); 4]) = match &room.arm.grid[row as usize][col as usize] {
+                Slot::K(k) => {
+                    // Slot +0x73: the corner the slot is listed at (SW 0, SE 1, NE 2, NW 3).
+                    use poe_data_tools::file_parsers::arm::types::Direction::*;
+                    let anchor = match k.origin {
+                        SE => 1,
+                        NE => 2,
+                        NW => 3,
+                        _ => 0,
+                    };
+                    (k.width as i32, k.height as i32, anchor, k.corners.clone().map(|c| (c.height, c.ground)))
                 }
+                Slot::F { .. } if std::env::var_os("POE_RH_K_ONLY").is_none() => (1, 1, 0, Default::default()),
+                _ => continue,
             };
             let x = col + if anchor % 3 != 0 { 1 - sw } else { 0 };
             let y = row + if anchor > 1 { 1 - sh } else { 0 };
@@ -993,6 +1002,10 @@ fn room_height(room: &Room, map: &TileMap, pos: (i32, i32), o: u8) -> Result<Opt
                     continue;
                 }
                 let (dx, dy) = crate::tileset::orient_point(o, rw, rh, cx, cy);
+                if std::env::var("POE_DBG_RH").is_ok_and(|v| v == format!("{},{}", pos.0, pos.1)) {
+                    let l = map.point_index(pos.0 + dx, pos.1 + dy).map(|p| (map.lattice[p].height, map.lattice[p].flags));
+                    eprintln!("RH0 slot ({col},{row}) corner {i} ({cx},{cy}) -> ({},{}) lattice {l:?} corner h {}", pos.0 + dx, pos.1 + dy, corners[i].0);
+                }
                 let Some(p) = map.point_index(pos.0 + dx, pos.1 + dy) else { continue };
                 let lat = &map.lattice[p];
                 if lat.flags & 2 == 0 {
@@ -1002,9 +1015,12 @@ fn room_height(room: &Room, map: &TileMap, pos: (i32, i32), o: u8) -> Result<Opt
                 if terrain < -0x78 {
                     terrain += 0x100;
                 }
-                let v = terrain - k.corners[i].height;
-                let ground = k.corners[i].ground.as_ref().map(|g| g.to_ascii_lowercase().replace('\\', "/"));
+                let v = terrain - corners[i].0;
+                let ground = corners[i].1.as_ref().map(|g| g.to_ascii_lowercase().replace('\\', "/"));
                 let follows = ground.as_ref().is_none_or(|g| room.ground_flags.iter().find(|(n, _)| n == g).map_or_else(|| map.gt_flags(g), |f| f.1) & 1 != 0);
+                if std::env::var("POE_DBG_RH").is_ok_and(|v| v == format!("{},{}", pos.0, pos.1)) {
+                    eprintln!("RH slot ({col},{row}) {sw}x{sh} anchor {anchor} corner {i} at ({cx},{cy}) -> map ({},{}) terrain {terrain} flags {:#x} corner h {} ground {ground:?} follows {follows} v {v}", pos.0 + dx, pos.1 + dy, lat.flags, corners[i].0);
+                }
                 if follows {
                     match decided {
                         Some(d) if d != v => return Ok(None),

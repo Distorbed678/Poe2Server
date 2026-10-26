@@ -854,7 +854,7 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
     let grid = crate::dungeon::layout(files, graph, removed, &set, overlap, unit, fill_height, &file_groups, rng)?;
     if std::env::var("POE_DBG").is_ok() {
         for (i, r) in grid.rooms.iter().enumerate() {
-            eprintln!("DBG room {i} {} o{} origin {:?} size {:?} special {} acc {} node {:?}", r.path, r.orientation, r.origin, r.size, r.special, r.accessible, r.node);
+            eprintln!("DBG room {i} {} o{} origin {:?} size {:?} special {} acc {} node {:?} height {} exits {:?}", r.path, r.orientation, r.origin, r.size, r.special, r.accessible, r.node, r.height, r.exits.iter().map(|e| (e.door.as_deref().map(|d| d.rsplit('/').next().unwrap_or("")), e.height)).collect::<Vec<_>>());
         }
     }
     let mut master = match (rel("TileSet"), rel("FillTiles")) {
