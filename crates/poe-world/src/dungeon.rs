@@ -436,9 +436,21 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
         }
     }
     let fields: Vec<EdgeFields> = graph.edges.iter().map(|e| EdgeFields::parse(&e.extra, graph.version)).collect::<Result<_, _>>()?;
-    // A node's side slots: its edges by edge index (`0x141d1c580`).
+    // A node's side slots (node +0x58..+0x78): its edges in slot order. The loader fills them
+    // by edge index (`0x141d1c580`); an edge merged by the prune (`remove_node`, `0x141fec1c0`)
+    // takes its new node's first free slot, so it can come after edges of higher index (the
+    // typeless room size pick `0x1420afa40` reads the first slot of a non-default type).
+    let touches = |e: usize, n: usize| !removed[e] && (graph.edges[e].from as usize == n || graph.edges[e].to as usize == n);
     let slots: Vec<Vec<usize>> = (0..graph.nodes.len())
-        .map(|n| (0..graph.edges.len()).filter(|&e| !removed[e] && (graph.edges[e].from as usize == n || graph.edges[e].to as usize == n)).collect())
+        .map(|n| {
+            let mut v: Vec<usize> = if std::env::var_os("POE_SLOTS_BY_INDEX").is_some() { Vec::new() } else { graph.nodes[n].edges.iter().take(4).map(|&e| e as usize).filter(|&e| e < graph.edges.len() && touches(e, n)).collect() };
+            for e in 0..graph.edges.len() {
+                if touches(e, n) && !v.contains(&e) {
+                    v.push(e);
+                }
+            }
+            v
+        })
         .collect();
     // `overlap` is the master's `RoomOverlap` (master +0x14b, default 1), read by the caller.
     let mut grid = Grid { w: graph.width, h: graph.height, cells: vec![0; (graph.width * graph.height) as usize], rooms: Vec::new(), overlap, chiral: Default::default(), pending: Vec::new() };
@@ -682,7 +694,7 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
         }
         let mut total: u32 = list.iter().map(|s| s.1).sum();
         if std::env::var("POE_DBG").is_ok() {
-            eprintln!("DBG typeless {n} pos {:?} door {door} total {total} edges {:?}", unit(n), slots[n]);
+            eprintln!("DBG typeless {n} pos {:?} door {door} total {total} edges {:?} prio {} values {:?}", unit(n), slots[n], priority(n), graph.nodes[n].values);
         }
         loop {
             let mut r = rng.below(total);

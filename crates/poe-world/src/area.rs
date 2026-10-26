@@ -1075,7 +1075,7 @@ fn dbg_cell(map: &TileMap, stage: &str) {
         let xy: Vec<i32> = v.split(',').filter_map(|t| t.parse().ok()).collect();
         if xy.len() == 2 {
             let c = map.index(xy[0], xy[1]).and_then(|i| map.cells[i].as_ref());
-            eprintln!("CELL {stage}: {:?}", c.map(|c| (c.path.rsplit('/').next().unwrap_or("").to_string(), c.orientation)));
+            eprintln!("CELL {stage}: {:?}", c.map(|c| (c.path.rsplit('/').next().unwrap_or("").to_string(), c.orientation, c.height)));
         }
     }
 }
