@@ -410,25 +410,51 @@ fn dungeon_room(r: &crate::rooms::RoomDef) -> DungeonRoom {
 pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet, overlap: u32, unit_size: u32, fill_height: Option<i32>, file_groups: &FileGroups, rng: &mut TerrainRng) -> Result<Grid, GenError> {
     let mut types = TerrainTypes::default();
     let mut rooms: Vec<DungeonRoom> = set.rooms.iter().map(dungeon_room).collect();
-    // The filler lists hold the blank rooms of every room set of the area's topologies
-    // (MapSunTemple: `generate.rs` and `generate_R270.rs` both list `open_01`..`05`, so the
-    // client's totals are twice the weights); see `Files::area_room_sets`.
-    let sets = files.area_room_sets();
-    // A room listed by several sets keeps its place and sums its weights (the client's lists
-    // match one entry per room with the summed weight, not the sets one after the other).
-    let fillers: Vec<DungeonRoom> = if sets.len() > 1 && sets.iter().any(|p| p.eq_ignore_ascii_case(&set.path)) {
-        let mut v: Vec<DungeonRoom> = Vec::new();
-        for p in &sets {
-            for r in RoomSet::load(files, p)?.rooms.iter().map(dungeon_room).filter(|r| r.blank) {
-                match v.iter_mut().find(|e| e.path.eq_ignore_ascii_case(&r.path) && e.mask == r.mask) {
-                    Some(e) => e.weight += r.weight,
-                    None => v.push(r),
+    // `0x141f99b20` → `0x141f9a830` → `0x141f98bb0`: the room set loader adds every room to the
+    // per-ground size lists once per distinct door type of its exits; a door-less room once for
+    // its default type, and once more when that type is virtual with equal split types (the
+    // `0x141f9a830` lambda). MapSunTemple's `open_01..05` (root edges
+    // `capped_thickwall_virtual.et`) count twice, MapUberBoss_CopperCitadel's `dune_fill_01`
+    // once. Taken as the room's first root-key edge (room data +0x180, not confirmed).
+    // `POE_FILLER_SETS=1`: the older rule (blank rooms of all the area's room sets, summed).
+    let fillers: Vec<DungeonRoom> = if std::env::var_os("POE_FILLER_SETS").is_some() {
+        let sets = files.area_room_sets();
+        if sets.len() > 1 && sets.iter().any(|p| p.eq_ignore_ascii_case(&set.path)) {
+            let mut v: Vec<DungeonRoom> = Vec::new();
+            for p in &sets {
+                for r in RoomSet::load(files, p)?.rooms.iter().map(dungeon_room).filter(|r| r.blank) {
+                    match v.iter_mut().find(|e| e.path.eq_ignore_ascii_case(&r.path) && e.mask == r.mask) {
+                        Some(e) => e.weight += r.weight,
+                        None => v.push(r),
+                    }
                 }
             }
+            v
+        } else {
+            Vec::new()
         }
-        v
     } else {
-        Vec::new()
+        let mut v: Vec<DungeonRoom> = Vec::new();
+        let mut doubled = false;
+        for (def, r) in set.rooms.iter().zip(rooms.iter()) {
+            if !r.blank {
+                continue;
+            }
+            let root_edge = match &def.room.arm.root_slot {
+                poe_data_tools::file_parsers::arm::types::Slot::K(k) => k.edges.iter().find_map(|e| e.edge.clone()),
+                _ => None,
+            };
+            let mut r = dungeon_room(def);
+            if let Some(e) = root_edge {
+                let et = types.edge(files, &e.to_ascii_lowercase().replace('\\', "/"))?.clone();
+                if et.virtual_edge && et.splits[0].0 == et.splits[1].0 {
+                    r.weight *= 2;
+                    doubled = true;
+                }
+            }
+            v.push(r);
+        }
+        if doubled { v } else { Vec::new() }
     };
     for r in &rooms {
         if r.exits.len() as u32 != 2 * (r.units.0 + r.units.1) {
