@@ -292,6 +292,9 @@ pub struct TilePass<'a> {
     pub overlap_fixes: bool,
     /// `.tsi` `DisableDoors` (master +0x167): no door placement.
     pub doors_disabled: bool,
+    /// `.tsi` `DoorEdgeType` (master +0x250, lower case) and its `can_end` flag (`.et` 0x10):
+    /// without a room overlap, door exits become walkways of this edge (`0x14209df50`).
+    pub door_edge: Option<(String, bool)>,
     /// The graph's ground types as the pass context holds them: +0x20 the default (graph line 2),
     /// +0x28 the ground of the lowest points (line 3), +0x30 that of the highest (line 1).
     pub grounds: [Option<String>; 3],
@@ -321,11 +324,16 @@ impl TilePass<'_> {
         let mut cells: Vec<GroundCell> = Vec::new();
         let mut borders: Vec<((i32, i32), Border)> = Vec::new();
         let mut pending = grid.pending.clone();
+        // Pass +0x78: door exit cells with their side, sorted by x·65536 + y (`0x1420cfbd0`).
+        let mut sides: Vec<((i32, i32), u8)> = Vec::new();
         for p in &grid.rooms {
             if p.path.is_empty() {
                 continue;
             }
             let room = rooms.get(&p.path).ok_or_else(|| unsupported(format!("dungeon: room {} not loaded", p.path)))?;
+            if doors.on && self.overlap == 0 {
+                door_sides(&mut sides, p, self.unit as i32, self.overlap as i32);
+            }
             if doors.on && self.overlap != 0 {
                 if std::env::var_os("POE_DBG_BORDER").is_some() {
                     eprintln!("MARKROOM {} origin {:?} size {:?} doors {:?}", p.path.rsplit('/').next().unwrap_or(""), p.origin, p.size, p.exits.iter().map(|e| e.door.is_some() as u8).collect::<Vec<_>>());
@@ -339,6 +347,11 @@ impl TilePass<'_> {
         // only without `DisableDoors` (master +0x167) and with a room overlap.
         if doors.on && !self.doors_disabled && (self.overlap != 0 || std::env::var_os("POE_DOORS_NO_OVERLAP").is_some()) {
             self.check_doors(&doors, map, rng)?;
+        }
+        if doors.on && !self.doors_disabled && self.overlap == 0 && std::env::var_os("POE_NO_WALKWAYS").is_none() {
+            if let Some(door) = &self.door_edge {
+                self.walkways(&sides, &cells, door, map, rng)?;
+            }
         }
         // `0x141f9e780`: the rooms' ground overrides.
         let step = (self.unit - self.overlap) as i32;
@@ -435,7 +448,151 @@ pub fn settle_rooms(grounds: &[Option<String>; 3], unit: u32, overlap: u32, grid
 
 }
 
+/// `0x142096e30` (rooms without overlap): every exit with a door lists the middle cell of its
+/// unit on the room's border line with its side (0 top, 1 right, 2 bottom, 3 left); a cell
+/// listed again takes the later side.
+fn door_sides(sides: &mut Vec<((i32, i32), u8)>, p: &crate::dungeon::PlacedRoom, unit: i32, overlap: i32) {
+    let step = unit - overlap;
+    let (bx, by) = (step * p.origin.0, step * p.origin.1);
+    let (w, h) = (p.size.0 as i32, p.size.1 as i32);
+    let (rw, rh) = (step * w + overlap, step * h + overlap);
+    for (i, e) in p.exits.iter().enumerate() {
+        if e.door.is_none() {
+            continue;
+        }
+        let i = i as i32;
+        let (pos, side) = if i < w {
+            ((unit / 2 + step * i + bx, by), 0)
+        } else if i - w < h {
+            ((bx + rw - 1, unit / 2 + step * (i - w) + by), 1)
+        } else if i - w - h < w {
+            ((rw - 1 + bx - step * (i - w - h) - unit / 2, by + rh - 1), 2)
+        } else {
+            ((bx, by - step * (i - 2 * w - h) - unit / 2 + rh - 1), 3)
+        };
+        let key = |c: &(i32, i32)| c.0 * 0x10000 + c.1;
+        match sides.binary_search_by_key(&key(&pos), |e| key(&e.0)) {
+            Ok(j) => sides[j].1 = side,
+            Err(j) => sides.insert(j, (pos, side)),
+        }
+    }
+}
+
+const SIDE_STEP: [(i32, i32); 4] = [(0, -1), (1, 0), (0, 1), (-1, 0)];
+
 impl TilePass<'_> {
+    /// `0x14209df50`: every listed door cell whose neighbour across its side is listed with
+    /// the opposite side gets a walkway both ways (`0x14209e190`), when both ways can be tiled.
+    fn walkways(&self, sides: &[((i32, i32), u8)], cells: &[GroundCell], door: &(String, bool), map: &mut TileMap, rng: &mut TerrainRng) -> Result<(), GenError> {
+        // Context +0x70: the ground-only cells by position (last write wins), from `0x142097cb0`.
+        let mut ground: HashMap<(i32, i32), (Option<String>, i32)> = HashMap::new();
+        for c in cells {
+            ground.insert(c.pos, (c.ground.clone(), c.height));
+        }
+        for &(a, s) in sides {
+            let d = SIDE_STEP[s as usize];
+            let b = (a.0 + d.0, a.1 + d.1);
+            let back = (s + 2) & 3;
+            if !sides.iter().any(|&(p, t)| p == b && t == back) {
+                continue;
+            }
+            if self.walk(map, &ground, door, a, back, true, rng)? && self.walk(map, &ground, door, b, s, true, rng)? {
+                self.walk(map, &ground, door, a, back, false, rng)?;
+                self.walk(map, &ground, door, b, s, false, rng)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// `0x14209e190`: the cell at `pos` takes the door edge on the side facing back (opposite
+    /// `dir`); when its key has no door edge yet, also on side `dir`, continuing into the next
+    /// cell that way (a walkway that fails to continue only stands when the edge type may end).
+    /// The tile is a `door` feature tile of the new key, picked with `below(total)` after the
+    /// cells further on; `dry` only checks.
+    #[allow(clippy::too_many_arguments)]
+    fn walk(&self, map: &mut TileMap, ground: &HashMap<(i32, i32), (Option<String>, i32)>, door: &(String, bool), pos: (i32, i32), dir: u8, dry: bool, rng: &mut TerrainRng) -> Result<bool, GenError> {
+        let Some(i) = map.index(pos.0, pos.1) else { return Ok(false) };
+        let face = ((dir + 2) & 3) as usize;
+        let dir = dir as usize;
+        let (key, origin, height) = match &map.cells[i] {
+            Some(c) => {
+                let Some((t, o)) = map.piece_at[i].and_then(|p| Some((map.pieces[p].tile?, map.pieces[p].orientation))) else {
+                    return Err(unsupported(format!("dungeon: walkway over a tile outside the tile set at {pos:?}")));
+                };
+                (self.master.tiles.tiles[t].key.oriented(o), (pos.0 - c.offset.0 as i32, pos.1 - c.offset.1 as i32), c.height)
+            }
+            None => {
+                let Some((g, h)) = ground.get(&pos) else { return Ok(false) };
+                let key = TileKey { size: (1, 1), grounds: std::array::from_fn(|_| g.clone()), heights: [*h as u8; 4], exits: [3; 4], virtual_exits: [3; 4], ..Default::default() };
+                // The empty cell's record keeps height 0.
+                (key, pos, 0)
+            }
+        };
+        if key.edges[face].as_deref() == Some(door.0.as_str()) {
+            return Ok(true);
+        }
+        let (w, h) = (key.size.0 as i32, key.size.1 as i32);
+        // The exit in the middle of the cell's part of the side (thirds of a tile).
+        let exit = |side: usize| -> u8 {
+            let c = match side {
+                0 => return (3 * (pos.0 - origin.0) + 1) as u8,
+                1 => return (3 * (pos.1 - origin.1) + 1) as u8,
+                2 => origin.0 - pos.0 + w,
+                _ => origin.1 - pos.1 + h,
+            };
+            (3 * c - 2) as u8
+        };
+        let mut one = key.clone();
+        one.edges[face] = Some(door.0.clone());
+        one.exits[face] = exit(face);
+        if !key.edges.iter().any(|e| e.as_deref() == Some(door.0.as_str())) {
+            let mut two = one.clone();
+            two.edges[dir] = Some(door.0.clone());
+            two.exits[dir] = exit(dir);
+            if !self.master.tiles.candidates("door", &two).is_empty() {
+                let d = SIDE_STEP[dir];
+                let mut next = (pos.0 + d.0, pos.1 + d.1);
+                match dir {
+                    0 => next.1 += 1 - h,
+                    2 => next.1 += h - 1,
+                    3 => next.0 += 1 - w,
+                    _ => next.0 += w - 1,
+                }
+                if self.walk(map, ground, door, next, dir as u8, dry, rng)? || door.1 {
+                    if !dry {
+                        self.place_walkway(map, &two, origin, height, rng);
+                    }
+                    return Ok(true);
+                }
+            }
+        }
+        if self.master.tiles.candidates("door", &one).is_empty() {
+            return Ok(false);
+        }
+        if !dry {
+            self.place_walkway(map, &one, origin, height, rng);
+        }
+        Ok(true)
+    }
+
+    /// `0x14209eab0`: the tile's corner points lose their ground and flag 1, then the picked
+    /// tile is placed with the old cell's height.
+    fn place_walkway(&self, map: &mut TileMap, key: &TileKey, origin: (i32, i32), height: i16, rng: &mut TerrainRng) {
+        let list = self.master.tiles.candidates("door", key);
+        let total = list.iter().map(|c| c.weight).sum();
+        let c = pick(list, rng.below(total)).expect("non-empty list");
+        for dy in 0..=key.size.1 as i32 {
+            for dx in 0..=key.size.0 as i32 {
+                if let Some(k) = map.point_index(origin.0 + dx, origin.1 + dy) {
+                    map.lattice[k].ground = None;
+                    map.lattice[k].flags &= !1;
+                }
+            }
+        }
+        let def = &self.master.tiles.tiles[c.tile];
+        map.place(origin.0, origin.1, &def.path, &def.tdt, c.orientation, height, Some(c.tile));
+    }
+
     /// `0x1420983d0`: a room's slots row by row.
     #[allow(clippy::too_many_arguments)]
     fn room(&self, p: &crate::dungeon::PlacedRoom, room: &Room, map: &mut TileMap, borders: &mut Vec<((i32, i32), Border)>, cells: &mut Vec<GroundCell>, moved: &mut Vec<(i32, i32)>, pending: &mut Vec<crate::dungeon::Pending>, rng: &mut TerrainRng) -> Result<(), GenError> {

@@ -912,7 +912,16 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
         }
         Some(crate::dungeon_tiles::Host { files, master: std::cell::RefCell::new(m) })
     };
-    let pass = crate::dungeon_tiles::TilePass { master: &master, ecf: &ecf, unit, overlap: grid.overlap, edge_types: &edge_types, overlap_fixes: flag("AllowInteriorOverlapFixes"), doors_disabled: flag("DisableDoors"), grounds: [1, 2, 0].map(|i| (!graph.ground_types[i].is_empty()).then(|| graph.ground_types[i].clone())), host, hosted: Default::default() };
+    // `.tsi` `DoorEdgeType` (master +0x250) with its `.et` `can_end` flag (0x10).
+    let door_edge = match rel("DoorEdgeType") {
+        Some(p) => {
+            let p = p.to_ascii_lowercase().replace('\\', "/");
+            let et = crate::rooms::EdgeType::parse(&crate::text::decode_utf16(&files.read(&p)?));
+            Some((p, et.can_end))
+        }
+        None => None,
+    };
+    let pass = crate::dungeon_tiles::TilePass { master: &master, ecf: &ecf, unit, overlap: grid.overlap, edge_types: &edge_types, overlap_fixes: flag("AllowInteriorOverlapFixes"), doors_disabled: flag("DisableDoors"), door_edge, grounds: [1, 2, 0].map(|i| (!graph.ground_types[i].is_empty()).then(|| graph.ground_types[i].clone())), host, hosted: Default::default() };
     // The graph's own grounds reach the lattice through the per-room settle; their `.gt` flags
     // (for example `CarverUpperGround`: 0x1f, which makes the fill treat it as none) are not in
     // the tile set's table unless a tile uses them.
