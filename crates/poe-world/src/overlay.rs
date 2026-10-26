@@ -605,8 +605,20 @@ impl Overlays {
         let (w, h) = (room.width() as i32, room.height() as i32);
         for y in 0..h {
             for x in 0..w {
-                let poe_data_tools::file_parsers::arm::types::Slot::K(k) = &room.arm.grid[y as usize][x as usize] else { continue };
-                let key = slot_key(k);
+                // Every slot with flags +0x70/+0x71 clear: `k` slots and fill slots (`f`, a 1x1
+                // key with the fill name as the feature; `cell_key`).
+                let slot = &room.arm.grid[y as usize][x as usize];
+                let (key, tag) = match slot {
+                    poe_data_tools::file_parsers::arm::types::Slot::K(k) => (slot_key(k), k.slot_tag.clone().unwrap_or_default()),
+                    poe_data_tools::file_parsers::arm::types::Slot::F { .. } if std::env::var_os("POE_MATCHALL_K_ONLY").is_none() => match crate::generate::cell_key(slot) {
+                        Some(kt) => kt,
+                        None => continue,
+                    },
+                    // An `s` slot: a blank 1x1 key (no edges, grounds or feature); the laid tile
+                    // must be one (P2_3 / MapOrnateChambers `cnr_overlay_stonewarrior_01.arm`).
+                    poe_data_tools::file_parsers::arm::types::Slot::S if std::env::var_os("POE_MATCHALL_K_ONLY").is_none() => (TileKey { size: (1, 1), exits: [3; 4], virtual_exits: [3; 4], ..Default::default() }, String::new()),
+                    _ => continue,
+                };
                 let (sw, sh) = (key.size.0.max(1) as i32, key.size.1.max(1) as i32);
                 let (ax, ay) = crate::tileset::orient_cell(o, w, h, x, y);
                 let (bx, by) = crate::tileset::orient_cell(o, w, h, x + sw - 1, y + sh - 1);
@@ -617,10 +629,23 @@ impl Overlays {
                     return Ok(false);
                 }
                 let tdt = master.header(files, &cell.path)?;
-                if tdt.feature.clone().unwrap_or_default() != k.slot_tag.clone().unwrap_or_default() {
+                if tdt.feature.clone().unwrap_or_default() != tag {
                     return Ok(false);
                 }
-                if TileKey::from_tdt(tdt).oriented(cell.orientation) != key.oriented(o) {
+                // The laid tile's key drops grounds with `.gt` flag 0x10 (`0x141d09900`); the
+                // slot's key keeps them.
+                let mut tk = TileKey::from_tdt(tdt);
+                if std::env::var_os("POE_MATCHKEY_RAW").is_none() {
+                    for g in tk.grounds.iter_mut() {
+                        if g.as_ref().is_some_and(|g| map.gt_flags(g) & 0x10 != 0) {
+                            *g = None;
+                        }
+                    }
+                }
+                if std::env::var("POE_DBG_MATCHALL").is_ok_and(|v| v == format!("{},{}", pos.0, pos.1)) {
+                    eprintln!("MATCHALL o{o} slot ({x},{y}) at ({mx},{my}) tile {} o{} eq {}\n   tile {:?}\n   slot {:?}", cell.path, cell.orientation, tk.clone().oriented(cell.orientation) == key.clone().oriented(o), tk.clone().oriented(cell.orientation), key.clone().oriented(o));
+                }
+                if tk.oriented(cell.orientation) != key.oriented(o) {
                     return Ok(false);
                 }
             }
