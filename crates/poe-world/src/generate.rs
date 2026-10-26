@@ -172,6 +172,9 @@ pub struct TileMap {
     /// Cells and corners tiles wrote outside the map (a tile may overhang the region by one
     /// cell): the client's region is a window into the full map, so `embed` keeps them.
     spill: Vec<Spill>,
+    /// A subgraph window's ring of cells just outside it that the parent map already holds
+    /// (the client's window is a view into the parent's map; the fill's one cell of slack sees them).
+    outer_taken: std::collections::HashSet<(i32, i32)>,
     /// The doodads of the rooms placed in this map, in cells of this map (`crate::doodads`).
     pub doodads: Vec<crate::doodads::Doodad>,
 }
@@ -214,6 +217,7 @@ impl TileMap {
             ground_flags: HashMap::new(),
             edge_flags: HashMap::new(),
             spill: Vec::new(),
+            outer_taken: Default::default(),
             doodads: Vec::new(),
         }
     }
@@ -331,6 +335,24 @@ impl TileMap {
                     if self.cells[i].is_none() && outer.cells[j].is_some() {
                         self.cells[i] = outer.cells[j].clone();
                         marked.push((i, self.cells[i].clone().unwrap()));
+                    }
+                }
+            }
+        }
+        if std::env::var_os("POE_NO_OUTER_TAKEN").is_none() {
+            let (w, h) = (self.width as i32, self.height as i32);
+            for y in -1..=h {
+                for x in -1..=w {
+                    if self.index(x, y).is_some() {
+                        continue;
+                    }
+                    let (ox, oy) = (x + origin.0, y + origin.1);
+                    let taken = match outer.index(ox, oy) {
+                        Some(j) => outer.cells[j].is_some(),
+                        None => outer.spilled(ox, oy),
+                    };
+                    if taken {
+                        self.outer_taken.insert((x, y));
                     }
                 }
             }
@@ -498,7 +520,7 @@ impl TileMap {
     }
 
     pub(crate) fn spilled(&self, x: i32, y: i32) -> bool {
-        self.spill.iter().any(|s| matches!(s, Spill::Cell(sx, sy, _, _) if *sx == x && *sy == y))
+        self.outer_taken.contains(&(x, y)) || self.spill.iter().any(|s| matches!(s, Spill::Cell(sx, sy, _, _) if *sx == x && *sy == y))
     }
 
     pub fn free(&self, x: i32, y: i32, w: i32, h: i32) -> bool {
