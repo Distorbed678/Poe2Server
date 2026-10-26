@@ -258,6 +258,9 @@ impl Doors {
         let both = |m: u8| m & 6 == 6 || m & 0x18 == 0x18;
         if key.size == (3, 3) {
             if (0..3).any(|i| (0..3).any(|j| self.markers.get(&(pos.0 + i, pos.1 + j)).is_some_and(|&m| both(m)))) {
+                if std::env::var_os("POE_DBG_BORDER").is_some() {
+                    eprintln!("DOORSPOT {pos:?} markers {:?}", (0..3).flat_map(|i| (0..3).map(move |j| (i, j))).filter_map(|(i, j)| self.markers.get(&(pos.0 + i, pos.1 + j)).map(|m| ((pos.0 + i, pos.1 + j), *m))).collect::<Vec<_>>());
+                }
                 self.add(pos, key.size);
             }
             return;
@@ -310,8 +313,11 @@ impl TilePass<'_> {
     /// x then y).
     pub fn run(&self, grid: &Grid, rooms: &HashMap<String, Room>, map: &mut TileMap, rng: &mut TerrainRng) -> Result<(Vec<GroundCell>, Vec<(i32, i32)>), GenError> {
         let mut moved = Vec::new();
-        // `0x142099c80`: door bookkeeping only with `door` tiles.
-        let mut doors = Doors { on: self.door_tiles().next().is_some(), ..Default::default() };
+        // `0x142099c80`: door bookkeeping only when the tile set's feature map has a `door`
+        // entry (tile pass +0x38). The map is keyed case-sensitively: ExpeditionLogBook_Tundra's
+        // door tiles say `Door`, so its tile pass has no doors.
+        let exact = std::env::var_os("POE_DOOR_ANYCASE").is_none();
+        let mut doors = Doors { on: self.door_tiles().any(|t| !exact || t.tdt.feature.as_deref() == Some("door")), ..Default::default() };
         let mut cells: Vec<GroundCell> = Vec::new();
         let mut borders: Vec<((i32, i32), Border)> = Vec::new();
         let mut pending = grid.pending.clone();
@@ -321,12 +327,17 @@ impl TilePass<'_> {
             }
             let room = rooms.get(&p.path).ok_or_else(|| unsupported(format!("dungeon: room {} not loaded", p.path)))?;
             if doors.on && self.overlap != 0 {
+                if std::env::var_os("POE_DBG_BORDER").is_some() {
+                    eprintln!("MARKROOM {} origin {:?} size {:?} doors {:?}", p.path.rsplit('/').next().unwrap_or(""), p.origin, p.size, p.exits.iter().map(|e| e.door.is_some() as u8).collect::<Vec<_>>());
+                }
                 doors.mark(p, self.unit as i32, self.overlap as i32);
             }
             self.room(p, room, map, &mut borders, &mut cells, &mut moved, &mut pending, rng)?;
         }
         self.borders(borders, map, &mut cells, &mut doors, rng)?;
-        if doors.on && !self.doors_disabled {
+        // `0x14209c4c0` at `0x14209c677`: the door passes (`0x14209d180`, `0x14209dc90`) run
+        // only without `DisableDoors` (master +0x167) and with a room overlap.
+        if doors.on && !self.doors_disabled && (self.overlap != 0 || std::env::var_os("POE_DOORS_NO_OVERLAP").is_some()) {
             self.check_doors(&doors, map, rng)?;
         }
         // `0x141f9e780`: the rooms' ground overrides.
@@ -845,6 +856,9 @@ impl TilePass<'_> {
             return Ok(false);
         }
         let total = list.iter().map(|c| c.weight).sum();
+        if std::env::var_os("POE_DBG_BORDER").is_some() {
+            eprintln!("BORDER @{} {pos:?} total {total} feature {feature:?} repair {} key {:?}", rng.log.as_ref().map_or(0, |l| l.len()), borders.is_none(), k);
+        }
         let c = pick(&list, rng.below(total)).expect("non-empty list");
         let def = &self.master.tiles.tiles[c.tile];
         map.place(pos.0, pos.1, &def.path, &def.tdt, c.orientation, height as i16, Some(c.tile));
@@ -1033,6 +1047,9 @@ impl TilePass<'_> {
             }
             let height = cell.height;
             let total = list.iter().map(|c| c.weight).sum();
+            if std::env::var_os("POE_DBG_BORDER").is_some() {
+                eprintln!("LARGEDOOR @{} {p:?} total {total} key {key:?} cell {} o{} cands {:?}", rng.log.as_ref().map_or(0, |l| l.len()), cell.path, cell.orientation, list.iter().map(|c| (self.master.tiles.tiles[c.tile].path.clone(), c.orientation, c.weight)).collect::<Vec<_>>());
+            }
             let c = pick(list, rng.below(total)).expect("non-empty list");
             let def = &self.master.tiles.tiles[c.tile];
             map.place(p.0, p.1, &def.path, &def.tdt, c.orientation, height, Some(c.tile));
