@@ -273,6 +273,20 @@ pub fn generate_probed_files(gd: &GameData, files: &dyn crate::generate::Files, 
     // area as a second graph job: a topology draw among its topologies, then its region
     // orientation draw (`below(0x348)` among the topology's allowed ones). It is generated after
     // the main graph and sits beside the finished map.
+    // `UltimatumPlugin` (G3_10, `0x141f10060`): the plugin rebuilds the trial graph (entrance, the
+    // trial's rooms, end, `exit_ruin`, the trial master graphs); the `.dgr` is that graph without
+    // trial rooms. Below area level 75 (area +0xbc) the end node is `end_lowlevel` and only joins
+    // `entrance2`, else `end` with `teleport1` and `entrance2`.
+    if area_plugin(gd, area_id).as_deref() == Some(ULTIMATUM_PLUGIN) && std::env::var_os("POE_NO_ULTIMATUM").is_none() {
+        let areas = gd.table("WorldAreas").ok();
+        let level = areas.as_ref().and_then(|t| t.find_by_str("Id", area_id).ok().flatten()).and_then(|r| r.int("Level").ok()).unwrap_or(0);
+        if level < 75 {
+            for node in graph.nodes.iter_mut().filter(|n| n.room_type == "end") {
+                node.room_type = "end_lowlevel".into();
+                node.tags.retain(|t| t != "teleport1");
+            }
+        }
+    }
     let mut extras: Vec<Graph> = Vec::new();
     if area_plugin(gd, area_id).as_deref() == Some(SHIP_PLUGIN) {
         extras.push(extra_job(gd, files, rng, SHIP_AREA)?);
@@ -315,6 +329,8 @@ const SHIP_PLUGIN: &str = "ShipPlugin";
 /// The plugin whose layout hook copies an earlier graph's rooms into a later graph of the same
 /// grid size (MapKarst's abyss under the upper level).
 const PAIRED_PLUGIN: &str = "PairedRoomLayoutPlugin";
+/// The plugin whose graph hook picks the trial's end room by area level (`0x141f10060`).
+const ULTIMATUM_PLUGIN: &str = "UltimatumPlugin";
 const SHIP_AREA: &str = "G4_ship";
 const KALGUUR_HOST: &str = "G4_13";
 const KALGUUR_AREA: &str = "ExpeditionSubArea_Kalguur_Act4";
@@ -336,8 +352,37 @@ fn extra_job(gd: &GameData, files: &dyn crate::generate::Files, rng: &mut Terrai
 
 /// A second graph job's map beside the finished first one with a one-tile gap: to its right
 /// for a map at least as wide as tall, else below it, from the far edge on the other axis's 0.
+/// The extra jobs' maps beside the main one: in a strip to its right when it is at least as
+/// wide as tall, else below it, one cell apart; inside the strip they always advance along x
+/// (G4_13: ship then Kalguur, 202×94 in orientation 2, 94×195 in orientation 3).
+fn append_jobs(main: TileMap, jobs: &[TileMap]) -> TileMap {
+    if jobs.is_empty() {
+        return main;
+    }
+    if std::env::var_os("POE_OLD_APPEND").is_some() {
+        return jobs.iter().fold(main, |m, job| append_job(m, job));
+    }
+    let (w, h) = (main.width as i32, main.height as i32);
+    let start = if w >= h { (w + 1, 0) } else { (0, h + 1) };
+    let mut spots = Vec::new();
+    let (mut x, mut size) = (start.0, (w, h));
+    for j in jobs {
+        spots.push((x, start.1));
+        size = (size.0.max(x + j.width as i32), size.1.max(start.1 + j.height as i32));
+        x += j.width as i32 + 1;
+    }
+    let mut m = main.embed((0, 0), size.0 as u32, size.1 as u32);
+    for (j, at) in jobs.iter().zip(spots) {
+        m.paste(j, at);
+    }
+    m
+}
+
 fn append_job(main: TileMap, job: &TileMap) -> TileMap {
     let (w, h) = (main.width, main.height);
+    if std::env::var_os("POE_DBG_JOB").is_some() {
+        eprintln!("JOB main {w}x{h} job {}x{}", job.width, job.height);
+    }
     let (at, size) = if w >= h { ((w as i32 + 1, 0), (w + 1 + job.width, h.max(job.height))) } else { ((0, h as i32 + 1), (w.max(job.width), h + 1 + job.height)) };
     let mut m = main.embed((0, 0), size.0, size.1);
     m.paste(job, at);
@@ -824,7 +869,7 @@ fn generate_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: 
         }
     }
     let main = finish_dungeon(files, built, &owner, repair, rng)?;
-    Ok(job_maps.iter().fold(main, |m, job| append_job(m, job)))
+    Ok(append_jobs(main, &job_maps))
 }
 
 /// The tail of a dungeon graph: the outer buffer of its own master, then tile heights in world

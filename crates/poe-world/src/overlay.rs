@@ -222,7 +222,11 @@ impl Overlays {
                     poe_data_tools::file_parsers::arm::types::Slot::K(k) => slot_key(k),
                     _ => {
                         let arm = &rooms[idx].1.arm;
-                        TileKey { size: (arm.grid.first().map_or(1, |r| r.len()) as u8, arm.grid.len() as u8), ..TileKey::default() }
+                        let size = (arm.grid.first().map_or(1, |r| r.len()) as u8, arm.grid.len() as u8);
+                        // No exit on any side (3 × the side's length), so mirrored orientations
+                        // keep the key (one group for all eight: `overlay_seagullsoncorpse`, G4_13).
+                        let full = if std::env::var_os("POE_SROOT_EXITS0").is_some() { [0; 4] } else { [3 * size.0, 3 * size.1, 3 * size.0, 3 * size.1] };
+                        TileKey { size, exits: full, virtual_exits: full, ..TileKey::default() }
                     }
                 };
                 for o in 0..8u8 {
@@ -348,6 +352,9 @@ impl Overlays {
     /// of size 3.
     #[allow(clippy::too_many_arguments)]
     fn collect(&self, g: &Group, gi: usize, map: &TileMap, master: &mut Master, types: &mut TerrainTypes, files: &dyn Files, out: &mut Candidates) -> Result<(), GenError> {
+        if std::env::var("POE_DBG_OVERLAY").is_ok() {
+            eprintln!("COLLECT group {gi} size {:?}", g.key.size);
+        }
         let mut stride3 = false;
         for e in g.key.edges.iter().flatten() {
             if types.edge(files, e)?.size == 3 {
@@ -711,6 +718,9 @@ fn covers_whole_pieces(map: &TileMap, (x0, y0, x1, y1): (i32, i32, i32, i32)) ->
             let (ox, oy) = (x - cell.offset.0 as i32, y - cell.offset.1 as i32);
             let (w, h) = TileMap::oriented_size(piece.size, piece.orientation);
             if ox < x0 || oy < y0 || ox + w > x1 || oy + h > y1 {
+                if std::env::var("POE_DBG_PIECES").ok().is_some_and(|v| v == format!("{x0},{y0}")) {
+                    eprintln!("PIECES ({x0},{y0})-({x1},{y1}) cell ({x},{y}) piece {} at ({ox},{oy}) {w}x{h} o{}", piece.path, piece.orientation);
+                }
                 return false;
             }
         }

@@ -891,6 +891,10 @@ fn size_map_final(rooms: &[DungeonRoom]) -> Vec<(String, Vec<((u32, u32), u32)>)
     let mut all: Vec<(String, Vec<((u32, u32), u32)>)> = Vec::new();
     let mut plain: Vec<(String, Vec<(u32, u32)>)> = Vec::new();
     for r in rooms.iter().filter(|r| r.generic) {
+        // Debug: `POE_SM_SKIP=<path part>` leaves matching rooms out of the size map.
+        if std::env::var("POE_SM_SKIP").is_ok_and(|s| r.path.contains(&s)) {
+            continue;
+        }
         let (w, h) = r.units;
         // `0x141f99b20`: each distinct door type other than the default; a room with only
         // default doors counts under the default (room data +0x180).
