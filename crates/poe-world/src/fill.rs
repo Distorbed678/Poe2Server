@@ -287,7 +287,17 @@ impl Fill<'_> {
                         let to = choose_orientation(&tdt, e.o, &fits, rng);
                         if to != 8 {
                             let (mx, my) = at(&tdt, to);
-                            self.place_tile(mx, my, &e.path, compose(to, o))?;
+                            // `0x141f8c8c0` at `0x141f8d5bf`: the tile's height is the slot's
+                            // (+0x72, its lowest corner) plus the room's.
+                            let saved = self.height;
+                            if std::env::var_os("POE_NO_SLOT_HEIGHT").is_none() {
+                                if let (Some(h), Some((k, _))) = (saved, cell_key(&room.arm.grid[cy][cx])) {
+                                    self.height = Some(h + k.heights.iter().map(|&v| v as i8).min().unwrap_or(0) as i16);
+                                }
+                            }
+                            let r = self.place_tile(mx, my, &e.path, compose(to, o));
+                            self.height = saved;
+                            r?;
                             placed = true;
                             break;
                         }
