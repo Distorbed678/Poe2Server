@@ -254,6 +254,21 @@ impl Fill<'_> {
         let room = load_room(self.files, &path.to_ascii_lowercase())?;
         self.map.use_room_grounds(&room);
         let (w, h) = (room.width(), room.height());
+        // `0x141f8f930`: without a passed height the room's height is the middle of the corner
+        // heights over its whole oriented extent (`0x141f90950`), for all its slots.
+        let outer = self.height;
+        if self.height.is_none() && std::env::var_os("POE_NO_ROOM_HEIGHT").is_none() {
+            let (ow, oh) = oriented((w as u8, h as u8), o);
+            self.height = Some(self.corner_height(x, y, ow as i32, oh as i32));
+        }
+        let r = self.place_room_cells(x, y, path, o, ground, room, rng);
+        self.height = outer;
+        r
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn place_room_cells(&mut self, x: i32, y: i32, path: &str, o: u8, ground: Option<String>, room: Room, rng: &mut TerrainRng) -> Result<(), GenError> {
+        let (w, h) = (room.width(), room.height());
         for cx in 0..w {
             for cy in 0..h {
                 // An `s` slot, or a key without feature and edges on one ground: a fill tile of
@@ -342,6 +357,9 @@ impl Fill<'_> {
                 }
                 let c = chosen.ok_or_else(|| GenError::Unsupported(format!("no tile fits at ({mx},{my}) for fill room {path}")))?;
                 let def = self.master.tiles.tiles[c.tile].clone();
+                if std::env::var_os("POE_DBG_FILLKEY").is_some() {
+                    eprintln!("FILLKEY {path} ({cx},{cy}) at {mx},{my} low {low} height {:?} {}", self.height, def.path);
+                }
                 self.map.place(mx, my, &def.path, &def.tdt, c.orientation, low as i16 + self.height.unwrap_or(0), Some(c.tile));
                 self.note(mx, my, &def.tdt)?;
             }
