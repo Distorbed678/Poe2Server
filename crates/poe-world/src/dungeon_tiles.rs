@@ -409,7 +409,19 @@ pub fn settle_rooms(grounds: &[Option<String>; 3], unit: u32, overlap: u32, grid
                 y1 -= (p.origin.1 < grid.h as i32 - 1) as i32;
             }
             // A blank room (no tag, doors or second ground) carries its ground.
+            // Room data +10 (`0x141f982b0`, read by `0x142099e90`): a one-string `.arm`, or a
+            // blank room (no tag, `special…` tags counting as none; one ground on all root corners;
+            // no doors) whose slots' corners are all as walkable as its root ground. Such a room
+            // gives its root ground (+0x13a, when set) to the lattice.
             let own = match &room.arm.root_slot {
+                poe_data_tools::file_parsers::arm::types::Slot::K(k) if std::env::var_os("POE_OLD_OWN").is_none() => {
+                    let tag = room.arm.tag.to_ascii_lowercase();
+                    let blank = (tag.is_empty() || tag.starts_with("special")) && room.arm.thingies.iter().all(|t| t.et_file.is_none()) && k.corners.iter().all(|c| c.ground == k.corners[0].ground);
+                    // `0x141f96da0`: the parser sets +10 when the `.arm`'s string table has fewer
+                    // than two entries (a room naming one ground only: `Location_Compass_02`).
+                    let flag = room.arm.strings.len() < 2 || (blank && uniform_walk(room));
+                    if flag { k.corners[0].ground.clone() } else { None }
+                }
                 // Room data +10 (`0x141f982b0`): the arm's second bool, else a blank room (no tag,
                 // one ground, no doors) whose slots are as walkable as its ground.
                 poe_data_tools::file_parsers::arm::types::Slot::K(k) if (std::env::var_os("POE_ARM_OWN").is_some() && room.arm.bools.get(1).copied().unwrap_or(false)) || ((room.arm.tag.is_empty() || std::env::var_os("POE_OWN_TAG").is_some() || (p.special && std::env::var("POE_NO_SPECIAL_OWN").is_err())) && room.arm.thingies.iter().all(|t| t.et_file.is_none()) && k.corners.iter().all(|c| c.ground == k.corners[0].ground) && uniform_walk(room)) => k.corners[0].ground.clone(),
