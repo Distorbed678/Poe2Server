@@ -543,6 +543,14 @@ impl TileMap {
         }
     }
 
+    /// The cells tiles overhang past the map (kept for the parent map, `Spill::Cell`).
+    pub(crate) fn spilled_cells(&self) -> impl Iterator<Item = (i32, i32)> + '_ {
+        self.spill.iter().filter_map(|s| match s {
+            Spill::Cell(x, y, _, _) => Some((*x, *y)),
+            _ => None,
+        })
+    }
+
     pub(crate) fn spilled(&self, x: i32, y: i32) -> bool {
         self.bounds.is_some_and(|b| x < b.0 || y < b.1 || x >= b.2 || y >= b.3) || self.outer_taken.contains(&(x, y)) || self.spill.iter().any(|s| matches!(s, Spill::Cell(sx, sy, _, _) if *sx == x && *sy == y))
     }

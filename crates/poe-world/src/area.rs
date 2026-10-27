@@ -827,6 +827,9 @@ fn generate_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: 
     let mut owner: Vec<Option<i16>> = vec![None; built.map.cells.len()];
     for (inner, origin, m) in &done {
         let st = storey_of(&inner.tsi);
+        if std::env::var_os("POE_DBG_OWNER").is_some() {
+            eprintln!("OWNER subgraph at {origin:?} {}x{} margins {m:?} storey {st}", inner.map.width, inner.map.height);
+        }
         let at = (origin.0 + m.left as i32, origin.1 + m.top as i32);
         for y in 0..inner.map.height as i32 {
             for x in 0..inner.map.width as i32 {
@@ -834,6 +837,14 @@ fn generate_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: 
                     if let Some(j) = built.map.index(x + at.0, y + at.1) {
                         owner[j] = Some(st);
                     }
+                }
+            }
+        }
+        // Cells its tiles overhang past its region (corridor ends into the margin).
+        if std::env::var_os("POE_NO_SPILL_OWNER").is_none() {
+            for (x, y) in inner.map.spilled_cells() {
+                if let Some(j) = built.map.index(x + at.0, y + at.1) {
+                    owner[j] = Some(st);
                 }
             }
         }
