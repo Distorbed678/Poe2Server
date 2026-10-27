@@ -1230,7 +1230,17 @@ fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng:
     let margins = Margins::parse(&crate::text::decode_utf16(&tsi_bytes));
     // Outer buffer.
     let edge_types = master.edge_type_table(files)?;
-    let mut map = outer_buffer(&map, margins, tsi.get("OuterGroundType").map(String::as_str), false, &mut master, files, &edge_types, rng)?;
+    // The repair flag is the map view's `+0x20` (some tile or corner has a non-zero height),
+    // as for dungeons.
+    let repair = map.raised && std::env::var_os("POE_TGR_NO_REPAIR").is_none();
+    let mut map = outer_buffer(&map, margins, tsi.get("OuterGroundType").map(String::as_str), repair, &mut master, files, &edge_types, rng)?;
+    // Tile records keep heights in world units (`StoreyHeight` per storey), like a dungeon's.
+    if std::env::var_os("POE_NO_TGR_STOREY").is_none() {
+        let storey: i16 = tsi.get("StoreyHeight").and_then(|v| v.trim().parse().ok()).unwrap_or(16);
+        for c in map.cells.iter_mut().flatten() {
+            c.height *= storey;
+        }
+    }
     if std::env::var_os("POE_GRID2").is_some() {
         lattice::mark_unwalkable(&mut map, &master.tiles);
         lattice::mark_enclosed_fills(&mut map, files).map_err(data)?;
@@ -1680,6 +1690,10 @@ fn build_tgr(files: &dyn crate::generate::Files, graph: &Graph, removed: Vec<boo
     probe(Stage::Lattice("borders", &map));
     lattice::border_floods(&mut map, &master.tiles);
     probe(Stage::Lattice("flood", &map));
+    // The height pass (`0x1420c0a60`) runs between the `flood` and `heights` snapshots.
+    if std::env::var_os("POE_NO_HEIGHT_PASS").is_none() {
+        lattice::height_pass(&mut map, files).map_err(data)?;
+    }
     // The unwalkable marking (`0x141fe0fd0`) works from the real map's border: a subgraph's
     // window marks nothing (G3_1's `End_*.tgr`: no corner gets flag 8).
     if window.is_none() {
@@ -1723,6 +1737,10 @@ fn build_tgr(files: &dyn crate::generate::Files, graph: &Graph, removed: Vec<boo
     fill_rooms.extend(fill_pass(&mut map, &mut master, files, rng)?);
     if let Some(o) = &mut overlays {
         o.run(2, &mut map, &mut master, &mut types, files, rng)?;
+    }
+    // The fill tiles' heights (`0x1420c19d0`), after the overlays' second phase.
+    if std::env::var_os("POE_NO_REFIX").is_none() {
+        lattice::refix_fills(&mut map, files).map_err(data)?;
     }
     let mut rooms: Vec<RoomPlacement> = placed
         .iter()

@@ -187,6 +187,10 @@ impl Fill<'_> {
             .filter(|&i| self.map.lattice[i].flags & 2 != 0)
             .map(|i| self.map.lattice[i].height as i32)
             .collect();
+        if std::env::var_os("POE_DBG_CORNERH").is_some() {
+            let all: Vec<(i32, u8)> = [(x, y), (x + w, y), (x, y + h), (x + w, y + h)].iter().filter_map(|&(px, py)| self.map.point_index(px, py)).map(|i| (self.map.lattice[i].height as i32, self.map.lattice[i].flags)).collect();
+            eprintln!("CORNERH ({x},{y}) {w}x{h} {all:?}");
+        }
         match (hs.iter().min(), hs.iter().max()) {
             (Some(&lo), Some(&hi)) => (hi - (hi - lo) / 2) as i16,
             _ => 0,
