@@ -161,6 +161,7 @@ fn mark_ground(map: &mut TileMap, cells: &mut Vec<GroundCell>, pos: (i32, i32), 
         for x in pos.0..=pos.0 + w {
             if let Some(i) = map.point_index(x, y) {
                 if map.lattice[i].flags & 2 == 0 {
+                    map.raised |= height != 0;
                     map.lattice[i].height = height as i8;
                     map.lattice[i].flags |= 2;
                 }
@@ -711,6 +712,7 @@ impl TilePass<'_> {
                     for dy in 0..kh as i32 {
                         for dx in 0..kw as i32 {
                             if let Some(k) = map.point_index(pos.0 + dx, pos.1 + dy) {
+                                map.raised |= height != 0;
                                 map.lattice[k].height = height as i8;
                                 map.lattice[k].flags |= 2;
                             }

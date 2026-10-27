@@ -34,18 +34,23 @@ pub fn run(map: &mut TileMap, master: &mut Master, files: &dyn Files, rng: &mut 
         let keys: Vec<(u8, TileKey)> = (0..8u8).filter(|o| mask & (1 << o) != 0).map(|o| (o, master.tiles.tiles[ti].key.oriented(o))).collect();
         // (x, y, orientation, height)
         let mut cands: Vec<(i32, i32, u8, i16)> = Vec::new();
-        for y in 0..map.height as i32 {
-            for x in 0..map.width as i32 {
-                let Some(i) = map.index(x, y) else { continue };
-                let Some(cell) = map.cells[i].clone() else { continue };
+        // The region's rectangle in the full map, so the cells a fill tile overhangs by one past
+        // the region are seen too (MapFrozenFalls: ledge tiles at x = -1).
+        let r = if std::env::var_os("POE_PU_REGION_ONLY").is_some() { 0 } else { 1 };
+        for y in -r..map.height as i32 + r {
+            for x in -r..map.width as i32 + r {
+                let Some(cell) = map.cell_or_spill(x, y).cloned() else { continue };
                 if cell.offset != (0, 0) {
                     continue;
                 }
                 let tdt = master.header(files, &cell.path)?.clone();
                 if tdt.feature.as_deref().is_some_and(|f| !f.is_empty()) {
+                    if std::env::var_os("POE_DBG_PU").is_some() {
+                        eprintln!("PU featured ({x},{y}) {} {:?}", cell.path, tdt.feature);
+                    }
                     continue;
                 }
-                let mut key = match map.piece_at[i].and_then(|p| map.pieces[p].tile) {
+                let mut key = match map.piece_or_spill(x, y).and_then(|p| map.pieces[p].tile) {
                     Some(t) => master.tiles.tiles[t].key.clone(),
                     None => {
                         let mut k = TileKey::from_tdt(&tdt);
@@ -61,13 +66,22 @@ pub fn run(map: &mut TileMap, master: &mut Master, files: &dyn Files, rng: &mut 
                 let (kw, kh) = (key.size.0 as i32, key.size.1 as i32);
                 let walkable = |px: i32, py: i32| map.point_index(px, py).is_some_and(|k| map.lattice[k].flags & 8 == 0);
                 if !(walkable(x, y) || walkable(x, y + kh) || walkable(x + kw, y) || walkable(x + kw, y + kh)) {
+                    if std::env::var_os("POE_DBG_PU").is_some() && keys.iter().any(|(_, k)| *k == key) {
+                        eprintln!("PU unwalkable ({x},{y}) {}", cell.path);
+                    }
                     continue;
                 }
                 let same: Vec<u8> = keys.iter().filter(|(_, k)| *k == key).map(|(o, _)| *o).collect();
+                if std::env::var_os("POE_DBG_PU").is_some() && y >= 68 && key.edges.iter().flatten().any(|e| e.contains("unwalkable_ledge")) {
+                    eprintln!("PU row ({x},{y}) {} o{} same {:?} key {:?}", cell.path, cell.orientation, same, key);
+                }
                 if same.is_empty() {
                     continue;
                 }
                 let o = same[rng.below(same.len() as u32) as usize];
+                if std::env::var_os("POE_DBG_PU").is_some() {
+                    eprintln!("PU cand ({x},{y}) o{o} {} key {:?}", cell.path, key);
+                }
                 cands.push((x, y, o, cell.height));
             }
         }

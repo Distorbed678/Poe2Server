@@ -173,6 +173,7 @@ fn angle(a: (i32, i32), b: (i32, i32)) -> u16 {
 }
 
 /// A room of the set as the dungeon sees it.
+#[derive(Clone)]
 struct DungeonRoom {
     path: String,
     /// The room type (the `.arm` tag; empty for `special…` rooms, whose tag the parser clears).
@@ -918,9 +919,13 @@ fn size_map_final(rooms: &[DungeonRoom]) -> Vec<(String, Vec<((u32, u32), u32)>)
                 all.len() - 1
             });
             for size in sizes {
+                if std::env::var_os("POE_DBG_SIZEMAP").is_some() {
+                    eprintln!("SIZEMAP {} {:?} w{} door {}", r.path, size, r.weight, door.rsplit('/').next().unwrap_or(""));
+                }
+                let weight = r.weight;
                 match all[k].1.iter_mut().find(|e| e.0 == size) {
-                    Some(e) => e.1 += r.weight,
-                    None => all[k].1.push((size, r.weight)),
+                    Some(e) => e.1 += weight,
+                    None => all[k].1.push((size, weight)),
                 }
                 // `0x141f98bb0`: a default-type room counts as a plain size only with every
                 // position a default door at height 0.
@@ -2276,8 +2281,20 @@ fn extra_features(files: &dyn Files, rooms: &[DungeonRoom], unit_size: u32, grid
         let room = crate::generate::load_room(files, &f.room.to_ascii_lowercase())?;
         if room.width() == 3 && room.height() == 3 && !table.is_empty() {
             requests.push(f.clone());
-        } else if room.arm.dimensions.side_length == unit_size {
-            return Err(unsupported(format!("dungeon: feature room {} would be placed as a room", f.room)));
+        } else if room.arm.dimensions.side_length == unit_size && std::env::var_os("POE_NO_FEATURE_ROOM").is_none() {
+            // `0x1420abb90`: a feature room built for the grid's unit size (not 3×3, or no mission
+            // table) is placed at once like a special room (`0x1420a7da0`, the request's
+            // orientation mask) and the request is served.
+            let key = match &room.arm.root_slot {
+                poe_data_tools::file_parsers::arm::types::Slot::K(k) => crate::generate::slot_key(k),
+                _ => Default::default(),
+            };
+            let def = crate::rooms::RoomDef { path: f.room.clone(), tag: room.arm.tag.clone(), weight: 1, orientations: f.mask, key, room };
+            let mut ext: Vec<DungeonRoom> = rooms.to_vec();
+            ext.push(dungeon_room(&def));
+            if place_special(files, &ext, &[ext.len() - 1], grid, types, rng)?.is_some() {
+                files.take_league(&f.room);
+            }
         }
     }
     if requests.is_empty() {

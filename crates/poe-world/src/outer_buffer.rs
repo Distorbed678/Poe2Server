@@ -709,6 +709,12 @@ fn fill_black(map: &mut TileMap, rect: (i32, i32, i32, i32), ground: &str, repai
         for c in std::mem::take(&mut waiting) {
             scan(map, c, &mut waiting, &mut ready);
         }
+        if waiting.len() == before && ready.is_empty() && std::env::var_os("POE_STUCK_ZERO").is_some() {
+            for c in std::mem::take(&mut waiting) {
+                ready.push((c.0, c.1, 0));
+            }
+            continue;
+        }
         if waiting.len() == before && ready.is_empty() {
             if std::env::var("POE_DBG").is_ok() {
                 let filled = (0..h).flat_map(|y| (0..w).map(move |x| (x, y))).filter(|&(x, y)| map.index(x0 + x, y0 + y).is_some_and(|i| map.cells[i].is_some())).count();

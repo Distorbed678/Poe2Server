@@ -182,6 +182,10 @@ pub struct TileMap {
     /// The underlying map's cells (x0, y0, x1, y1), when known: a dungeon region with its
     /// `OuterBufferSize` margins, or a window's parent's; cells outside are never free (`0x141d0d940`).
     pub bounds: Option<(i32, i32, i32, i32)>,
+    /// Map view `+0x20`: a tile was placed or a corner height set with a non-zero height
+    /// (`0x141f9e2e0`, `0x142097cb0`, `0x1420983d0`); ORed into generator `+8` (the outer fill's
+    /// height repair) after a dungeon graph's tile pass (`0x141ff05f0`).
+    pub raised: bool,
     /// The doodads of the rooms placed in this map, in cells of this map (`crate::doodads`).
     pub doodads: Vec<crate::doodads::Doodad>,
 }
@@ -226,6 +230,7 @@ impl TileMap {
             spill: Vec::new(),
             outer_taken: Default::default(),
             bounds: None,
+            raised: false,
             doodads: Vec::new(),
         }
     }
@@ -527,6 +532,17 @@ impl TileMap {
         }
     }
 
+    /// The piece covering `(x, y)`, also outside the map where a tile overhangs it (last write wins).
+    pub(crate) fn piece_or_spill(&self, x: i32, y: i32) -> Option<usize> {
+        match self.index(x, y) {
+            Some(i) => self.piece_at[i],
+            None => self.spill.iter().rev().find_map(|s| match s {
+                Spill::Cell(sx, sy, p, _) if *sx == x && *sy == y => Some(*p),
+                _ => None,
+            }),
+        }
+    }
+
     pub(crate) fn spilled(&self, x: i32, y: i32) -> bool {
         self.bounds.is_some_and(|b| x < b.0 || y < b.1 || x >= b.2 || y >= b.3) || self.outer_taken.contains(&(x, y)) || self.spill.iter().any(|s| matches!(s, Spill::Cell(sx, sy, _, _) if *sx == x && *sy == y))
     }
@@ -558,6 +574,7 @@ impl TileMap {
     ) {
         // `0x141f9e2e0`: a tile with a spawner object and no edge of a real type (edge flag 0x80
         // is the wildcard) is placed without the mirror bit.
+        self.raised |= height != 0;
         let real_edge = tdt.edges.iter().flatten().any(|e| self.edge_flags.get(&e.to_ascii_lowercase()).copied().unwrap_or(0) & 0x80 == 0);
         let o = if tdt.spawner && !real_edge && std::env::var("POE_NO_PLACE_MASK").is_err() { o & 3 } else { o };
         let size = tdt.size;

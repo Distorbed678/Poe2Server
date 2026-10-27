@@ -692,9 +692,9 @@ fn generate_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: 
     let mut done: Vec<(Built, (i32, i32), Margins)> = Vec::new();
     // A subgraph's own `graph` nodes (BossRush_Area1's `_TheForsakenSon.dgr`) are generated right
     // after it, depth first, into the same map (their origins are relative to the subgraph's grid).
-    let mut work: Vec<(String, (i32, i32))> = std::mem::take(&mut built.subgraphs);
+    let mut work: Vec<(String, (i32, i32), (i32, i32))> = std::mem::take(&mut built.subgraphs);
     work.reverse();
-    while let Some((file, origin)) = work.pop() {
+    while let Some((file, origin, slot)) = work.pop() {
         let mut sub = Graph::parse_bytes(&files.read(&file)?).map_err(|e| data(format!("{file}: {e:?}")))?;
         // Turned like the main graph (`0x141ff05f0` sets the parent's region).
         turn(files, &mut sub, graph.region)?;
@@ -705,6 +705,35 @@ fn generate_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: 
         let (sub, removed) = prune(&sub, rng)?;
         // The region sits inside the subgraph master's `OuterBufferSize` margins.
         let m = Margins::parse(&crate::text::decode_utf16(&files.read(&sub.master_file)?));
+        let mut origin = origin;
+        // A subgraph smaller or larger than its reserved slot keeps the slot corner its unturned
+        // top-left turns to (the turned corner (0, 0)): in region orientation 6 the bottom
+        // (G2_4_3 `_boss.dgr`, 4×4 units in a 5×5 slot), in 2 and 4 the right, in 3 and 5 the
+        // bottom (G3_1 `_SandsweptMarshEnd_S_E_1.tgr`, 60 tiles in a 57-tile slot).
+        if std::env::var_os("POE_NO_SUB_ALIGN").is_none() {
+            let inner_size = if is_dgr {
+                let st = master_entries(&files.read(&sub.master_file)?, &sub.master_file);
+                let unit: i32 = st.get("RoomUnitSize").and_then(|v| v.trim().parse().ok()).unwrap_or(9);
+                let ov: i32 = st.get("RoomOverlap").and_then(|v| v.trim().parse().ok()).unwrap_or(1);
+                (sub.width as i32 * (unit - ov) + ov, sub.height as i32 * (unit - ov) + ov)
+            } else {
+                (sub.width as i32, sub.height as i32)
+            };
+            let size = (inner_size.0 + (m.left + m.right) as i32, inner_size.1 + (m.top + m.bottom) as i32);
+            let (cx, cy) = crate::tileset::orient_cell(graph.region, 2, 2, 0, 0);
+            if cx == 1 {
+                origin.0 += slot.0 - size.0;
+            }
+            if cy == 1 {
+                origin.1 += slot.1 - size.1;
+            }
+        }
+        if let Ok(v) = std::env::var(if is_dgr { "POE_SUB_SHIFT" } else { "POE_SUB_SHIFT_TGR" }) {
+            let d: Vec<i32> = v.split(',').filter_map(|t| t.parse().ok()).collect();
+            if d.len() == 2 {
+                origin = (origin.0 + d[0], origin.1 + d[1]);
+            }
+        }
         let at = (origin.0 + m.left as i32, origin.1 + m.top as i32);
         if std::env::var_os("POE_DBG_WIN").is_some() {
             for y in at.1 - 1..at.1 + 14 {
@@ -720,8 +749,8 @@ fn generate_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: 
         } else {
             build_tgr(files, &sub, removed, rng, probe, Some((&built.map, at)))?
         };
-        for (f, o) in inner.subgraphs.iter().rev() {
-            work.push((f.clone(), (o.0 + at.0, o.1 + at.1)));
+        for (f, o, sl) in inner.subgraphs.iter().rev() {
+            work.push((f.clone(), (o.0 + at.0, o.1 + at.1), *sl));
         }
         if std::env::var("POE_DBG").is_ok() {
             eprintln!("DBG subgraph {file} origin {origin:?} margins {m:?} inner {}x{}", inner.map.width, inner.map.height);
@@ -740,7 +769,8 @@ fn generate_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: 
     }
     let mut job_maps: Vec<TileMap> = Vec::new();
     for b in job_built.into_iter().rev() {
-        job_maps.push(finish_dungeon(files, b, &[], rng)?);
+        let repair = repair_flag(&[&b]);
+        job_maps.push(finish_dungeon(files, b, &[], repair, rng)?);
     }
     job_maps.reverse();
     // `0x141ff7a10`: the outer fill and outer buffer per graph, the last subgraph first, then the
@@ -763,6 +793,7 @@ fn generate_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: 
             }
         }
     }
+    let repair = repair_flag(&std::iter::once(&built).chain(done.iter().map(|d| &d.0)).collect::<Vec<_>>());
     for (mut inner, origin, m) in done.into_iter().rev() {
         if std::env::var("POE_DBG").is_ok() {
             eprintln!("DBG subgraph outer pass origin {:?} size {}x{} pieces {}", origin, inner.map.width, inner.map.height, inner.map.cells.iter().filter(|c| c.is_some()).count());
@@ -774,13 +805,13 @@ fn generate_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: 
         if m.top + m.right + m.bottom + m.left == 0 {
             if let Some(g) = g {
                 let rect = (origin.0, origin.1, origin.0 + w as i32, origin.1 + h as i32);
-                crate::outer_buffer::outer_fill(&mut built.map, rect, &g, true, &mut inner.master, files)?;
+                crate::outer_buffer::outer_fill(&mut built.map, rect, &g, repair, &mut inner.master, files)?;
             }
         } else {
             let mut window = built.map.window(origin, w + m.left + m.right, h + m.top + m.bottom);
             let rect = (m.left as i32, m.top as i32, (m.left + w) as i32, (m.top + h) as i32);
             let edges = inner.master.edge_type_table(files)?;
-            crate::outer_buffer::outer_buffer_window(&mut window, rect, g.as_deref(), true, &mut inner.master, files, &edges, rng).map_err(|e| match e {
+            crate::outer_buffer::outer_buffer_window(&mut window, rect, g.as_deref(), repair, &mut inner.master, files, &edges, rng).map_err(|e| match e {
                 GenError::Unsupported(s) => GenError::Unsupported(format!("{s} (outer buffer of the subgraph window at {origin:?}, {}x{}, margins {m:?})", w + m.left + m.right, h + m.top + m.bottom)),
                 e => e,
             })?;
@@ -792,20 +823,20 @@ fn generate_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: 
             }
         }
     }
-    let main = finish_dungeon(files, built, &owner, rng)?;
+    let main = finish_dungeon(files, built, &owner, repair, rng)?;
     Ok(job_maps.iter().fold(main, |m, job| append_job(m, job)))
 }
 
 /// The tail of a dungeon graph: the outer buffer of its own master, then tile heights in world
 /// units (`owner`: the storey of the subgraph that placed a cell, by cell of the unbuffered map).
-fn finish_dungeon(files: &dyn crate::generate::Files, built: Built, owner: &[Option<i16>], rng: &mut TerrainRng) -> Result<TileMap, GenError> {
+fn finish_dungeon(files: &dyn crate::generate::Files, built: Built, owner: &[Option<i16>], repair: bool, rng: &mut TerrainRng) -> Result<TileMap, GenError> {
     let storey_of = |tsi: &std::collections::HashMap<String, String>| -> i16 { tsi.get("StoreyHeight").and_then(|v| v.trim().parse().ok()).unwrap_or(16) };
     let Built { map, mut master, tsi_bytes, tsi, .. } = built;
     let margins = Margins::parse(&crate::text::decode_utf16(&tsi_bytes));
     let edge_types = master.edge_type_table(files)?;
     // A container graph has no fill tiles to fill with (its subgraphs fill their own rectangles).
     let outer_ground = tsi.get("OuterGroundType").map(String::as_str).filter(|_| !master.fills.is_empty());
-    let mut map = outer_buffer(&map, margins, outer_ground, true, &mut master, files, &edge_types, rng)?;
+    let mut map = outer_buffer(&map, margins, outer_ground, repair, &mut master, files, &edge_types, rng)?;
     // Tile records keep heights in world units (`StoreyHeight` per storey).
     let storey: i16 = storey_of(&tsi);
     let (dx, dy) = (margins.left as i32, margins.top as i32);
@@ -824,15 +855,31 @@ fn finish_dungeon(files: &dyn crate::generate::Files, built: Built, owner: &[Opt
     Ok(map)
 }
 
+/// The outer fill's height repair (`0x141fd5ff0`'s third argument): generator `+8`, which
+/// `0x141ff05f0` ORs with each dungeon graph's map view flag `+0x20` after its tile pass:
+/// some tile or corner was set with a non-zero height (flat graphs: G4_4_3, HideoutLimestone,
+/// Design_Lite place the outer fill plain). Switches: `POE_NO_REPAIR_ALL`, `POE_REPAIR_ALL`.
+fn repair_flag(built: &[&Built]) -> bool {
+    if std::env::var_os("POE_NO_REPAIR_ALL").is_some() {
+        return false;
+    }
+    if std::env::var_os("POE_REPAIR_ALL").is_some() {
+        return true;
+    }
+    built.iter().any(|b| b.raised)
+}
+
 struct Built {
     map: TileMap,
     master: Master,
     tsi_bytes: Vec<u8>,
     tsi: std::collections::HashMap<String, String>,
     /// Reserved subgraph rectangles: graph file and tile origin.
-    subgraphs: Vec<(String, (i32, i32))>,
+    subgraphs: Vec<(String, (i32, i32), (i32, i32))>,
     /// The dungeon layout's grid size and rooms (the paired-room plugin copies them).
     layout: Option<(u32, u32, Vec<crate::dungeon::PlacedRoom>)>,
+    /// The map view's raised flag after the tile pass (ORed into generator `+8`).
+    raised: bool,
 }
 
 /// One dungeon graph up to its de-repetition: layout, tile pass, fill. `window` is the map and
@@ -1096,10 +1143,12 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
     drop(placements);
     // `0x141ff2090` (post-unique tiles, per region after the de-repetition: the village graphs of
     // G1_13_2 place `Fields_01`-style tiles of the tile set's own list here).
+    // Generator `+8` takes the view's flag right after the tile pass, before the post-unique tiles.
+    let raised = map.raised;
     crate::postunique::run(&mut map, &mut master, files, rng)?;
-    let subgraphs = grid.rooms.iter().filter_map(|r| Some((r.subgraph.clone()?, (r.origin.0 * step as i32, r.origin.1 * step as i32)))).collect();
+    let subgraphs = grid.rooms.iter().filter_map(|r| Some((r.subgraph.clone()?, (r.origin.0 * step as i32, r.origin.1 * step as i32), ((r.size.0 * step + grid.overlap) as i32, (r.size.1 * step + grid.overlap) as i32)))).collect();
     map.release(&inherited);
-    Ok(Built { map, master, tsi_bytes, tsi, subgraphs, layout: Some((grid.w, grid.h, grid.rooms.clone())) })
+    Ok(Built { map, master, tsi_bytes, tsi, subgraphs, layout: Some((grid.w, grid.h, grid.rooms.clone())), raised })
 }
 
 /// Everything after the topology choice, for one graph.
@@ -1643,6 +1692,6 @@ fn build_tgr(files: &dyn crate::generate::Files, graph: &Graph, removed: Vec<boo
     derepeat_pass(&mut map, &master, &rooms, rng);
     crate::postunique::run(&mut map, &mut master, files, rng)?;
 
-    Ok(Built { map, master, tsi_bytes, tsi, subgraphs: Vec::new(), layout: None })
+    Ok(Built { map, master, tsi_bytes, tsi, subgraphs: Vec::new(), layout: None, raised: false })
 }
 
