@@ -371,9 +371,9 @@ mod tests {
             }
         }
         let latest = VersionFile::latest(root).unwrap();
-        assert_eq!(latest.version, "0.5.5e");
+        assert_eq!(latest.version, "0.5.5e.hotfix1");
         assert_eq!(latest.app_id, 2694490);
-        assert_eq!(latest.exe.pe_timestamp, 0x6ac302e0);
+        assert_eq!(latest.exe.pe_timestamp, 0x6ae12470);
     }
 
     #[test]

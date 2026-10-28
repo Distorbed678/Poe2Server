@@ -10,7 +10,7 @@
 # The supported client build: versions/<version>.toml is its single definition (depots, exe
 # checksum, opcode folder, signature table, accepted client hashes; docs/guides/new-game-version.md).
 # `{version}` in the path settings below is replaced by it.
-version = "0.5.5e"
+version = "0.5.5e.hotfix1"
 # Provided copy of the client install; game data is read from <game_dir>/Bundles2.
 game_dir = "GameFiles"
 # Community .datc64 schema (third_party/fetch-tools.sh downloads it).

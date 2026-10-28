@@ -1368,7 +1368,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let text = std::fs::read_to_string(root.join("config/server.toml"))
             .unwrap()
-            .replacen("version = \"0.5.5e\"", "version = \"9.9.9z\"", 1);
+            .replacen("version = \"0.5.5e.hotfix1\"", "version = \"9.9.9z\"", 1);
         let bad = dir.join("server.toml");
         std::fs::write(&bad, text).unwrap();
         let e = Config::load_in(&bad, &root).unwrap_err().to_string();
@@ -1650,7 +1650,7 @@ mod tests {
         assert!(e.message.contains("interval_secs"), "{e:?}");
 
         // Unknown game version: the version file is missing; points at the key.
-        let c = Config::check_text(&good.replace("version = \"0.5.5e\"", "version = \"9.9.9\""), &root);
+        let c = Config::check_text(&good.replace("version = \"0.5.5e.hotfix1\"", "version = \"9.9.9\""), &root);
         let e = c.error.expect("version error");
         assert!(e.message.contains("version") && e.line.is_some(), "{e:?}");
 
