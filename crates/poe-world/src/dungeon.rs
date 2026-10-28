@@ -229,6 +229,10 @@ pub struct PlacedRoom {
     pub height: i32,
     /// Flags +0x15 bit 0: reachable (an accessible edge or tag).
     pub accessible: bool,
+    /// Reachable only through the edgeless typed node rule (`node_accessible`): the room flag is
+    /// not set yet when the ground-only cells are listed (`0x142097cb0`; the pre-unique room
+    /// sees those cells as inaccessible, G1_13_2), only for the fill later.
+    pub late_access: bool,
     /// Flags +0x15 bit 1: closed to extra doors (typed or tagged nodes, impenetrable edges).
     pub blocked: bool,
     /// +0x10: extra door chance (%).
@@ -358,7 +362,7 @@ impl FileGroups {
             .get(group)
             .or_else(|| self.groups.iter().find(|(k, _)| k.eq_ignore_ascii_case(group)).map(|(_, v)| v))
             .filter(|l| !l.is_empty())
-            .ok_or_else(|| unsupported(format!("Cannot find random subgraph: No files listed for group {group:?}")))?;
+            .ok_or_else(|| unsupported(format!("Cannot find random late_access: false, subgraph: No files listed for group {group:?}")))?;
         let mut file = list[rng.below(list.len() as u32) as usize].clone();
         if let Some(u) = used.get(group) {
             let left: Vec<&String> = list.iter().filter(|f| !u.contains(f)).collect();
@@ -557,17 +561,20 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
 
     // `0x142095d90`: an accessible edge, or an `accessible` / `default` / `entrance…` /
     // `sideentrance…` tag.
+    let node_early = |n: usize| {
+        slots[n].iter().any(|&e| fields[e].accessible)
+            || graph.nodes[n].tags.iter().any(|t| {
+                let t = t.to_ascii_lowercase();
+                t == "accessible" || t == "default" || t.starts_with("entrance") || t.starts_with("sideentrance")
+            })
+    };
+    let node_late = |n: usize| slots[n].is_empty() && !graph.nodes[n].room_type.is_empty() && !node_early(n);
     let node_accessible = |n: usize| {
         // An edgeless typed node (`bonfire` of the Gallows village graphs) is reachable: the client's
         // fill treats its cells as walkable (chest fill rooms are offered; G1_13_2). The rule behind
         // it is not found (`0x142095d90` returns 0 for it, no extra door reaches it); it is derived
         // from the traces (G1_13_2: 1835 of 1842 jobs match with it).
-        (slots[n].is_empty() && !graph.nodes[n].room_type.is_empty() && { if std::env::var_os("POE_DBG_ACC").is_some() { eprintln!("ACC edgeless node {n} type {} tags {:?}", graph.nodes[n].room_type, graph.nodes[n].tags); } true })
-            || slots[n].iter().any(|&e| fields[e].accessible)
-            || graph.nodes[n].tags.iter().any(|t| {
-                let t = t.to_ascii_lowercase();
-                t == "accessible" || t == "default" || t.starts_with("entrance") || t.starts_with("sideentrance")
-            })
+        node_late(n) || node_early(n)
     };
     // `0x1420af7d0`: typed or tagged nodes, or nodes with an impenetrable edge.
     let node_blocked = |n: usize| {
@@ -592,7 +599,7 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
                 std::mem::swap(&mut w, &mut h);
             }
             let origin = origin_for(&grid, graph.region, unit(n), (w, h));
-            grid.stamp(PlacedRoom { path: String::new(), node: Some(n), origin, size: (w, h), orientation: 0, exits: Vec::new(), extra_door: None, height: height(n), accessible: node_accessible(n), blocked: node_blocked(n), extra_pct: node_extra(n), door_type: None, special: false, subgraph: Some(file) })?;
+            grid.stamp(PlacedRoom { path: String::new(), node: Some(n), origin, size: (w, h), orientation: 0, exits: Vec::new(), extra_door: None, height: height(n), accessible: node_accessible(n), blocked: node_blocked(n), extra_pct: node_extra(n), door_type: None, special: false, late_access: node_late(n), subgraph: Some(file) })?;
             continue;
         }
         let no = node_orientation(&node.orientation);
@@ -689,7 +696,7 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
         }
         let (c, origin, _) = kept[k].clone();
         let extra_door = extra_door_pick(&slots[n], &fields, rng);
-        grid.stamp(PlacedRoom { path: rooms[c.room].path.clone(), node: Some(n), origin, size: c.size, orientation: c.o, exits: c.exits, extra_door, height: height(n), accessible: node_accessible(n), blocked: node_blocked(n), extra_pct: node_extra(n), door_type: None, special: false, subgraph: None })?;
+        grid.stamp(PlacedRoom { path: rooms[c.room].path.clone(), node: Some(n), origin, size: c.size, orientation: c.o, exits: c.exits, extra_door, height: height(n), accessible: node_accessible(n), blocked: node_blocked(n), extra_pct: node_extra(n), door_type: None, special: false, late_access: node_late(n), subgraph: None })?;
     }
     // Typeless nodes (`0x1420afdd0`): a room size drawn from the size map of the node's first
     // edge type until one fits; the room itself comes later.
@@ -747,7 +754,7 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
             };
             if clear && !(0..graph.nodes.len()).any(swallows) {
                 let extra_door = extra_door_pick(&slots[n], &fields, rng);
-                grid.stamp(PlacedRoom { path: String::new(), node: Some(n), origin, size: (w, h), orientation: 0, exits: Vec::new(), extra_door, height: height(n), accessible: node_accessible(n), blocked: node_blocked(n), extra_pct: node_extra(n), door_type: Some(door.clone()), special: false, subgraph: None })?;
+                grid.stamp(PlacedRoom { path: String::new(), node: Some(n), origin, size: (w, h), orientation: 0, exits: Vec::new(), extra_door, height: height(n), accessible: node_accessible(n), blocked: node_blocked(n), extra_pct: node_extra(n), door_type: Some(door.clone()), special: false, late_access: node_late(n), subgraph: None })?;
                 break;
             }
             let size = list[k].0;
@@ -2149,7 +2156,7 @@ fn fill_placeholders(grid: &mut Grid, list: &[((u32, u32), u32)], door_type: Opt
             }
             let size = chosen.unwrap_or(list[0].0);
             let stamp = if fits(grid, (x, y), size) { size } else { (1, 1) };
-            grid.stamp(PlacedRoom { path: String::new(), node: None, origin: (x, y), size: stamp, orientation: 0, exits: Vec::new(), extra_door: None, height: 0, accessible: false, blocked: chosen.is_none() && stamp == (1, 1) && size != (1, 1), extra_pct: 0, door_type: door_type.clone(), special: false, subgraph: None })?;
+            grid.stamp(PlacedRoom { path: String::new(), node: None, origin: (x, y), size: stamp, orientation: 0, exits: Vec::new(), extra_door: None, height: 0, accessible: false, blocked: chosen.is_none() && stamp == (1, 1) && size != (1, 1), extra_pct: 0, door_type: door_type.clone(), special: false, late_access: false, subgraph: None })?;
             x += size.0 as i32;
         }
     }
@@ -2197,7 +2204,7 @@ fn paired_rooms(files: &dyn Files, earlier: &[PlacedRoom], groups: &FileGroups, 
             size = (size.1, size.0);
         }
         rng.below(1);
-        grid.stamp(PlacedRoom { path: lower.clone(), node: None, origin: r.origin, size, orientation: r.orientation, exits: Vec::new(), extra_door: None, height: r.height, accessible: r.accessible, blocked: r.blocked, extra_pct: 0, door_type: None, special: r.special, subgraph: None })?;
+        grid.stamp(PlacedRoom { path: lower.clone(), node: None, origin: r.origin, size, orientation: r.orientation, exits: Vec::new(), extra_door: None, height: r.height, accessible: r.accessible, blocked: r.blocked, extra_pct: 0, door_type: None, special: r.special, late_access: false, subgraph: None })?;
     }
     Ok(())
 }
@@ -2520,7 +2527,7 @@ fn place_special(files: &dyn Files, rooms: &[DungeonRoom], entries: &[usize], gr
         }
         let r = &rooms[si];
         let exits = grid.turned(r.units.0, r.units.1, &r.exits, o);
-        grid.stamp(PlacedRoom { path: r.path.clone(), node: None, origin: pos, size, orientation: o, exits, extra_door: None, height, accessible: true, blocked: false, extra_pct: 0, door_type: None, special: true, subgraph: None })?;
+        grid.stamp(PlacedRoom { path: r.path.clone(), node: None, origin: pos, size, orientation: o, exits, extra_door: None, height, accessible: true, blocked: false, extra_pct: 0, door_type: None, special: true, late_access: false, subgraph: None })?;
         return Ok(Some(grid.rooms.len() - 1));
     }
     if std::env::var_os("POE_DBG_LEAGUE").is_some() {
@@ -2865,7 +2872,7 @@ fn place_filler(rooms: &[DungeonRoom], grid: &mut Grid, pos: (i32, i32), size: (
         let ob = crate::region::pick(list[k].1, rng.below(840));
         let r = &rooms[list[k].0];
         let exits = grid.turned(r.units.0, r.units.1, &r.exits, ob);
-        grid.stamp(PlacedRoom { path: r.path.clone(), node: None, origin: o, size, orientation: ob, exits, extra_door: None, height, accessible, blocked: false, extra_pct: 0, door_type: None, special: false, subgraph: None })?;
+        grid.stamp(PlacedRoom { path: r.path.clone(), node: None, origin: o, size, orientation: ob, exits, extra_door: None, height, accessible, blocked: false, extra_pct: 0, door_type: None, special: false, late_access: false, subgraph: None })?;
         return Ok(true);
     }
     Ok(false)

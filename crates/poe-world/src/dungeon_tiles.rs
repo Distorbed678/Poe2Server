@@ -144,12 +144,15 @@ pub struct GroundCell {
     pub pos: (i32, i32),
     pub ground: Option<String>,
     pub accessible: bool,
+    /// Accessible when listed (the pre-unique room's test, `0x14209c150` entry `+0x10`); the fill
+    /// reads the room flag later (`accessible`).
+    pub early: bool,
     pub height: i32,
 }
 
 /// `0x142097cb0`: a ground-only slot. Its corners take the height where none is set yet, and
 /// each cell is listed with its ground for the fill.
-fn mark_ground(map: &mut TileMap, cells: &mut Vec<GroundCell>, pos: (i32, i32), key: &TileKey, height: i32, accessible: bool) {
+fn mark_ground(map: &mut TileMap, cells: &mut Vec<GroundCell>, pos: (i32, i32), key: &TileKey, height: i32, accessible: bool, early: bool) {
     let (w, h) = (key.size.0 as i32, key.size.1 as i32);
     if let Ok(v) = std::env::var("POE_DBG_MARK") {
         let c: Vec<i32> = v.split(',').filter_map(|s| s.parse().ok()).collect();
@@ -180,7 +183,7 @@ fn mark_ground(map: &mut TileMap, cells: &mut Vec<GroundCell>, pos: (i32, i32), 
                 let p = &map.lattice[map.point_index(x, y)?];
                 (p.flags & 1 != 0).then(|| p.ground.clone()).flatten()
             });
-            cells.push(GroundCell { pos: (x, y), ground, accessible, height });
+            cells.push(GroundCell { pos: (x, y), ground, accessible, early, height });
         }
     }
 }
@@ -656,7 +659,7 @@ impl TilePass<'_> {
                 let height = p.height + low as i32;
                 let flat = feature.is_empty() && key.heights.iter().all(|&v| v == 0) && key.edges.iter().all(Option::is_none) && key.grounds.iter().all(|g| *g == key.grounds[0]);
                 if flat {
-                    mark_ground(map, cells, pos, &key, height, p.accessible);
+                    mark_ground(map, cells, pos, &key, height, p.accessible, p.accessible && !p.late_access);
                     continue;
                 }
                 let border = self.on_border(&feature, &key, (xflag, yflag), (lx, ly), (tw, th));
@@ -679,7 +682,8 @@ impl TilePass<'_> {
                     }
                 }
                 if border {
-                    let mut flags = p.accessible as u8;
+                    // 0x40: accessible when listed (no edgeless typed node rule, `early`).
+                    let mut flags = p.accessible as u8 | if p.accessible && !p.late_access { 0x40 } else { 0 };
                     if xflag != 2 {
                         flags |= 0x10;
                     }
@@ -822,7 +826,7 @@ impl TilePass<'_> {
     fn border(&self, borders: &mut [((i32, i32), Border)], pos: (i32, i32), e: &mut Border, map: &mut TileMap, cells: &mut Vec<GroundCell>, doors: &mut Doors, rng: &mut TerrainRng) -> Result<(), GenError> {
         {
             if e.names.is_empty() && uniform(map, &e.key) {
-                mark_ground(map, cells, pos, &e.key, e.height, e.seen & 1 != 0);
+                mark_ground(map, cells, pos, &e.key, e.height, e.seen & 1 != 0, e.seen & 0x40 != 0);
                 return Ok(());
             }
             let (w, h) = (e.key.size.0 as i32, e.key.size.1 as i32);
@@ -911,7 +915,7 @@ impl TilePass<'_> {
                 }
             }
             if uniform(map, &e.key) {
-                mark_ground(map, cells, pos, &e.key, e.height, e.seen & 1 != 0);
+                mark_ground(map, cells, pos, &e.key, e.height, e.seen & 1 != 0, e.seen & 0x40 != 0);
                 return Ok(());
             }
             if !self.place_border(&e.key, "", pos, e.height, map, rng, Some(&mut *borders))? {

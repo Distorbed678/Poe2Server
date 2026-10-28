@@ -495,7 +495,7 @@ pub fn place_pre_unique(
 ) -> Result<(Vec<PlacedFillRoom>, Vec<(i32, i32)>), GenError> {
     let n = cells.len();
     // `POE_DBG_PU_IN`: the list before the shuffle, like the trace's `preunique_cells` lines.
-    if std::env::var("POE_DBG_PU_IN").is_ok() { for (i, c) in cells.iter().enumerate() { eprintln!("PUIN {i} {} {} {} {}", c.pos.0, c.pos.1, c.accessible as u8, c.height); } }
+    if std::env::var("POE_DBG_PU_IN").is_ok() { for (i, c) in cells.iter().enumerate() { eprintln!("PUIN {i} {} {} {} {}", c.pos.0, c.pos.1, c.early as u8, c.height); } }
     rng.below(n as u32);
     for i in 0..n {
         let k = rng.uniform((n - i) as u32) as usize;
@@ -514,7 +514,7 @@ pub fn place_pre_unique(
         let (x, y) = c.pos;
         if std::env::var("POE_DBG_PREUNIQUE").is_ok() { eprintln!("PU {} cell {:?} o{o} acc {} ground {:?} flags {:?} free {}", ci + 1, c.pos, c.accessible, c.ground, c.ground.as_deref().map(|g| f.map.gt_flags(g)), f.free(x, y, w, h)); }
         let ground_ok = c.ground.as_deref().is_none_or(|g| f.map.gt_flags(g) & 8 != 0);
-        if !(c.accessible && ground_ok) {
+        if !(c.early && ground_ok) {
             continue;
         }
         let (mw, mh) = (f.map.width as i32, f.map.height as i32);
