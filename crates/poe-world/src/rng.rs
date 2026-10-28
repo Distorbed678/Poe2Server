@@ -104,6 +104,10 @@ impl TerrainRng {
         };
         if let Some(log) = &mut self.log {
             log.push((n, v));
+            // `POE_RNG_BT=<draw index>`: where that draw comes from.
+            if std::env::var("POE_RNG_BT").ok().and_then(|s| s.parse::<usize>().ok()).is_some_and(|i| i + 1 == log.len()) {
+                eprintln!("RNG_BT draw {} n={n}\n{}", log.len() - 1, std::backtrace::Backtrace::force_capture());
+            }
         }
         v
     }

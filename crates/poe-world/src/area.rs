@@ -735,11 +735,14 @@ fn generate_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: 
     // `0x141ff7e00` / `0x141ff05f0`: each `graph` node's subgraph is generated after the main
     // graph's fill and de-repetition, straight into its reserved rectangle of the map.
     let mut done: Vec<(Built, (i32, i32), Margins)> = Vec::new();
-    // A subgraph's own `graph` nodes (BossRush_Area1's `_TheForsakenSon.dgr`) are generated right
-    // after it, depth first, into the same map (their origins are relative to the subgraph's grid).
+    // A subgraph's own `graph` nodes (BossRush_Area1's `_TheForsakenSon.dgr`) are generated after the
+    // subgraphs already waiting, into the same map (their origins are relative to the subgraph's grid).
     let mut work: Vec<(String, (i32, i32), (i32, i32))> = std::mem::take(&mut built.subgraphs);
     work.reverse();
     while let Some((file, origin, slot)) = work.pop() {
+        if std::env::var_os("POE_DBG_SUBDRAWS").is_some() {
+            eprintln!("SUBDRAWS {file} starts at draw {}", rng.log.as_ref().map_or(0, |l| l.len()));
+        }
         let mut sub = Graph::parse_bytes(&files.read(&file)?).map_err(|e| data(format!("{file}: {e:?}")))?;
         // Turned like the main graph (`0x141ff05f0` sets the parent's region).
         turn(files, &mut sub, graph.region)?;
@@ -794,8 +797,17 @@ fn generate_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: 
         } else {
             build_tgr(files, &sub, removed, rng, probe, Some((&built.map, at)))?
         };
-        for (f, o, sl) in inner.subgraphs.iter().rev() {
-            work.push((f.clone(), (o.0 + at.0, o.1 + at.1), *sl));
+        // A subgraph's own `graph` nodes queue behind the ones already waiting (BossRush_Area1:
+        // `_TheForsakenSon.dgr`'s `_boss.dgr` comes after `_CaptainRoth.dgr`); `POE_SUB_DEPTH`
+        // generates them right after their parent instead.
+        if std::env::var_os("POE_SUB_DEPTH").is_some() {
+            for (f, o, sl) in inner.subgraphs.iter().rev() {
+                work.push((f.clone(), (o.0 + at.0, o.1 + at.1), *sl));
+            }
+        } else {
+            for (f, o, sl) in inner.subgraphs.iter() {
+                work.insert(0, (f.clone(), (o.0 + at.0, o.1 + at.1), *sl));
+            }
         }
         if std::env::var("POE_DBG").is_ok() {
             eprintln!("DBG subgraph {file} origin {origin:?} margins {m:?} inner {}x{}", inner.map.width, inner.map.height);
