@@ -407,7 +407,21 @@ impl Overlays {
                 }
             }
         }
-        if !covers_whole_pieces(map, (x, y, x + w, y + h)) {
+        // Cells of tiles without a piece (pasted from a subgraph or a fill): their tile size
+        // from the header (`0x141d0dc40` reads every record's tile data).
+        let mut sizes: HashMap<String, (u8, u8)> = HashMap::new();
+        for yy in y..y + h {
+            for xx in x..x + w {
+                if let Some(i) = map.index(xx, yy) {
+                    if let (Some(c), None) = (&map.cells[i], map.piece_at[i]) {
+                        if !sizes.contains_key(&c.path) {
+                            sizes.insert(c.path.clone(), master.header(files, &c.path)?.size);
+                        }
+                    }
+                }
+            }
+        }
+        if !covers_whole_pieces(map, (x, y, x + w, y + h), &sizes) {
             if std::env::var("POE_DBG_OVERLAY").is_ok() { eprintln!("FIT {w}x{h} ({x},{y}) pieces"); }
             return Ok(false);
         }
@@ -713,20 +727,35 @@ impl Candidates {
 }
 
 /// `0x141d0dc40`: the rectangle holds at least one tile and every tile it touches lies inside it.
-fn covers_whole_pieces(map: &TileMap, (x0, y0, x1, y1): (i32, i32, i32, i32)) -> bool {
+fn covers_whole_pieces(map: &TileMap, (x0, y0, x1, y1): (i32, i32, i32, i32), sizes: &HashMap<String, (u8, u8)>) -> bool {
+    if std::env::var("POE_DBG_PIECES").ok().is_some_and(|v| v == format!("{x0},{y0}")) {
+        for y in y0..y1 {
+            for x in x0..x1 {
+                let i = map.index(x, y);
+                eprintln!("PIECECELL ({x},{y}) cell {:?} piece {:?}", i.and_then(|i| map.cells[i].as_ref()).map(|c| (c.path.rsplit('/').next().unwrap_or("").to_string(), c.offset, c.orientation)), i.and_then(|i| map.piece_at[i]).map(|p| (map.pieces[p].x, map.pieces[p].y, map.pieces[p].size, map.pieces[p].orientation)));
+            }
+        }
+    }
     let mut any = false;
     for y in y0..y1 {
         for x in x0..x1 {
             let Some(i) = map.index(x, y) else { continue };
             let Some(cell) = &map.cells[i] else { continue };
             any = true;
-            let Some(p) = map.piece_at[i] else { continue };
-            let piece = &map.pieces[p];
             let (ox, oy) = (x - cell.offset.0 as i32, y - cell.offset.1 as i32);
-            let (w, h) = TileMap::oriented_size(piece.size, piece.orientation);
+            let (w, h) = match map.piece_at[i] {
+                Some(p) => TileMap::oriented_size(map.pieces[p].size, map.pieces[p].orientation),
+                None if std::env::var_os("POE_PIECES_OLD").is_none() => match sizes.get(&cell.path) {
+                    Some(&sz) => TileMap::oriented_size(sz, cell.orientation),
+                    None => continue,
+                },
+                None => continue,
+            };
+            let piece_path = map.piece_at[i].map_or(cell.path.as_str(), |p| map.pieces[p].path.as_str());
+            let piece_o = map.piece_at[i].map_or(cell.orientation, |p| map.pieces[p].orientation);
             if ox < x0 || oy < y0 || ox + w > x1 || oy + h > y1 {
                 if std::env::var("POE_DBG_PIECES").ok().is_some_and(|v| v == format!("{x0},{y0}")) {
-                    eprintln!("PIECES ({x0},{y0})-({x1},{y1}) cell ({x},{y}) piece {} at ({ox},{oy}) {w}x{h} o{}", piece.path, piece.orientation);
+                    eprintln!("PIECES ({x0},{y0})-({x1},{y1}) cell ({x},{y}) piece {piece_path} at ({ox},{oy}) {w}x{h} o{piece_o}");
                 }
                 return false;
             }
