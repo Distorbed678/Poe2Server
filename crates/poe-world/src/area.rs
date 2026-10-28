@@ -718,7 +718,7 @@ fn edge_symmetric(types: &mut TerrainTypes, files: &dyn crate::generate::Files, 
 
 /// The master's keys, with `OuterGroundType` made a full path (like the other file keys it is
 /// relative to the `.tsi` unless it starts with `Metadata/`: `Tiles/water.gt` of MapUniqueLake).
-fn master_entries(bytes: &[u8], tsi_path: &str) -> std::collections::HashMap<String, String> {
+pub(crate) fn master_entries(bytes: &[u8], tsi_path: &str) -> std::collections::HashMap<String, String> {
     let mut tsi = tsi_entries(bytes);
     if let Some(v) = tsi.get_mut("OuterGroundType") {
         if !(v.len() > 9 && v[..9].eq_ignore_ascii_case("metadata/")) {
@@ -1263,6 +1263,19 @@ fn dbg_cell(map: &TileMap, stage: &str) {
             eprintln!("CELL {stage}: {:?}", c.map(|c| (c.path.rsplit('/').next().unwrap_or("").to_string(), c.orientation, c.height)));
         }
     }
+}
+
+/// A graph as the client loads it before laying it out: `.dgr` random offsets and comma-list
+/// room types, existence rolls, `shuffle` and `unique` groups ([`random_offsets`], [`prune`]),
+/// drawing from `rng`. Used by the world-map pin walk ([`crate::map_pins`]), which reads the
+/// graph without generating it.
+pub fn prepared_graph(graph: &Graph, rng: &mut TerrainRng) -> Result<Graph, GenError> {
+    let mut g = graph.clone();
+    if g.dungeon_defaults.is_some() {
+        random_offsets(&mut g, rng);
+    }
+    LETTER_HISTORY.with(|h| h.borrow_mut().clear());
+    Ok(prune(&g, rng)?.0)
 }
 
 fn generate_graph_probed(files: &dyn crate::generate::Files, graph: &Graph, rng: &mut TerrainRng, probe: &mut dyn FnMut(Stage), extra: &[Graph]) -> Result<TileMap, GenError> {
