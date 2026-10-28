@@ -815,7 +815,7 @@ fn generate_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: 
     let mut job_maps: Vec<TileMap> = Vec::new();
     for b in job_built.into_iter().rev() {
         let repair = repair_flag(&[&b]);
-        job_maps.push(finish_dungeon(files, b, &[], repair, rng)?);
+        job_maps.push(finish_dungeon(files, b, &[], &HashMap::new(), &[], repair, rng)?);
     }
     job_maps.reverse();
     // `0x141ff7a10`: the outer fill and outer buffer per graph, the last subgraph first, then the
@@ -849,10 +849,18 @@ fn generate_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: 
             }
         }
     }
+    let mut spill_owner: HashMap<(i32, i32), i16> = HashMap::new();
     let repair = repair_flag(&std::iter::once(&built).chain(done.iter().map(|d| &d.0)).collect::<Vec<_>>());
     // The unbuffered main map lies inside the main master's margins of the final map.
     let main_margins = Margins::parse(&crate::text::decode_utf16(&built.tsi_bytes));
     let main_at = (main_margins.left as i32, main_margins.top as i32);
+    // `0x141ffde60`: a tile's storeys become world units with the `StoreyHeight` of the last graph
+    // region (`0x141d02d60`: main first, then the subgraphs' reserved blocks in the final map)
+    // that holds the tile's corner cell, else the main graph's.
+    let regions: Vec<((i32, i32, i32, i32), i16)> = done
+        .iter()
+        .map(|(inner, origin, m)| ((origin.0 + main_at.0, origin.1 + main_at.1, (inner.map.width + m.left + m.right) as i32, (inner.map.height + m.top + m.bottom) as i32), storey_of(&inner.tsi)))
+        .collect();
     for (mut inner, origin, m) in done.into_iter().rev() {
         if std::env::var("POE_DBG").is_ok() {
             eprintln!("DBG subgraph outer pass origin {:?} size {}x{} pieces {}", origin, inner.map.width, inner.map.height, inner.map.cells.iter().filter(|c| c.is_some()).count());
@@ -874,7 +882,15 @@ fn generate_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: 
                 GenError::Unsupported(s) => GenError::Unsupported(format!("{s} (outer buffer of the subgraph window at {origin:?}, {}x{}, margins {m:?})", w + m.left + m.right, h + m.top + m.bottom)),
                 e => e,
             })?;
+            let spilled: std::collections::HashSet<(i32, i32)> = built.map.spilled_cells().into_iter().collect();
             built.map.paste(&window, origin);
+            // Window cells past the unbuffered main map (into the main margins) keep this
+            // subgraph's storey too (ChayulaLeague_TowerBoss: the window's right strip).
+            for c in built.map.spilled_cells() {
+                if !spilled.contains(&c) {
+                    spill_owner.insert(c, st);
+                }
+            }
         }
         for (i, was) in before.iter().enumerate() {
             if !was && built.map.cells[i].is_some() {
@@ -882,13 +898,14 @@ fn generate_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: 
             }
         }
     }
-    let main = finish_dungeon(files, built, &owner, repair, rng)?;
+    if std::env::var_os("POE_DBG_OWNER").is_some() { eprintln!("OWNER spill {} {:?} map {}x{}", spill_owner.len(), spill_owner.iter().take(4).collect::<Vec<_>>(), built.map.width, built.map.height); }
+    let main = finish_dungeon(files, built, &owner, &spill_owner, &regions, repair, rng)?;
     Ok(append_jobs(main, &job_maps))
 }
 
 /// The tail of a dungeon graph: the outer buffer of its own master, then tile heights in world
 /// units (`owner`: the storey of the subgraph that placed a cell, by cell of the unbuffered map).
-fn finish_dungeon(files: &dyn crate::generate::Files, built: Built, owner: &[Option<i16>], repair: bool, rng: &mut TerrainRng) -> Result<TileMap, GenError> {
+fn finish_dungeon(files: &dyn crate::generate::Files, built: Built, owner: &[Option<i16>], spill_owner: &HashMap<(i32, i32), i16>, regions: &[((i32, i32, i32, i32), i16)], repair: bool, rng: &mut TerrainRng) -> Result<TileMap, GenError> {
     let storey_of = |tsi: &std::collections::HashMap<String, String>| -> i16 { tsi.get("StoreyHeight").and_then(|v| v.trim().parse().ok()).unwrap_or(16) };
     let Built { map, mut master, tsi_bytes, tsi, .. } = built;
     let margins = Margins::parse(&crate::text::decode_utf16(&tsi_bytes));
@@ -904,6 +921,17 @@ fn finish_dungeon(files: &dyn crate::generate::Files, built: Built, owner: &[Opt
         for x in 0..map.width as i32 {
             let (sx, sy) = (x - dx, y - dy);
             let st = if sx >= 0 && sy >= 0 && sx < src_w { owner.get((sy * src_w + sx) as usize).copied().flatten() } else { None };
+            let st = st.or_else(|| spill_owner.get(&(sx, sy)).copied());
+            let st = if std::env::var_os("POE_OLD_OWNER").is_some() {
+                st
+            } else {
+                // By the tile's corner cell.
+                let (ox, oy) = map.index(x, y).and_then(|i| map.cells[i].as_ref()).map_or((x, y), |c| (x - c.offset.0 as i32, y - c.offset.1 as i32));
+                regions.iter().rev().find(|((rx, ry, rw, rh), _)| ox >= *rx && ox < rx + rw && oy >= *ry && oy < ry + rh).map(|r| r.1)
+            };
+            if std::env::var("POE_DBG_CELLST").is_ok_and(|v| v == format!("{x},{y}")) {
+                eprintln!("CELLST {x},{y} s {sx},{sy} st {st:?} raw {:?}", map.index(x, y).and_then(|i| map.cells[i].as_ref()).map(|c| (c.height, c.path.clone())));
+            }
             if let Some(i) = map.index(x, y) {
                 if let Some(c) = map.cells[i].as_mut() {
                     c.height *= st.unwrap_or(storey);

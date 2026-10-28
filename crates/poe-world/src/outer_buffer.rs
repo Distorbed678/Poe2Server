@@ -45,6 +45,8 @@ struct Pass<'a> {
     edges: &'a HashMap<String, EdgeType>,
     w: i32,
     h: i32,
+    /// The master's `OuterGroundType` (the strips' fallback fill tile).
+    outer: Option<String>,
 }
 
 impl Pass<'_> {
@@ -243,6 +245,18 @@ impl Pass<'_> {
         }
         let Some((path, o)) = self.master.first_fill_tile(self.files, g1.as_deref())? else { return Ok(None) };
         let tdt = self.master.header(self.files, &path)?.clone();
+        // `0x141fdbd3d`: with an outer ground, a plain first ground whose fill tile has no ground
+        // of its own (or a non-plain one: `Blank.tdt` from the `default` group) takes the outer
+        // ground's fill tile instead (ChayulaLeague_TowerBoss: `Outskirts_Wall_Fill_Large_01`).
+        let plain = |m: &TileMap, g: &Option<String>| g.as_ref().is_some_and(|g| m.gt_flags(g) & 5 == 0);
+        if let Some(outer) = self.outer.clone().filter(|_| std::env::var_os("POE_STRIP_NO_OUTER").is_none()) {
+            if plain(self.map, g1) && !plain(self.map, &tdt.grounds[0].as_ref().map(|g| g.to_ascii_lowercase())) {
+                if let Some((p2, o2)) = self.master.first_fill_tile(self.files, Some(&outer))? {
+                    let t2 = self.master.header(self.files, &p2)?.clone();
+                    return Ok(Some((p2, t2, if o2 == 8 { 0 } else { o2 })));
+                }
+            }
+        }
         Ok(Some((path, tdt, if o == 8 { 0 } else { o })))
     }
 
@@ -411,6 +425,10 @@ impl Pass<'_> {
                 y += s;
             } else {
                 let (g1, g2) = (self.ground(x, y), self.ground(x, y + 1));
+                if std::env::var_os("POE_DBG_STRIP").is_some() {
+                    let f = |g: &Option<String>| g.as_ref().map(|g| (g.rsplit('/').next().unwrap_or("").to_string(), self.map.gt_flags(g)));
+                    eprintln!("STRIP left y {y} x {x} g1 {:?} g2 {:?}", f(&g1), f(&g2));
+                }
                 let Some((path, tdt, o)) = self.fill_tile(&g1, &g2)? else {
                     y += 1;
                     continue;
@@ -540,7 +558,7 @@ pub fn outer_buffer(
         }
     }
     preload_headers(&map, master, files)?;
-        let mut pass = Pass { map: &mut map, master, files, edges, w: w as i32, h: h as i32 };
+        let mut pass = Pass { map: &mut map, master, files, edges, w: w as i32, h: h as i32, outer: outer_ground.map(str::to_string) };
     pass.extend_lattice(rect);
     pass.below_strip(rect, rng)?;
     pass.above_strip(rect, rng)?;
@@ -578,7 +596,7 @@ pub fn outer_buffer_window(
     }
     let (w, h) = (map.width as i32, map.height as i32);
     preload_headers(map, master, files)?;
-    let mut pass = Pass { map, master, files, edges, w, h };
+    let mut pass = Pass { map, master, files, edges, w, h, outer: outer_ground.map(str::to_string) };
     pass.extend_lattice(rect);
     pass.below_strip(rect, rng)?;
     pass.above_strip(rect, rng)?;
@@ -746,13 +764,25 @@ fn fill_black(map: &mut TileMap, rect: (i32, i32, i32, i32), at: (i32, i32), gro
             eprintln!("cells {y} {}", cells.join(" "));
         }
     }
-    // `0x141fd71c0` rounds.
+    // `0x141fd71c0` rounds. A listed cell whose tile did not fit stays empty, but its record
+    // still takes the height and its 1×1 square's corners are set (ChayulaLeague_TowerBoss: the
+    // raise travels through such a cell to the parent's fill row above a subgraph window).
+    let mut empty_h: HashMap<(i32, i32), i32> = HashMap::new();
+    let empty_levels = std::env::var_os("POE_NO_EMPTY_LEVEL").is_none();
     for _ in 0..15 {
         let mut small = true;
         let mut changes: Vec<((i32, i32), i32)> = Vec::new();
         for &(x, y) in &fixed {
             let ht = crate::generate::middle(&map.tile_corner_heights(x0 + x, y0 + y)).unwrap_or(0);
-            let cur = map.index(x0 + x, y0 + y).and_then(|i| map.cells[i].as_ref()).map_or(0, |c| c.height as i32);
+            let is_empty = map.index(x0 + x, y0 + y).is_some_and(|i| map.cells[i].is_none() && map.piece_at[i].is_none());
+            if is_empty && !empty_levels {
+                continue;
+            }
+            let cur = if is_empty {
+                empty_h.get(&(x, y)).copied().unwrap_or(0)
+            } else {
+                map.index(x0 + x, y0 + y).and_then(|i| map.cells[i].as_ref()).map_or(0, |c| c.height as i32)
+            };
             if ht != cur {
                 changes.push(((x, y), ht));
                 if (ht - cur).abs() > 1 {
@@ -770,6 +800,14 @@ fn fill_black(map: &mut TileMap, rect: (i32, i32, i32, i32), at: (i32, i32), gro
         for ((x, y), ht) in changes {
             if map.index(x0 + x, y0 + y).and_then(|i| map.cells[i].as_ref()).is_some_and(|c| c.offset == (0, 0)) {
                 map.set_heights(x0 + x, y0 + y, &tdt, ht as i16);
+            } else if map.index(x0 + x, y0 + y).is_some_and(|i| map.cells[i].is_none() && map.piece_at[i].is_none()) {
+                empty_h.insert((x, y), ht);
+                for (px, py) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+                    if let Some(k) = map.point_index(x0 + x + px, y0 + y + py) {
+                        map.lattice[k].height = ht as i8;
+                        map.lattice[k].flags |= 2;
+                    }
+                }
             }
         }
         if small {
