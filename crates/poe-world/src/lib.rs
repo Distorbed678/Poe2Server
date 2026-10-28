@@ -19,6 +19,7 @@ pub mod generate;
 pub mod graph;
 pub mod hash;
 pub mod lattice;
+pub mod map_pins;
 pub mod outer_buffer;
 pub mod overlay;
 pub mod postunique;

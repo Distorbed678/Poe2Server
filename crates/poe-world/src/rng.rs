@@ -132,8 +132,9 @@ impl TerrainRng {
     }
 }
 
-/// The topology choice's index (`0x141025cf0`): a C `rand`-style LCG seeded with `seed`
-/// (`x = x·1103515245 + 12345`, 15 bits `(x >> 16) & 0x7fff` per step), enough bits for
+/// The topology choice's index (`0x141025cf0`, 0.5.5e.hotfix1 `0x141025ef0`; also the world-map
+/// pin consolidation): a C `rand`-style LCG seeded with `seed` (`x = x·1103515245 + 12345`,
+/// 15 bits `(x >> 16) & 0x7fff` per step, the first step giving the high bits), enough bits for
 /// `n - 1`, values `>= n` rejected; `n < 2` gives 0 without stepping.
 pub fn lcg_index(seed: u32, n: u32) -> u32 {
     if n < 2 {
@@ -142,12 +143,12 @@ pub fn lcg_index(seed: u32, n: u32) -> u32 {
     let bits = 32 - (n - 1).leading_zeros();
     let mut x = seed;
     loop {
-        let (mut v, mut got) = (0u32, 0u32);
-        while got < bits {
+        let (mut v, mut left) = (0u32, bits);
+        while left > 0 {
             x = x.wrapping_mul(1_103_515_245).wrapping_add(12345);
-            let take = (bits - got).min(15);
-            v |= (((x >> 16) & 0x7fff) & ((1 << take) - 1)) << got;
-            got += take;
+            let take = left.min(15);
+            v = (v << take).wrapping_add(((x >> 16) & 0x7fff) & ((1 << take) - 1));
+            left -= take;
         }
         if v < n {
             return v;
