@@ -190,6 +190,9 @@ struct DungeonRoom {
     /// Room data +5: `specialchance N` (default 100).
     chance: u8,
     weight: u32,
+    /// Room data +0x180: the root slot's first set edge (`0x141f99b20` counts a room without a
+    /// non-default door under it; G2_12's `entrance.arm` under `cart_walkway.et`).
+    root_door: Option<String>,
     mask: u8,
     units: (u32, u32),
     exits: Vec<Exit>,
@@ -407,7 +410,11 @@ fn dungeon_room(r: &crate::rooms::RoomDef) -> DungeonRoom {
         eprintln!("BLANKCAND {} tag {:?} armtag {:?} units {units:?} w{} doors {} corners0 {:?} blank {blank}", r.path, r.tag, arm.tag, r.weight, exits.iter().filter(|e| e.door.is_some()).count(), corners[0]);
     }
     let missions = arm.grid.iter().flatten().filter(|sl| matches!(sl, poe_data_tools::file_parsers::arm::types::Slot::K(k) if k.slot_tag.as_deref().is_some_and(|t| t.eq_ignore_ascii_case("missiontile")))).count() as u32;
-    DungeonRoom { path: r.path.clone(), tag: if special { String::new() } else { r.tag.clone() }, generic, unique, special, list, chance, weight: r.weight, mask: r.orientations, units, exits, corners, blank, side: arm.dimensions.side_length, missions }
+    let root_door = match &arm.root_slot {
+        poe_data_tools::file_parsers::arm::types::Slot::K(k) => k.edges.iter().find_map(|e| e.edge.as_ref().map(|s| s.to_ascii_lowercase().replace('\\', "/"))),
+        _ => None,
+    };
+    DungeonRoom { path: r.path.clone(), tag: if special { String::new() } else { r.tag.clone() }, generic, unique, special, list, chance, weight: r.weight, root_door, mask: r.orientations, units, exits, corners, blank, side: arm.dimensions.side_length, missions }
 }
 
 /// The dungeon layout of a pruned `.dgr` graph (`0x1420ac3e0`); `overlap` is the master's
@@ -913,8 +920,17 @@ fn size_map_final(rooms: &[DungeonRoom]) -> Vec<(String, Vec<((u32, u32), u32)>)
             }
         }
         let default = DEFAULT.to_string();
-        if seen.is_empty() && r.exits.iter().any(|e| e.door.is_some()) {
-            seen.push(&default);
+        if seen.is_empty() {
+            if std::env::var_os("POE_SM_OLD_DEFAULT").is_some() {
+                if r.exits.iter().any(|e| e.door.is_some()) {
+                    seen.push(&default);
+                }
+            } else if let Some(d) = r.root_door.as_ref() {
+                seen.push(d);
+            } else if r.exits.iter().any(|e| e.door.is_some()) {
+                // No root edge (older `.arm`s, Programming's `corner_1a.arm`): the default.
+                seen.push(&default);
+            }
         }
         for door in seen {
             let mut sizes = Vec::new();
