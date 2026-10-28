@@ -519,7 +519,7 @@ pub fn outer_buffer(
         (margins.top + region.height) as i32,
     );
     if let Some(g) = outer_ground {
-        fill_black(&mut map, rect, g, repair, master, files)?;
+        fill_black(&mut map, rect, (0, 0), g, repair, master, files)?;
     }
     // `ForceOuterGT`: the margins are not tiled from the border outwards; every empty cell takes
     // the outer ground's first fill tile (the world maps' ring of `black_nofog.tdt`).
@@ -556,6 +556,7 @@ pub fn outer_buffer(
 pub fn outer_buffer_window(
     map: &mut TileMap,
     rect: (i32, i32, i32, i32),
+    at: (i32, i32),
     outer_ground: Option<&str>,
     repair: bool,
     master: &mut Master,
@@ -573,7 +574,7 @@ pub fn outer_buffer_window(
         }
     }
     if let Some(g) = outer_ground {
-        fill_black(map, rect, g, repair, master, files)?;
+        fill_black(map, rect, at, g, repair, master, files)?;
     }
     let (w, h) = (map.width as i32, map.height as i32);
     preload_headers(map, master, files)?;
@@ -588,7 +589,7 @@ pub fn outer_buffer_window(
 
 /// `0x141fd5ff0` on one graph's rectangle of an already embedded map (a subgraph's window):
 /// set corners there count as height-set, then the outer ground's fill.
-pub fn outer_fill(map: &mut TileMap, rect: (i32, i32, i32, i32), ground: &str, repair: bool, master: &mut Master, files: &dyn Files) -> Result<(), GenError> {
+pub fn outer_fill(map: &mut TileMap, rect: (i32, i32, i32, i32), at: (i32, i32), ground: &str, repair: bool, master: &mut Master, files: &dyn Files) -> Result<(), GenError> {
     for y in rect.1..=rect.3 {
         for x in rect.0..=rect.2 {
             if let Some(k) = map.point_index(x, y) {
@@ -598,7 +599,7 @@ pub fn outer_fill(map: &mut TileMap, rect: (i32, i32, i32, i32), ground: &str, r
             }
         }
     }
-    fill_black(map, rect, ground, repair, master, files)
+    fill_black(map, rect, at, ground, repair, master, files)
 }
 
 /// `0x141fd5ff0`: region cells still empty (dungeon grid cells without a room) take the outer
@@ -608,8 +609,10 @@ pub fn outer_fill(map: &mut TileMap, rect: (i32, i32, i32, i32), ground: &str, r
 /// (no `.gt` flag 1), each new tile takes the middle of its cell's set corner heights (cells
 /// without any wait for their neighbours), and then those tiles and the fill's tiles of that
 /// ground are levelled to the middle of their corners, again while some tile moved by more
-/// than one storey (up to 15 rounds).
-fn fill_black(map: &mut TileMap, rect: (i32, i32, i32, i32), ground: &str, repair: bool, master: &mut Master, files: &dyn Files) -> Result<(), GenError> {
+/// than one storey (up to 15 rounds). `at`: where `map`'s origin lies in the final map (a
+/// subgraph's window, the unbuffered main map): the client tests the alignment on the region's
+/// position in the whole map (ChayulaLeague_TowerBoss: a window region at 7,7 is at 11,131).
+fn fill_black(map: &mut TileMap, rect: (i32, i32, i32, i32), at: (i32, i32), ground: &str, repair: bool, master: &mut Master, files: &dyn Files) -> Result<(), GenError> {
     let Some((path, o)) = master.first_fill_tile(files, Some(ground))? else {
         return Err(GenError::Unsupported("no fill tile found for outer fill ground type".into()));
     };
@@ -617,7 +620,7 @@ fn fill_black(map: &mut TileMap, rect: (i32, i32, i32, i32), ground: &str, repai
     let tdt = master.header(files, &path)?.clone();
     let (tw, th) = TileMap::oriented_size(tdt.size, o);
     let (x0, y0, w, h) = (rect.0, rect.1, rect.2 - rect.0, rect.3 - rect.1);
-    let aligned = (tw, th) == (3, 3) && x0 % 3 == 1 && y0 % 3 == 1 && w % 3 == 1 && h % 3 == 1;
+    let aligned = (tw, th) == (3, 3) && (x0 + at.0).rem_euclid(3) == 1 && (y0 + at.1).rem_euclid(3) == 1 && w % 3 == 1 && h % 3 == 1;
     let a = aligned as i32;
     // `0x141fd6990`: inside the region (one cell of slack when aligned) and free.
     let fits = |map: &TileMap, x: i32, y: i32| {
@@ -729,6 +732,19 @@ fn fill_black(map: &mut TileMap, rect: (i32, i32, i32, i32), ground: &str, repai
     }
     if std::env::var_os("POE_DBG_FILL").is_some() {
         eprintln!("fill_black rect {:?} ground {} tile {} fixed {} ({:?}) placed-after-scan {}", rect, ground, path, fixed.len(), &fixed[..fixed.len().min(12)], n_scan_fixed);
+    }
+    // `POE_DBG_LATROWS=y0,y1`: the lattice rows (ground.height.flags, map coordinates) the rounds start from.
+    if let Some((r0, r1)) = std::env::var("POE_DBG_LATROWS").ok().and_then(|v| v.split_once(',').and_then(|(a, b)| Some((a.parse::<i32>().ok()?, b.parse::<i32>().ok()?)))) {
+        eprintln!("latrows rect {rect:?}");
+        for y in r0..=r1 {
+            let row: Vec<String> = (0..=map.width as i32).filter_map(|x| map.point_index(x, y)).map(|k| format!("{}.{}.{}", map.lattice[k].ground.as_deref().map_or("-", |g| g.rsplit('/').next().unwrap_or(g)), map.lattice[k].height, map.lattice[k].flags)).collect();
+            eprintln!("row {y} {}", row.join(" "));
+            let cells: Vec<String> = (0..map.width as i32).map(|x| match map.index(x, y).and_then(|i| map.cells[i].as_ref()) {
+                Some(c) => format!("{}{}{}h{}", c.path.rsplit('/').next().unwrap_or("").chars().take(8).collect::<String>(), c.offset.0, c.offset.1, c.height),
+                None => "-".to_string(),
+            }).collect();
+            eprintln!("cells {y} {}", cells.join(" "));
+        }
     }
     // `0x141fd71c0` rounds.
     for _ in 0..15 {

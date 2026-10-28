@@ -562,7 +562,7 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
         // fill treats its cells as walkable (chest fill rooms are offered; G1_13_2). The rule behind
         // it is not found (`0x142095d90` returns 0 for it, no extra door reaches it); it is derived
         // from the traces (G1_13_2: 1835 of 1842 jobs match with it).
-        (slots[n].is_empty() && !graph.nodes[n].room_type.is_empty())
+        (slots[n].is_empty() && !graph.nodes[n].room_type.is_empty() && { if std::env::var_os("POE_DBG_ACC").is_some() { eprintln!("ACC edgeless node {n} type {} tags {:?}", graph.nodes[n].room_type, graph.nodes[n].tags); } true })
             || slots[n].iter().any(|&e| fields[e].accessible)
             || graph.nodes[n].tags.iter().any(|t| {
                 let t = t.to_ascii_lowercase();

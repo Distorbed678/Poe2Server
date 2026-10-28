@@ -355,6 +355,13 @@ impl Overlays {
         if std::env::var("POE_DBG_OVERLAY").is_ok() {
             eprintln!("COLLECT group {gi} size {:?}", g.key.size);
         }
+        // `POE_DBG_OCC`: the occupancy bytes (low nibble, hex) like the trace's `occupancy` rows.
+        if std::env::var_os("POE_DBG_OCC").is_some() {
+            eprintln!("OCC {}x{}", self.width, self.height);
+            for y in 0..self.height {
+                eprintln!("OCC row {y} {}", (0..self.width).map(|x| format!("{:x}", self.occupied[(y * self.width + x) as usize] & 0xf)).collect::<String>());
+            }
+        }
         let mut stride3 = false;
         for e in g.key.edges.iter().flatten() {
             if types.edge(files, e)?.size == 3 {

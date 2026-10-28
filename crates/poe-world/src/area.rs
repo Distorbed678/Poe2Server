@@ -850,6 +850,9 @@ fn generate_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: 
         }
     }
     let repair = repair_flag(&std::iter::once(&built).chain(done.iter().map(|d| &d.0)).collect::<Vec<_>>());
+    // The unbuffered main map lies inside the main master's margins of the final map.
+    let main_margins = Margins::parse(&crate::text::decode_utf16(&built.tsi_bytes));
+    let main_at = (main_margins.left as i32, main_margins.top as i32);
     for (mut inner, origin, m) in done.into_iter().rev() {
         if std::env::var("POE_DBG").is_ok() {
             eprintln!("DBG subgraph outer pass origin {:?} size {}x{} pieces {}", origin, inner.map.width, inner.map.height, inner.map.cells.iter().filter(|c| c.is_some()).count());
@@ -861,13 +864,13 @@ fn generate_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: 
         if m.top + m.right + m.bottom + m.left == 0 {
             if let Some(g) = g {
                 let rect = (origin.0, origin.1, origin.0 + w as i32, origin.1 + h as i32);
-                crate::outer_buffer::outer_fill(&mut built.map, rect, &g, repair, &mut inner.master, files)?;
+                crate::outer_buffer::outer_fill(&mut built.map, rect, main_at, &g, repair, &mut inner.master, files)?;
             }
         } else {
             let mut window = built.map.window(origin, w + m.left + m.right, h + m.top + m.bottom);
             let rect = (m.left as i32, m.top as i32, (m.left + w) as i32, (m.top + h) as i32);
             let edges = inner.master.edge_type_table(files)?;
-            crate::outer_buffer::outer_buffer_window(&mut window, rect, g.as_deref(), repair, &mut inner.master, files, &edges, rng).map_err(|e| match e {
+            crate::outer_buffer::outer_buffer_window(&mut window, rect, (main_at.0 + origin.0, main_at.1 + origin.1), g.as_deref(), repair, &mut inner.master, files, &edges, rng).map_err(|e| match e {
                 GenError::Unsupported(s) => GenError::Unsupported(format!("{s} (outer buffer of the subgraph window at {origin:?}, {}x{}, margins {m:?})", w + m.left + m.right, h + m.top + m.bottom)),
                 e => e,
             })?;
