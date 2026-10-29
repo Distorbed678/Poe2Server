@@ -124,6 +124,7 @@ async fn main() -> anyhow::Result<()> {
         live: Default::default(),
         actors: Default::default(),
         mods: mods.clone(),
+        layouts: Default::default(),
     });
 
     let (web_lifecycle, mut shutdown_requests) = poe_web_api::Lifecycle::new();

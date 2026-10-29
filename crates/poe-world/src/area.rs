@@ -142,7 +142,7 @@ pub fn generate(gd: &GameData, area_id: &str, seed: u32) -> Result<Generated, Ge
 
 /// A layout choice the server makes for the client: `map_force_topology` (1-based index into
 /// [`topologies`]) and `map_force_orientation` (stat value − 1).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct Forced {
     pub topology: Option<u32>,
     pub orientation: Option<u8>,
@@ -241,12 +241,43 @@ pub fn generate_probed_files(gd: &GameData, files: &dyn crate::generate::Files, 
     generate_stated(gd, files, area_id, rng, forced, &mut PinState::default(), probe)
 }
 
-/// [`generate_probed_files`] with the client's generation state for the natural choice
-/// ([`crate::map_dirs`]): its seed (world `+0x4b0`, the load's instance word) and its direction
-/// list; a town or kind-2 area rebuilds the list, a natural pick writes its keys back. The client
-/// starts each load with an empty list, so [`PinState::default`] with the seed is what it does.
-pub fn generate_stated(gd: &GameData, files: &dyn crate::generate::Files, area_id: &str, rng: &mut TerrainRng, forced: Option<Forced>, state: &mut PinState, probe: &mut dyn FnMut(Stage)) -> Result<Generated, GenError> {
-    let forced = forced.unwrap_or_default();
+/// The layout an area's generation uses: its graph, the graph's orientation mask, the
+/// topology as `map_force_topology` numbers it (1-based in the raw list) and the region
+/// orientation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Choice {
+    pub path: String,
+    pub mask: u8,
+    pub topology: u32,
+    pub orientation: u8,
+}
+
+/// What the instance server forces for a new instance (WP7.13): the topology and orientation
+/// `generate` picks for `area_id` and `seed` with `forced` (either side may be set; the rest is
+/// the client's natural choice, [`crate::map_dirs`], with a fresh generation state of seed 0),
+/// without generating the map. Forcing the result gives the same layout as not forcing it: the
+/// client makes the same sub-seed draw either way (`0x141ff9280`).
+pub fn choose_layout(gd: &GameData, files: &dyn crate::generate::Files, area_id: &str, seed: u32, forced: Forced) -> Result<Forced, GenError> {
+    let c = choose(gd, files, area_id, &mut TerrainRng::new(seed), forced, &mut PinState::default())?.0;
+    Ok(Forced { topology: Some(c.topology), orientation: Some(c.orientation) })
+}
+
+/// The 1-based raw-list index (`map_force_topology`) of entry `k` of the mode-1 list
+/// ([`topology_entries`]).
+fn raw_index(gd: &GameData, area_id: &str, k: usize) -> Result<u32, GenError> {
+    let raw = raw_topology_entries(gd, area_id)?;
+    let mode = if raw.iter().any(|e| e.2 == 1) { 1 } else { 0x39 };
+    raw.iter()
+        .enumerate()
+        .filter(|(_, e)| e.2 == mode)
+        .nth(k)
+        .map(|(i, _)| i as u32 + 1)
+        .ok_or_else(|| data(format!("{area_id}: no topology {k} in the mode-filtered list")))
+}
+
+/// The prologue of `TerrainGen_Run` up to the layout choice (`0x141ff9280`): hideouts draw
+/// nothing, league rolls, the natural candidates, the sub-seed draw, the pick.
+fn choose(gd: &GameData, files: &dyn crate::generate::Files, area_id: &str, rng: &mut TerrainRng, forced: Forced, state: &mut PinState) -> Result<(Choice, crate::league::Rolled), GenError> {
     // `TerrainGen_Run` seeds with `disabled` set for hideouts (WorldAreas `IsHideout`, row
     // +0x12a): every draw then returns its lower bound.
     if poe_data::views::WorldArea::find(gd, area_id).ok().flatten().is_some_and(|a| a.is_hideout) {
@@ -272,11 +303,11 @@ pub fn generate_stated(gd: &GameData, files: &dyn crate::generate::Files, area_i
     // main stream is not touched. With candidates it picks one (`lcg_index`), else
     // `0x141ff90f0` draws from the whole list.
     let sub = if area_kind(gd, area_id) == Some(0x21) { state.seed } else { rng.below(u32::MAX) };
-    let (dgr, mask, picked) = match forced.topology {
+    let (dgr, mask, topology, picked) = match forced.topology {
         Some(f) if f >= 1 => {
             let raw = raw_topology_entries(gd, area_id)?;
             let e = raw.get(f as usize - 1).ok_or_else(|| data(format!("{area_id}: cannot force topology {f}: only {} topologies", raw.len())))?;
-            (e.0.clone(), e.1, None)
+            (e.0.clone(), e.1, f, None)
         }
         _ if !natural.is_empty() => {
             let c = natural[lcg_index(sub, natural.len() as u32) as usize];
@@ -284,17 +315,28 @@ pub fn generate_stated(gd: &GameData, files: &dyn crate::generate::Files, area_i
                 crate::map_dirs::write_back(gd, row, &mut state.dirs, c.topology, 1)?;
             }
             let (path, mask) = graphs.get(c.topology).cloned().ok_or_else(|| data(format!("{area_id}: natural topology {} out of range", c.topology)))?;
-            (path, mask, Some(c.orientation))
+            (path, mask, raw_index(gd, area_id, c.topology)?, Some(c.orientation))
         }
         _ => {
-            let (path, mask) = graphs[lcg_index(sub, graphs.len() as u32) as usize].clone();
-            (path, mask, None)
+            let k = lcg_index(sub, graphs.len() as u32) as usize;
+            let (path, mask) = graphs[k].clone();
+            (path, mask, raw_index(gd, area_id, k)?, None)
         }
     };
     // Region orientation: forced, else the natural candidate's. Without a candidate the client
     // draws it from the topology's list with the same sub-seed (`0x141ff90f0`:
     // `region::pick(mask, lcg_index(sub, 0x348))`).
     let orientation = forced.orientation.filter(|&o| o < 8).or(picked).unwrap_or_else(|| crate::region::pick(mask, lcg_index(sub, 0x348)));
+    Ok((Choice { path: dgr, mask, topology, orientation }, rolled))
+}
+
+/// [`generate_probed_files`] with the client's generation state for the natural choice
+/// ([`crate::map_dirs`]): its seed (world `+0x4b0`, the load's instance word) and its direction
+/// list; a town or kind-2 area rebuilds the list, a natural pick writes its keys back. The client
+/// starts each load with an empty list, so [`PinState::default`] with the seed is what it does.
+pub fn generate_stated(gd: &GameData, files: &dyn crate::generate::Files, area_id: &str, rng: &mut TerrainRng, forced: Option<Forced>, state: &mut PinState, probe: &mut dyn FnMut(Stage)) -> Result<Generated, GenError> {
+    let forced = forced.unwrap_or_default();
+    let (Choice { path: dgr, orientation, .. }, rolled) = choose(gd, files, area_id, rng, forced, state)?;
     let mut graph = Graph::parse_bytes(&files.read(&dgr)?).map_err(|e| data(format!("{dgr}: {e:?}")))?;
     turn(files, &mut graph, orientation)?;
     // `ShipPlugin` (`0x141f03c40` via `0x141ff9860` / `0x141ff89e0`): the plugin adds the `G4_ship`

@@ -30,6 +30,7 @@ pub mod social;
 mod spawn;
 pub mod sync;
 pub mod terrain_store;
+
 #[cfg(test)]
 mod actor_tests;
 #[cfg(test)]
@@ -83,6 +84,9 @@ pub struct InstanceServer {
     pub actors: Arc<actor::Actors>,
     /// The server's mods (events, commands, the login check of the client's mods).
     pub mods: Arc<poe_mod_host::ModHost>,
+    /// Layouts the server chose (`[terrain] force_layout`), by area, seed and what the instance
+    /// forces.
+    pub layouts: LayoutCache,
 }
 
 impl InstanceServer {
@@ -658,6 +662,19 @@ impl InstanceServer {
         }
     }
 
+    /// What instance `instance` forces itself (`transfer ... topology orientation`) and whether
+    /// the server completes it with its own choice (`[terrain] force_layout`); resolve it with
+    /// [`resolve_layout`] off the async threads.
+    fn layout_request(&self, instance: Option<u32>) -> LayoutRequest {
+        let spec = instance.and_then(|id| self.instances.get(id)).map(|i| i.spec);
+        LayoutRequest {
+            data: self.data.clone(),
+            cache: self.layouts.clone(),
+            given: poe_world::area::Forced { topology: spec.as_ref().and_then(|s| s.topology), orientation: spec.as_ref().and_then(|s| s.orientation) },
+            choose: self.config.terrain.force_layout,
+        }
+    }
+
     /// The collision grid the server generates for the instance's layout (`[terrain]
     /// generated_grid`): `poe-world` makes the `PWG1` bytes and `poe-game` reads them, so the
     /// two crates stay independent (docs/architecture/instance-world.md in the hub). `None` when the generator
@@ -665,12 +682,10 @@ impl InstanceServer {
     async fn generated_grid(&self, area: &str, seed: u32, client_hash: u32, instance: Option<u32>) -> Option<spawn::Grid> {
         let data = self.data.clone();
         let area = area.to_string();
-        let forced = instance
-            .and_then(|id| self.instances.get(id))
-            .filter(|i| i.spec.topology.is_some() || i.spec.orientation.is_some())
-            .map(|i| poe_world::area::Forced { topology: i.spec.topology, orientation: i.spec.orientation });
+        let request = self.layout_request(instance);
         let started = std::time::Instant::now();
         let result = tokio::task::spawn_blocking(move || {
+            let forced = resolve_layout(&request, &area, seed);
             let mut rng = poe_world::rng::TerrainRng::new(seed);
             let g = poe_world::area::generate_with(&data, &area, &mut rng, forced).map_err(|e| e.to_string())?;
             let ours = g.map.tile_hash();
@@ -703,11 +718,9 @@ impl InstanceServer {
         let data = self.data.clone();
         let area = area.to_string();
         // The instance's forced layout, as sent in AreaInfo.
-        let forced = instance
-            .and_then(|id| self.instances.get(id))
-            .filter(|i| i.spec.topology.is_some() || i.spec.orientation.is_some())
-            .map(|i| poe_world::area::Forced { topology: i.spec.topology, orientation: i.spec.orientation });
+        let request = self.layout_request(instance);
         tokio::task::spawn_blocking(move || {
+            let forced = resolve_layout(&request, &area, seed);
             let started = std::time::Instant::now();
             let mut rng = poe_world::rng::TerrainRng::new(seed);
             match poe_world::area::generate_with(&data, &area, &mut rng, forced) {
@@ -832,14 +845,18 @@ impl InstanceServer {
             // The first player decides an instance's seed; later ones share it.
             self.instances.settle_seed(instance_id, seed).unwrap_or(seed)
         };
-        // A forced layout (`transfer ... topology orientation`): the generator reads
-        // `map_force_topology` (1-based) and `map_force_orientation` (orientation + 1).
-        let spec = self.instances.get(instance_id).map(|i| i.spec);
+        // The layout (`transfer ... topology orientation`, else the server's own choice with
+        // `[terrain] force_layout`): the generator reads `map_force_topology` (1-based) and
+        // `map_force_orientation` (orientation + 1).
+        let layout = {
+            let (request, area_id) = (self.layout_request(Some(instance_id)), area.id.clone());
+            tokio::task::spawn_blocking(move || resolve_layout(&request, &area_id, seed)).await?
+        };
         let mut forced = Vec::new();
-        if let Some(t) = spec.as_ref().and_then(|s| s.topology) {
+        if let Some(t) = layout.and_then(|l| l.topology) {
             forced.push((self.stat_key("map_force_topology")?, t as i32));
         }
-        if let Some(o) = spec.as_ref().and_then(|s| s.orientation) {
+        if let Some(o) = layout.and_then(|l| l.orientation) {
             forced.push((self.stat_key("map_force_orientation")?, o as i32 + 1));
         }
         let msg = AreaInfo {
@@ -1552,4 +1569,40 @@ fn load_inventories(path: &std::path::Path) -> Vec<(u32, Inventory)> {
             ))
         })
         .collect()
+}
+
+/// Cache of [`resolve_layout`] results by (area, seed, what the instance forces).
+pub type LayoutCache = Arc<std::sync::Mutex<std::collections::HashMap<(String, u32, poe_world::area::Forced), Option<poe_world::area::Forced>>>>;
+
+/// See [`InstanceServer::layout_request`].
+struct LayoutRequest {
+    data: Arc<GameData>,
+    cache: LayoutCache,
+    given: poe_world::area::Forced,
+    choose: bool,
+}
+
+/// The layout an instance loads with, as AreaInfo forces it (WP7.13): what the instance forces,
+/// completed with the generator's natural choice (`poe_world::area::choose_layout`, equal to the
+/// client's own) when `[terrain] force_layout` is on. `None` when nothing is forced (the client
+/// chooses). The choice is the same with and without forcing it, so this only makes client and
+/// server agree by construction.
+fn resolve_layout(r: &LayoutRequest, area: &str, seed: u32) -> Option<poe_world::area::Forced> {
+    let given = (r.given.topology.is_some() || r.given.orientation.is_some()).then_some(r.given);
+    if !r.choose {
+        return given;
+    }
+    let key = (area.to_string(), seed, r.given);
+    if let Some(f) = r.cache.lock().unwrap().get(&key) {
+        return *f;
+    }
+    let chosen = match poe_world::area::choose_layout(&r.data, r.data.files(), area, seed, r.given) {
+        Ok(f) => Some(f),
+        Err(e) => {
+            warn!(%area, seed, "no server layout choice, the client chooses: {e}");
+            given
+        }
+    };
+    r.cache.lock().unwrap().insert(key, chosen);
+    chosen
 }

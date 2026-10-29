@@ -502,8 +502,15 @@ fn default_web_token_ttl() -> u64 {
 
 /// Server-side terrain generation (`poe-world`). The client always builds the terrain itself
 /// from the area and seed; the server's copy is for collision, pathing and spawns later.
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct TerrainConfig {
+    /// Send every new instance's layout (topology and region orientation) to the client as
+    /// `map_force_topology` / `map_force_orientation`, chosen by the server's generator
+    /// (`poe_world::area::choose_layout`, the client's own natural choice), unless the instance
+    /// forces one itself. Client and server then agree on the layout by construction. Off: the
+    /// client chooses alone (as before).
+    #[serde(default = "default_true")]
+    pub force_layout: bool,
     /// Generate each new instance's terrain on the server and compare its tile hash with the
     /// client's. Off by default until the generator covers every area.
     #[serde(default)]
@@ -514,6 +521,12 @@ pub struct TerrainConfig {
     /// default until the generator covers every area.
     #[serde(default)]
     pub generated_grid: bool,
+}
+
+impl Default for TerrainConfig {
+    fn default() -> Self {
+        Self { force_layout: true, generate: false, generated_grid: false }
+    }
 }
 
 /// Cluster identity. Login tokens carry the id of the cluster that issued them, so a token
