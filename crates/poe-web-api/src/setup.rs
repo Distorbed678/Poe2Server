@@ -28,7 +28,12 @@ impl<S: Send + Sync> FromRequestParts<S> for Peer {
     type Rejection = std::convert::Infallible;
 
     async fn from_request_parts(parts: &mut Parts, _: &S) -> Result<Self, Self::Rejection> {
-        Ok(Self(parts.extensions.get::<ConnectInfo<SocketAddr>>().map(|c| c.0)))
+        Ok(Self(
+            parts
+                .extensions
+                .get::<ConnectInfo<SocketAddr>>()
+                .map(|c| c.0),
+        ))
     }
 }
 
@@ -96,7 +101,10 @@ pub async fn create(
     })
     .await??;
     tracing::info!(account = %account.username, "first admin created through the web admin setup");
-    Ok((StatusCode::CREATED, Json(issue(&s, account, TokenKind::Web).await?)))
+    Ok((
+        StatusCode::CREATED,
+        Json(issue(&s, account, TokenKind::Web).await?),
+    ))
 }
 
 #[cfg(test)]

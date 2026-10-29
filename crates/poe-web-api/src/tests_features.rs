@@ -1914,11 +1914,15 @@ async fn call_from(
     };
     let mut req = req.body(body).unwrap();
     let addr: std::net::SocketAddr = peer.parse().unwrap();
-    req.extensions_mut().insert(axum::extract::ConnectInfo(addr));
+    req.extensions_mut()
+        .insert(axum::extract::ConnectInfo(addr));
     let res = f.app.clone().oneshot(req).await.unwrap();
     let status = res.status();
     let bytes = res.into_body().collect().await.unwrap().to_bytes();
-    (status, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+    )
 }
 
 #[tokio::test]
@@ -1931,21 +1935,51 @@ async fn first_admin_is_made_once_and_only_from_this_computer() {
     assert_eq!(body["local"], true);
     // From another computer: not even told whether the server is empty.
     let (_, body) = call_from(&f, "GET", "/api/v1/setup", "192.168.1.9:4000", &[], None).await;
-    assert_eq!((body["needed"].clone(), body["local"].clone()), (json!(false), json!(false)));
+    assert_eq!(
+        (body["needed"].clone(), body["local"].clone()),
+        (json!(false), json!(false))
+    );
     let new = json!({"username": "boss", "password": "correct horse"});
-    let (st, _) = call_from(&f, "POST", "/api/v1/setup", "192.168.1.9:4000", &[], Some(new.clone())).await;
+    let (st, _) = call_from(
+        &f,
+        "POST",
+        "/api/v1/setup",
+        "192.168.1.9:4000",
+        &[],
+        Some(new.clone()),
+    )
+    .await;
     assert_eq!(st, StatusCode::FORBIDDEN);
     // Through a proxy on this computer: refused too.
-    let (st, _) = call_from(&f, "POST", "/api/v1/setup", local, &[("x-forwarded-for", "203.0.113.5")], Some(new.clone())).await;
+    let (st, _) = call_from(
+        &f,
+        "POST",
+        "/api/v1/setup",
+        local,
+        &[("x-forwarded-for", "203.0.113.5")],
+        Some(new.clone()),
+    )
+    .await;
     assert_eq!(st, StatusCode::FORBIDDEN);
-    let (st, _) = call_from(&f, "POST", "/api/v1/setup", local, &[], Some(json!({"username": "boss", "password": "short"}))).await;
+    let (st, _) = call_from(
+        &f,
+        "POST",
+        "/api/v1/setup",
+        local,
+        &[],
+        Some(json!({"username": "boss", "password": "short"})),
+    )
+    .await;
     assert_eq!(st, StatusCode::BAD_REQUEST);
     let (st, body) = call_from(&f, "POST", "/api/v1/setup", local, &[], Some(new.clone())).await;
     assert_eq!(st, StatusCode::CREATED, "{body}");
     assert_eq!(body["account"]["role"], "admin");
     let token = body["token"].as_str().unwrap().to_owned();
     let (st, me) = f.call("GET", "/api/v1/me", Some(&token), None).await;
-    assert_eq!((st, me["username"].clone()), (StatusCode::OK, json!("boss")));
+    assert_eq!(
+        (st, me["username"].clone()),
+        (StatusCode::OK, json!("boss"))
+    );
     // Once an account exists the setup is over.
     let (_, body) = call_from(&f, "GET", "/api/v1/setup", local, &[], None).await;
     assert_eq!(body["needed"], false);
@@ -1959,19 +1993,67 @@ async fn admins_create_accounts() {
     let f = fixture();
     let t = admin(&f).await;
     let t = Some(t.as_str());
-    let (st, body) = f.call("POST", "/api/v1/admin/accounts", t, Some(json!({"username": "bob", "password": "correct horse"}))).await;
+    let (st, body) = f
+        .call(
+            "POST",
+            "/api/v1/admin/accounts",
+            t,
+            Some(json!({"username": "bob", "password": "correct horse"})),
+        )
+        .await;
     assert_eq!(st, StatusCode::CREATED, "{body}");
-    assert_eq!((body["username"].clone(), body["role"].clone()), (json!("bob"), json!("player")));
-    let (st, body) = f.call("POST", "/api/v1/admin/accounts", t, Some(json!({"username": "eve", "password": "correct horse", "role": "admin"}))).await;
-    assert_eq!((st, body["role"].clone()), (StatusCode::CREATED, json!("admin")));
-    let (st, _) = f.call("POST", "/api/v1/admin/accounts", t, Some(json!({"username": "bob", "password": "correct horse"}))).await;
+    assert_eq!(
+        (body["username"].clone(), body["role"].clone()),
+        (json!("bob"), json!("player"))
+    );
+    let (st, body) = f
+        .call(
+            "POST",
+            "/api/v1/admin/accounts",
+            t,
+            Some(json!({"username": "eve", "password": "correct horse", "role": "admin"})),
+        )
+        .await;
+    assert_eq!(
+        (st, body["role"].clone()),
+        (StatusCode::CREATED, json!("admin"))
+    );
+    let (st, _) = f
+        .call(
+            "POST",
+            "/api/v1/admin/accounts",
+            t,
+            Some(json!({"username": "bob", "password": "correct horse"})),
+        )
+        .await;
     assert_eq!(st, StatusCode::CONFLICT);
-    let (st, _) = f.call("POST", "/api/v1/admin/accounts", t, Some(json!({"username": "zed", "password": "x"}))).await;
+    let (st, _) = f
+        .call(
+            "POST",
+            "/api/v1/admin/accounts",
+            t,
+            Some(json!({"username": "zed", "password": "x"})),
+        )
+        .await;
     assert_eq!(st, StatusCode::BAD_REQUEST);
-    let (st, _) = f.call("POST", "/api/v1/admin/accounts", t, Some(json!({"username": "zed", "password": "correct horse", "role": "god"}))).await;
+    let (st, _) = f
+        .call(
+            "POST",
+            "/api/v1/admin/accounts",
+            t,
+            Some(json!({"username": "zed", "password": "correct horse", "role": "god"})),
+        )
+        .await;
     assert_eq!(st, StatusCode::BAD_REQUEST);
     let p = player(&f).await;
-    let (st, _) = f.call("POST", "/api/v1/admin/accounts", Some(&p), Some(json!({"username": "zed", "password": "correct horse"}))).await;
+    let (st, _) = f
+        .call(
+            "POST",
+            "/api/v1/admin/accounts",
+            Some(&p),
+            Some(json!({"username": "zed", "password": "correct horse"})),
+        )
+        .await;
     assert_eq!(st, StatusCode::FORBIDDEN);
 }
 
@@ -1979,10 +2061,26 @@ async fn admins_create_accounts() {
 async fn local_metrics_only_for_this_computer() {
     let f = fixture();
     f.state.metrics.push(sample(1000, 3));
-    let (st, body) = call_from(&f, "GET", "/api/v1/local/metrics", "127.0.0.1:4000", &[], None).await;
+    let (st, body) = call_from(
+        &f,
+        "GET",
+        "/api/v1/local/metrics",
+        "127.0.0.1:4000",
+        &[],
+        None,
+    )
+    .await;
     assert_eq!(st, StatusCode::OK, "{body}");
     assert_eq!(body["latest"]["players"], 3);
     assert_eq!(body["latest"]["net_out_bps"], 3400);
-    let (st, _) = call_from(&f, "GET", "/api/v1/local/metrics", "10.0.0.2:4000", &[], None).await;
+    let (st, _) = call_from(
+        &f,
+        "GET",
+        "/api/v1/local/metrics",
+        "10.0.0.2:4000",
+        &[],
+        None,
+    )
+    .await;
     assert_eq!(st, StatusCode::FORBIDDEN);
 }

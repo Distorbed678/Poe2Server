@@ -400,12 +400,18 @@ pub async fn create_account(
 ) -> Result<(StatusCode, Json<AccountInfo>), ApiError> {
     let role = match req.role.as_deref() {
         None => Role::Player,
-        Some(r) => Role::parse(r).ok_or_else(|| ApiError::bad_request("role must be player or admin"))?,
+        Some(r) => {
+            Role::parse(r).ok_or_else(|| ApiError::bad_request("role must be player or admin"))?
+        }
     };
     crate::public::check_password(&req.password)?;
     let accounts = s.accounts.clone();
     let account = blocking(move || {
-        accounts.create_account(&req.username, &poe_accounts::password_digest(&req.password), role)
+        accounts.create_account(
+            &req.username,
+            &poe_accounts::password_digest(&req.password),
+            role,
+        )
     })
     .await??;
     tracing::info!(account = %account.username, role = role.as_str(), by = %who.account.username, "account created through the web admin");

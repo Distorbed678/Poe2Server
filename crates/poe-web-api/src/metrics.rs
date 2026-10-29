@@ -147,7 +147,9 @@ pub async fn local(
     headers: axum::http::HeaderMap,
 ) -> Result<Json<LocalMetrics>, ApiError> {
     if !crate::setup::is_local(peer, &headers) {
-        return Err(ApiError::forbidden("only for the computer the server runs on"));
+        return Err(ApiError::forbidden(
+            "only for the computer the server runs on",
+        ));
     }
     let enabled = s.config.metrics.enabled;
     let latest = if enabled {
