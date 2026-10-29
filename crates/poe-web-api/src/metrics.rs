@@ -47,6 +47,9 @@ pub struct MetricsPoint {
     /// CPU use of the server process, percent of one core; absent for the first sample and on
     /// platforms where it is unknown.
     pub cpu_pct: Option<f32>,
+    /// Network traffic of the game connections in bytes per second (TCP payload in and out).
+    pub net_in_bps: u64,
+    pub net_out_bps: u64,
 }
 
 impl From<poe_cluster::Sample> for MetricsPoint {
@@ -61,6 +64,8 @@ impl From<poe_cluster::Sample> for MetricsPoint {
             tick_max_us: s.tick_max_us,
             rss_bytes: s.rss_bytes,
             cpu_pct: s.cpu_pct,
+            net_in_bps: s.net_in_bps,
+            net_out_bps: s.net_out_bps,
         }
     }
 }

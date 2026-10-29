@@ -20,6 +20,7 @@ mod mods;
 mod openapi;
 pub mod webadmin;
 mod public;
+mod setup;
 pub mod scheduler;
 mod webtoken;
 
@@ -93,6 +94,7 @@ pub fn router(state: WebState) -> Router {
         .route("/server", get(public::server))
         .route("/mods/{id}/{file}", get(mods::package))
         .route("/register", post(public::register))
+        .route("/setup", get(setup::status).post(setup::create))
         .route("/login", post(public::login))
         .route("/logout", post(public::logout))
         .route("/password", post(public::password))
@@ -143,7 +145,7 @@ pub fn router(state: WebState) -> Router {
         .route("/admin/server/restart", post(admin::server_restart))
         .route("/admin/server/cancel", post(admin::server_cancel))
         .route("/admin/server/shutdown", get(admin::server_shutdown))
-        .route("/admin/accounts", get(admin::accounts))
+        .route("/admin/accounts", get(admin::accounts).post(admin::create_account))
         .route(
             "/admin/accounts/{name}/disable",
             post(admin::disable_account),

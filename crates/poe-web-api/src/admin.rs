@@ -388,6 +388,30 @@ pub async fn accounts(
     Ok(Json(list.into_iter().map(Into::into).collect()))
 }
 
+/// Creates an account (role `player` unless `admin` is given). The password is checked like a
+/// registration's; `409` when the name is taken.
+#[utoipa::path(post, path = "/api/v1/admin/accounts", tag = "admin", security(("bearer" = [])),
+    request_body = CreateAccountRequest,
+    responses((status = 201, body = AccountInfo), (status = 400, body = crate::ErrorBody), (status = 401, body = crate::ErrorBody), (status = 403, body = crate::ErrorBody), (status = 409, description = "name taken", body = crate::ErrorBody)))]
+pub async fn create_account(
+    State(s): State<WebState>,
+    AdminAuth(who): AdminAuth,
+    ApiJson(req): ApiJson<CreateAccountRequest>,
+) -> Result<(StatusCode, Json<AccountInfo>), ApiError> {
+    let role = match req.role.as_deref() {
+        None => Role::Player,
+        Some(r) => Role::parse(r).ok_or_else(|| ApiError::bad_request("role must be player or admin"))?,
+    };
+    crate::public::check_password(&req.password)?;
+    let accounts = s.accounts.clone();
+    let account = blocking(move || {
+        accounts.create_account(&req.username, &poe_accounts::password_digest(&req.password), role)
+    })
+    .await??;
+    tracing::info!(account = %account.username, role = role.as_str(), by = %who.account.username, "account created through the web admin");
+    Ok((StatusCode::CREATED, Json(account.into())))
+}
+
 /// Runs `account <action> <name> [value]` through the registry and returns the account.
 async fn account_action(
     s: &WebState,

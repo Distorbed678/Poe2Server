@@ -1982,6 +1982,7 @@ dependencies = [
  "poe-data",
  "poe-game",
  "poe-mod-host",
+ "poe-net",
  "poe-proto",
  "poe-store",
  "poe-web-api",

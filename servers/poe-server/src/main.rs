@@ -129,7 +129,7 @@ async fn main() -> anyhow::Result<()> {
 
     let (web_lifecycle, mut shutdown_requests) = poe_web_api::Lifecycle::new();
     // Dashboard charts: a sampler fills the ring buffer (players, instances, frame time of the
-    // instance actors, memory and CPU of this process).
+    // instance actors, memory and CPU of this process, network traffic of the game connections).
     let metrics = Arc::new(poe_cluster::Metrics::new(
         config.metrics.interval_secs,
         config.metrics.retention_hours * 3600,
@@ -145,7 +145,8 @@ async fn main() -> anyhow::Result<()> {
                     .duration_since(std::time::UNIX_EPOCH)
                     .map_or(0, |d| d.as_millis() as i64)
             }),
-        )));
+        )
+        .with_net_counter(Arc::new(|| (poe_net::stats::bytes_in(), poe_net::stats::bytes_out())))));
     }
     // Scheduled tasks (scheduled restarts), in the server's local time zone.
     let scheduler = Arc::new(poe_web_api::scheduler::Scheduler::new(

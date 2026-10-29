@@ -57,6 +57,80 @@
             "bearer": []
           }
         ]
+      },
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Creates an account (role `player` unless `admin` is given). The password is checked like a\nregistration's; `409` when the name is taken.",
+        "operationId": "create_account",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAccountRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountInfo"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "name taken",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
       }
     },
     "/api/v1/admin/accounts/{name}/disable": {
@@ -3189,6 +3263,76 @@
         }
       }
     },
+    "/api/v1/setup": {
+      "get": {
+        "tags": [
+          "public"
+        ],
+        "summary": "Whether the server still needs its first admin, and whether this request may create it.",
+        "operationId": "status",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetupStatus"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "public"
+        ],
+        "summary": "Creates the first account, with the admin role, and signs it in (a `web` token, as\n`POST /login` returns). `403` once any account exists or when the request is not a direct\none from this computer.",
+        "operationId": "create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "the server has accounts already, or the request is not from this computer",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/web-token": {
       "post": {
         "tags": [
@@ -3788,6 +3932,31 @@
           }
         }
       },
+      "CreateAccountRequest": {
+        "type": "object",
+        "description": "`POST /admin/accounts`.",
+        "required": [
+          "username",
+          "password"
+        ],
+        "properties": {
+          "password": {
+            "type": "string",
+            "description": "Plain text, at least 8 characters. Use HTTPS outside the local machine."
+          },
+          "role": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`player` (default) or `admin`."
+          },
+          "username": {
+            "type": "string",
+            "description": "3-64 characters from `A-Za-z0-9_.@+-`."
+          }
+        }
+      },
       "CreatedInstance": {
         "type": "object",
         "required": [
@@ -4112,7 +4281,9 @@
           "tick_count",
           "tick_avg_us",
           "tick_max_us",
-          "rss_bytes"
+          "rss_bytes",
+          "net_in_bps",
+          "net_out_bps"
         ],
         "properties": {
           "cpu_pct": {
@@ -4127,6 +4298,17 @@
             "type": "integer",
             "format": "int32",
             "description": "Instances that exist.",
+            "minimum": 0
+          },
+          "net_in_bps": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Network traffic of the game connections in bytes per second (TCP payload in and out).",
+            "minimum": 0
+          },
+          "net_out_bps": {
+            "type": "integer",
+            "format": "int64",
             "minimum": 0
           },
           "occupied": {
@@ -5014,6 +5196,34 @@
           "version": {
             "type": "string",
             "description": "The game client version this server speaks."
+          }
+        }
+      },
+      "SetupStatus": {
+        "type": "object",
+        "description": "`GET /setup`: the first-run state.",
+        "required": [
+          "needed",
+          "local",
+          "open_registration",
+          "name"
+        ],
+        "properties": {
+          "local": {
+            "type": "boolean",
+            "description": "The request came directly from the computer the server runs on."
+          },
+          "name": {
+            "type": "string",
+            "description": "`[gateway] display_name`."
+          },
+          "needed": {
+            "type": "boolean",
+            "description": "The server has no account yet and this request may create the first admin."
+          },
+          "open_registration": {
+            "type": "boolean",
+            "description": "`[accounts] open_registration`: players can create accounts on the register page."
           }
         }
       },

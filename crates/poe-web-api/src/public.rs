@@ -35,7 +35,7 @@ pub async fn blocking<T: Send + 'static>(
         .map_err(ApiError::internal)
 }
 
-fn check_password(password: &str) -> Result<(), ApiError> {
+pub(crate) fn check_password(password: &str) -> Result<(), ApiError> {
     let len = password.chars().count();
     if len < MIN_PASSWORD_LEN {
         return Err(AccountError::WeakPassword.into());
@@ -76,7 +76,7 @@ fn ttl(state: &WebState, kind: TokenKind) -> i64 {
     }
 }
 
-async fn issue(
+pub(crate) async fn issue(
     state: &WebState,
     account: poe_accounts::AccountRecord,
     kind: TokenKind,

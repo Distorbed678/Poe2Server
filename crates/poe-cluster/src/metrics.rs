@@ -80,6 +80,10 @@ pub struct Sample {
     /// CPU use of the server process since the previous sample, in percent of one core (can
     /// exceed 100 with several busy threads); `None` for the first sample and where unknown.
     pub cpu_pct: Option<f32>,
+    /// Network traffic of the game connections since the previous sample, in bytes per second
+    /// (TCP payload read and written); 0 for the first sample and without a counter.
+    pub net_in_bps: u64,
+    pub net_out_bps: u64,
 }
 
 /// Ring buffer of samples.
@@ -174,6 +178,8 @@ pub fn downsample(samples: &[Sample], max_points: usize) -> Vec<Sample> {
                 tick_max_us: chunk.iter().map(|s| s.tick_max_us).max().unwrap_or(0),
                 rss_bytes: chunk.iter().map(|s| s.rss_bytes).max().unwrap_or(0),
                 cpu_pct: (!cpus.is_empty()).then(|| cpus.iter().sum::<f32>() / cpus.len() as f32),
+                net_in_bps: chunk.iter().map(|s| s.net_in_bps).sum::<u64>() / chunk.len() as u64,
+                net_out_bps: chunk.iter().map(|s| s.net_out_bps).sum::<u64>() / chunk.len() as u64,
             }
         })
         .collect()
@@ -244,6 +250,10 @@ pub struct Sampler {
     pub instances: Arc<dyn InstanceDirectory>,
     pub now_ms: Arc<dyn Fn() -> i64 + Send + Sync>,
     probe: Mutex<ProcessProbe>,
+    /// Total bytes (in, out) of the game connections so far (`poe_net::stats` in the server).
+    net: Option<Arc<dyn Fn() -> (u64, u64) + Send + Sync>>,
+    /// The previous reading of `net` and its time.
+    net_last: Mutex<Option<(i64, u64, u64)>>,
 }
 
 impl Sampler {
@@ -261,6 +271,31 @@ impl Sampler {
             instances,
             now_ms,
             probe: Mutex::new(ProcessProbe::default()),
+            net: None,
+            net_last: Mutex::new(None),
+        }
+    }
+
+    /// Adds the network counter: a function that returns the total bytes read and written.
+    pub fn with_net_counter(mut self, net: Arc<dyn Fn() -> (u64, u64) + Send + Sync>) -> Self {
+        self.net = Some(net);
+        self
+    }
+
+    /// Bytes per second (in, out) since the previous call.
+    fn net_rates(&self, t_ms: i64) -> (u64, u64) {
+        let Some(net) = &self.net else { return (0, 0) };
+        let (i, o) = net();
+        let previous = self.net_last.lock().unwrap().replace((t_ms, i, o));
+        match previous {
+            Some((t0, i0, o0)) if t_ms > t0 => {
+                let secs = (t_ms - t0) as f64 / 1000.0;
+                (
+                    (i.saturating_sub(i0) as f64 / secs) as u64,
+                    (o.saturating_sub(o0) as f64 / secs) as u64,
+                )
+            }
+            _ => (0, 0),
         }
     }
 
@@ -270,6 +305,7 @@ impl Sampler {
         let list = self.instances.list();
         let tick = self.ticks.take();
         let (rss_bytes, cpu_pct) = self.probe.lock().unwrap().read(t_ms);
+        let (net_in_bps, net_out_bps) = self.net_rates(t_ms);
         let sample = Sample {
             t_ms,
             players: u32::try_from(self.admin.online().len()).unwrap_or(u32::MAX),
@@ -281,6 +317,8 @@ impl Sampler {
             tick_max_us: tick.max_us,
             rss_bytes,
             cpu_pct,
+            net_in_bps,
+            net_out_bps,
         };
         self.metrics.push(sample);
         sample
@@ -367,6 +405,8 @@ mod tests {
             tick_max_us: max,
             rss_bytes: rss,
             cpu_pct: cpu,
+            net_in_bps: 0,
+            net_out_bps: 0,
         };
         let v = vec![
             mk(1, 1, 100, 1000, 5000, 10, Some(10.0)),

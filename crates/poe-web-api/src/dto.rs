@@ -146,6 +146,31 @@ pub struct RegisterRequest {
     pub password: String,
 }
 
+/// `GET /setup`: the first-run state.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct SetupStatus {
+    /// The server has no account yet and this request may create the first admin.
+    pub needed: bool,
+    /// The request came directly from the computer the server runs on.
+    pub local: bool,
+    /// `[accounts] open_registration`: players can create accounts on the register page.
+    pub open_registration: bool,
+    /// `[gateway] display_name`.
+    pub name: String,
+}
+
+/// `POST /admin/accounts`.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct CreateAccountRequest {
+    /// 3-64 characters from `A-Za-z0-9_.@+-`.
+    pub username: String,
+    /// Plain text, at least 8 characters. Use HTTPS outside the local machine.
+    pub password: String,
+    /// `player` (default) or `admin`.
+    #[serde(default)]
+    pub role: Option<String>,
+}
+
 /// `POST /login`.
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct LoginRequest {
