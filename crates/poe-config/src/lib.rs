@@ -512,8 +512,9 @@ pub struct TerrainConfig {
     #[serde(default = "default_true")]
     pub force_layout: bool,
     /// Generate each new instance's terrain on the server and compare its tile hash with the
-    /// client's. Off by default until the generator covers every area.
-    #[serde(default)]
+    /// client's (on by default since 2026-10-28: every layout of the client batch that the client
+    /// can generate matches, docs/status/terrain.md in the hub).
+    #[serde(default = "default_true")]
     pub generate: bool,
     /// Use the walkability grid the server generates (`poe-world`, docs/architecture/instance-world.md in the hub)
     /// instead of the one the client uploads or the layout cache holds. It is used only when the
@@ -525,7 +526,7 @@ pub struct TerrainConfig {
 
 impl Default for TerrainConfig {
     fn default() -> Self {
-        Self { force_layout: true, generate: false, generated_grid: false }
+        Self { force_layout: true, generate: true, generated_grid: false }
     }
 }
 
@@ -1454,7 +1455,8 @@ mod tests {
         assert!(!cfg.dev.debug_link && !cfg.dev.position_sync && !cfg.dev.drift_check);
         assert!(cfg.dev.movement_trace.as_os_str().is_empty());
         assert!(cfg.dev.sweep.as_os_str().is_empty());
-        assert!(!cfg.terrain.generate);
+        // Server-side generation is on (a capped background check); the layout is forced.
+        assert!(cfg.terrain.generate && cfg.terrain.force_layout && !cfg.terrain.generated_grid);
         // The pre-login limits are on.
         let l = &cfg.network.login;
         assert!(l.pre_auth_read_timeout_secs > 0 && l.pre_auth_login_timeout_secs > 0);

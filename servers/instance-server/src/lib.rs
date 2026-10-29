@@ -715,11 +715,28 @@ impl InstanceServer {
     /// Server-side terrain (`[terrain] generate`, `terrain` command): generates the layout in
     /// the background and logs whether its tile hash matches the client's.
     pub(crate) fn generate_terrain(&self, area: &str, seed: u32, client_hash: u32, instance: Option<u32>) {
+        // At most `GENERATE_LIMIT` generations at once (on by default, so a burst of new
+        // instances must not take every core): the others are skipped, it is only a check.
+        static RUNNING: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        const GENERATE_LIMIT: usize = 2;
+        if RUNNING.fetch_add(1, std::sync::atomic::Ordering::SeqCst) >= GENERATE_LIMIT {
+            RUNNING.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+            info!(%area, seed, "server terrain skipped: {GENERATE_LIMIT} generations already running");
+            return;
+        }
         let data = self.data.clone();
         let area = area.to_string();
         // The instance's forced layout, as sent in AreaInfo.
         let request = self.layout_request(instance);
         tokio::task::spawn_blocking(move || {
+            // Frees the slot also when the generator panics.
+            struct Slot;
+            impl Drop for Slot {
+                fn drop(&mut self) {
+                    RUNNING.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                }
+            }
+            let _slot = Slot;
             let forced = resolve_layout(&request, &area, seed);
             let started = std::time::Instant::now();
             let mut rng = poe_world::rng::TerrainRng::new(seed);
