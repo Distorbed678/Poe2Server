@@ -1199,7 +1199,8 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
         std::fs::write(format!("{path}.{}x{}", map.width, map.height), out).ok();
     }
     // Overlays around the fill (`0x14209c4c0`: the context `0x141fa0ac0`, phase 1, the fill of
-    // the listed cells, phase 2). The generator's room list (`+0x58`) is empty for `.dgr`.
+    // the listed cells, phase 2). The generator's room list (`+0x58`) holds the rooms placed
+    // before it (below).
     // `0x14209c150`: the pre-unique room, before the overlay context is built.
     let mut cells = cells;
     let (mut pre_rooms, mut pre_wiggle) = (pass.hosted.take(), Vec::new());
@@ -1241,6 +1242,14 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
                     }
                     Some(crate::overlay::RoomRect { rect, feature: !room.arm.tag.is_empty() && (!r.special || room.arm.tag.eq_ignore_ascii_case("mission")), described: r.node.is_some_and(|n| !graph.nodes[n].tags.is_empty()), inset })
                 })
+                // Rooms placed before the overlay context (league rooms, the pre-unique room
+                // `0x14209c150`) join the room list as feature rooms, as on `.tgr` maps (P1_4
+                // 1187622552: a 3 x 3 pre-unique room marked 8, its centre 4).
+                .chain(pre_rooms.iter().filter(|r| std::env::var_os("POE_NO_LEAGUE_RECTS").is_none() && !r.room.arm.tag.is_empty()).map(|r| {
+                    let (w, h) = (r.room.width() as i32, r.room.arm.grid.len() as i32);
+                    let (w, h) = if r.orientation & 1 == 1 { (h, w) } else { (w, h) };
+                    crate::overlay::RoomRect { rect: (r.origin.0, r.origin.1, r.origin.0 + w, r.origin.1 + h), feature: true, described: false, inset: r.room.arm.dimensions.uint1.unwrap_or(0) as i32 }
+                }))
                 .collect();
             let mut o = crate::overlay::Overlays::new(files, &toy, &map, &mut master, &rects, files.special_tile(2))?;
             o.dungeon = true;
