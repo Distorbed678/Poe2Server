@@ -14,6 +14,7 @@ use crate::{
     graph::Graph,
     layout::{self, JitterNode},
     lattice,
+    map_dirs::PinState,
     outer_buffer::{Margins, outer_buffer},
     rng::{TerrainRng, lcg_index},
     rooms::{PlacedGraph, PlacedRoom, RoomSet, TerrainTypes, place_node, tsi_entries},
@@ -153,8 +154,9 @@ pub struct Forced {
 ///
 /// Without one the client chooses by the world map (`0x141ff9280` → `0x141fa6440`: the
 /// directions of the connected areas' map pins against each topology's direction list, three
-/// passes from exact to adjacent) and only falls back to the index draw here when nothing
-/// matches; that choice is not ported yet.
+/// passes from exact to adjacent, [`crate::map_dirs`]) and only falls back to the index draw
+/// when nothing matches. This uses a fresh generation state with seed 0 (this server's loads);
+/// [`generate_stated`] takes another seed.
 pub fn generate_with(gd: &GameData, area_id: &str, rng: &mut TerrainRng, forced: Option<Forced>) -> Result<Generated, GenError> {
     generate_probed(gd, area_id, rng, forced, &mut |_| {})
 }
@@ -236,6 +238,14 @@ fn area_room_sets(gd: &GameData, files: &dyn crate::generate::Files, area_id: &s
 
 /// [`generate_probed`] with the file source given.
 pub fn generate_probed_files(gd: &GameData, files: &dyn crate::generate::Files, area_id: &str, rng: &mut TerrainRng, forced: Option<Forced>, probe: &mut dyn FnMut(Stage)) -> Result<Generated, GenError> {
+    generate_stated(gd, files, area_id, rng, forced, &mut PinState::default(), probe)
+}
+
+/// [`generate_probed_files`] with the client's generation state for the natural choice
+/// ([`crate::map_dirs`]): its seed (world `+0x4b0`, the load's instance word) and its direction
+/// list; a town or kind-2 area rebuilds the list, a natural pick writes its keys back. The client
+/// starts each load with an empty list, so [`PinState::default`] with the seed is what it does.
+pub fn generate_stated(gd: &GameData, files: &dyn crate::generate::Files, area_id: &str, rng: &mut TerrainRng, forced: Option<Forced>, state: &mut PinState, probe: &mut dyn FnMut(Stage)) -> Result<Generated, GenError> {
     let forced = forced.unwrap_or_default();
     // `TerrainGen_Run` seeds with `disabled` set for hideouts (WorldAreas `IsHideout`, row
     // +0x12a): every draw then returns its lower bound.
@@ -248,25 +258,43 @@ pub fn generate_probed_files(gd: &GameData, files: &dyn crate::generate::Files, 
     }
     // `phase_cad0`: league mechanic rolls come before the topology choice.
     let rolled = crate::league::roll_area(gd, area_id, rng);
-    // `0x141ff90f0`: the sub-seed is drawn unless the area's kind (`+0x1b4`, the unnamed i32
-    // column 45 of `WorldAreas`) is 0x21, a world-map panel: it then comes from the caller's
-    // seed word and the main stream is not touched (unforced choice not ported: 0).
-    let sub = if area_kind(gd, area_id) == Some(0x21) { 0 } else { rng.below(u32::MAX) };
-    // A forced topology indexes the raw list (all league modes, `0x141ff9280`); the client
-    // throws for an index past its end ("Cannot force graph"). Without one it draws from the
-    // mode-filtered list.
-    let (dgr, mask) = match forced.topology {
+    // `0x141ff9280`: a forced topology indexes the raw list (all league modes); the client throws
+    // for an index past its end ("Cannot force graph"). Without one the world-map match
+    // (`crate::map_dirs`) gives (topology, orientation) candidates of the mode-filtered list.
+    let area_row = gd.table("WorldAreas").map_err(data)?.find_by_str("Id", area_id).map_err(data)?.map(|r| r.index());
+    let natural = match (forced.topology, area_row) {
+        (Some(f), _) if f >= 1 => Vec::new(),
+        (_, Some(row)) => crate::map_dirs::natural_candidates(gd, files, row, state, 1, forced.orientation.unwrap_or(8))?,
+        _ => Vec::new(),
+    };
+    // The sub-seed is drawn unless the area's kind (`+0x1b4`, the unnamed i32 column 45 of
+    // `WorldAreas`) is 0x21, a world-map panel: it is then the generation state's seed and the
+    // main stream is not touched. With candidates it picks one (`lcg_index`), else
+    // `0x141ff90f0` draws from the whole list.
+    let sub = if area_kind(gd, area_id) == Some(0x21) { state.seed } else { rng.below(u32::MAX) };
+    let (dgr, mask, picked) = match forced.topology {
         Some(f) if f >= 1 => {
             let raw = raw_topology_entries(gd, area_id)?;
             let e = raw.get(f as usize - 1).ok_or_else(|| data(format!("{area_id}: cannot force topology {f}: only {} topologies", raw.len())))?;
-            (e.0.clone(), e.1)
+            (e.0.clone(), e.1, None)
         }
-        _ => graphs[lcg_index(sub, graphs.len() as u32) as usize].clone(),
+        _ if !natural.is_empty() => {
+            let c = natural[lcg_index(sub, natural.len() as u32) as usize];
+            if let Some(row) = area_row {
+                crate::map_dirs::write_back(gd, row, &mut state.dirs, c.topology, 1)?;
+            }
+            let (path, mask) = graphs.get(c.topology).cloned().ok_or_else(|| data(format!("{area_id}: natural topology {} out of range", c.topology)))?;
+            (path, mask, Some(c.orientation))
+        }
+        _ => {
+            let (path, mask) = graphs[lcg_index(sub, graphs.len() as u32) as usize].clone();
+            (path, mask, None)
+        }
     };
-    // Region orientation: forced, else what the world-map match gives (not ported: the lowest
-    // allowed one, right for the act 1 areas checked). Without a match the client draws it from
-    // the topology's list (`0x141ff90f0`: `region::pick(mask, lcg_index(sub, 0x348))`).
-    let orientation = forced.orientation.filter(|&o| o < 8).unwrap_or(if mask == 0 || mask == 0xff { 0 } else { mask.trailing_zeros() as u8 });
+    // Region orientation: forced, else the natural candidate's. Without a candidate the client
+    // draws it from the topology's list with the same sub-seed (`0x141ff90f0`:
+    // `region::pick(mask, lcg_index(sub, 0x348))`).
+    let orientation = forced.orientation.filter(|&o| o < 8).or(picked).unwrap_or_else(|| crate::region::pick(mask, lcg_index(sub, 0x348)));
     let mut graph = Graph::parse_bytes(&files.read(&dgr)?).map_err(|e| data(format!("{dgr}: {e:?}")))?;
     turn(files, &mut graph, orientation)?;
     // `ShipPlugin` (`0x141f03c40` via `0x141ff9860` / `0x141ff89e0`): the plugin adds the `G4_ship`
