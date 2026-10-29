@@ -67,15 +67,15 @@ pub trait Files {
         Vec::new()
     }
     /// A graph placed (or queued) the feature room `room`: it leaves the generator's feature
-    /// list (`0x141f8b320`), so a later graph of the same job (subgraphs) does not place it again.
+    /// list (`0x141f8b4a0`), so a later graph of the same job (subgraphs) does not place it again.
     fn take_league(&self, _room: &str) {}
     /// The `RoomSet` files of the masters of all the area's topologies, each once, in topology
-    /// order: the client loads them into one store whose filler lists (`0x141f98bb0`, room set
+    /// order: the client loads them into one store whose filler lists (`0x141f98d30`, room set
     /// +0x98 / +0xd8) take the blank rooms of every set.
     fn area_room_sets(&self) -> Vec<String> {
         Vec::new()
     }
-    /// The area's terrain plugin is `PairedRoomLayoutPlugin` (`0x141f01710`).
+    /// The area's terrain plugin is `PairedRoomLayoutPlugin` (`0x141f01890`).
     fn paired_rooms(&self) -> bool {
         false
     }
@@ -180,11 +180,11 @@ pub struct TileMap {
     /// (the client's window is a view into the parent's map; the fill's one cell of slack sees them).
     outer_taken: std::collections::HashSet<(i32, i32)>,
     /// The underlying map's cells (x0, y0, x1, y1), when known: a dungeon region with its
-    /// `OuterBufferSize` margins, or a window's parent's; cells outside are never free (`0x141d0d940`).
+    /// `OuterBufferSize` margins, or a window's parent's; cells outside are never free (`0x141d0dac0`).
     pub bounds: Option<(i32, i32, i32, i32)>,
     /// Map view `+0x20`: a tile was placed or a corner height set with a non-zero height
-    /// (`0x141f9e2e0`, `0x142097cb0`, `0x1420983d0`); ORed into generator `+8` (the outer fill's
-    /// height repair) after a dungeon graph's tile pass (`0x141ff05f0`).
+    /// (`0x141f9e460`, `0x142097e30`, `0x142098550`); ORed into generator `+8` (the outer fill's
+    /// height repair) after a dungeon graph's tile pass (`0x141ff0770`).
     pub raised: bool,
     /// The doodads of the rooms placed in this map, in cells of this map (`crate::doodads`).
     pub doodads: Vec<crate::doodads::Doodad>,
@@ -205,7 +205,7 @@ pub struct LatticePoint {
     pub ground: Option<String>,
     pub height: i8,
     /// Bit 0: set by a tile or a flood; bit 1: height set; bit 2: set before the post-tile
-    /// passes; bit 3: set by `0x1420c0a60`.
+    /// passes; bit 3: set by `0x1420c0be0`.
     pub flags: u8,
 }
 
@@ -289,7 +289,7 @@ impl TileMap {
     }
 
     /// A corner write of a tile placed outside this map's bounds at the time, replayed in
-    /// placement order with `place`'s rule (`0x141d0bad0`): the ground always, the height (and the
+    /// placement order with `place`'s rule (`0x141d0bc50`): the ground always, the height (and the
     /// set flag) only where the tile's or the old ground takes heights (`.gt` flag 1).
     fn replay_point(&mut self, j: usize, g: &Option<String>, h: i8) {
         let takes_height = |m: &Self, g: &Option<String>| g.as_ref().is_none_or(|g| m.gt_flags(g) & 1 != 0);
@@ -325,7 +325,7 @@ impl TileMap {
         m
     }
 
-    /// The corners of `outer` from `origin` on (a subgraph's window, `0x141f9e130`).
+    /// The corners of `outer` from `origin` on (a subgraph's window, `0x141f9e2b0`).
     pub fn copy_lattice(&mut self, outer: &TileMap, origin: (i32, i32)) {
         for y in 0..=self.height as i32 {
             for x in 0..=self.width as i32 {
@@ -452,7 +452,7 @@ impl TileMap {
             .then(|| (y as u32 * (self.width + 1) + x as u32) as usize)
     }
 
-    /// `0x141d0e130` with a ground: the corner takes it and is set.
+    /// `0x141d0e2b0` with a ground: the corner takes it and is set.
     pub fn set_ground(&mut self, x: i32, y: i32, g: &str) {
         if let Some(i) = self.point_index(x, y) {
             self.lattice[i].ground = Some(g.to_ascii_lowercase());
@@ -460,7 +460,7 @@ impl TileMap {
         }
     }
 
-    /// `0x141f9e780`: a room's ground overrides on its inside corners.
+    /// `0x141f9e900`: a room's ground overrides on its inside corners.
     pub fn room_overrides(&mut self, room: &Room, origin: (i32, i32), o: u8) {
         let (w, h) = (room.width() as i32, room.height() as i32);
         for v in 1..h {
@@ -504,7 +504,7 @@ impl TileMap {
         }
     }
 
-    /// Takes away the piece covering a cell (`0x141d0c480`).
+    /// Takes away the piece covering a cell (`0x141d0c600`).
     pub fn remove_piece_at(&mut self, x: i32, y: i32) {
         let Some(i) = self.index(x, y) else { return };
         let Some(p) = self.piece_at[i] else {
@@ -519,7 +519,7 @@ impl TileMap {
         }
     }
 
-    /// Whether every cell of a `w`×`h` rectangle is inside the map and empty (`0x141d0d880`).
+    /// Whether every cell of a `w`×`h` rectangle is inside the map and empty (`0x141d0da00`).
     /// A cell outside the region that a tile already took (it overhangs into the outer buffer).
     /// The cell at `(x, y)`, also outside the map where a tile overhangs it (last write wins).
     pub(crate) fn cell_or_spill(&self, x: i32, y: i32) -> Option<&Cell> {
@@ -580,7 +580,7 @@ impl TileMap {
         height: i16,
         tile: Option<usize>,
     ) {
-        // `0x141f9e2e0`: a tile with a spawner object and no edge of a real type (edge flag 0x80
+        // `0x141f9e460`: a tile with a spawner object and no edge of a real type (edge flag 0x80
         // is the wildcard) is placed without the mirror bit.
         self.raised |= height != 0;
         let real_edge = tdt.edges.iter().flatten().any(|e| self.edge_flags.get(&e.to_ascii_lowercase()).copied().unwrap_or(0) & 0x80 == 0);
@@ -608,7 +608,7 @@ impl TileMap {
                 }
             }
         }
-        // Corner points (`0x141d0bad0`): the tile's ground per point, and its height where the
+        // Corner points (`0x141d0bc50`): the tile's ground per point, and its height where the
         // ground (old or new) is missing or takes heights (`.gt` flag 1).
         for v in 0..=h {
             for u in 0..=w {
@@ -638,7 +638,7 @@ impl TileMap {
 }
 
 impl TileMap {
-    /// `0x141d0b390`: the tile covering `(x, y)` (`tdt` is its header) gets height `h` on all
+    /// `0x141d0b510`: the tile covering `(x, y)` (`tdt` is its header) gets height `h` on all
     /// its cells and `h` plus the tile's own corner heights on all its corner points (flags
     /// unchanged).
     pub(crate) fn set_heights(&mut self, x: i32, y: i32, tdt: &Tdt, h: i16) {
@@ -674,7 +674,7 @@ impl TileMap {
         }
     }
 
-    /// `0x141fd6d70`: the set (flag 2) heights at the four corners of the tile covering
+    /// `0x141fd6ef0`: the set (flag 2) heights at the four corners of the tile covering
     /// `(x, y)` (a 1×1 square when the cell is empty).
     pub(crate) fn tile_corner_heights(&self, x: i32, y: i32) -> Vec<i32> {
         let (x0, y0, w, h) = match self.index(x, y).and_then(|i| self.piece_at[i]) {
@@ -734,7 +734,7 @@ pub fn load_tdt(files: &dyn Files, path: &str) -> Result<Tdt, GenError> {
         Some(parent) => tdt.resolve(&load_tdt(files, parent)?),
         None => tdt,
     };
-    // `0x141d053a0`: data +0x16f bit 1, asked by `place_tile` (`0x141f9e2e0`) for tiles without a
+    // `0x141d05520`: data +0x16f bit 1, asked by `place_tile` (`0x141f9e460`) for tiles without a
     // real edge: an object of the tile's model data (`.tmd`) with `Spawner` in its type path.
     let wild = |e: &str| e.to_ascii_lowercase().contains("wildcard");
     if tdt.edges.iter().flatten().all(|e| wild(e)) {
@@ -836,7 +836,7 @@ impl Master {
         })
     }
 
-    /// `0x141d09a30`: a `.tdt` a league mechanic adds to the tile set (weight 1, every
+    /// `0x141d09bb0`: a `.tdt` a league mechanic adds to the tile set (weight 1, every
     /// orientation the tile allows), after the `.tst` entries.
     pub fn add_extra_tile(&mut self, files: &dyn Files, path: &str) -> Result<(), GenError> {
         let tdt = load_tdt(files, path)?;
@@ -884,7 +884,7 @@ impl Master {
         Ok(out)
     }
 
-    /// The first fill tile of a ground's group (`0x141f93cc0`; the `default` group without a
+    /// The first fill tile of a ground's group (`0x141f93e40`; the `default` group without a
     /// ground or when the ground's name has none), with its orientation (8 = any).
     pub fn first_fill_tile(&mut self, files: &dyn Files, ground: Option<&str>) -> Result<Option<(String, u8)>, GenError> {
         let name = match ground {
@@ -1044,7 +1044,7 @@ pub(crate) fn uniform_ground(key: &TileKey, feature: &str) -> bool {
         && key.grounds.iter().all(|g| *g == key.grounds[0])
 }
 
-/// Room pass (`0x141f8e6c0`) for an unrotated room.
+/// Room pass (`0x141f8e840`) for an unrotated room.
 pub fn room_pass(
     map: &mut TileMap,
     master: &Master,
@@ -1055,11 +1055,11 @@ pub fn room_pass(
     room_pass_oriented(map, master, room, origin, 0, false, 0, rng)
 }
 
-/// Room pass (`0x141f8e6c0`): every cell of the room grid, x outer, y inner; a slot's key is
+/// Room pass (`0x141f8e840`): every cell of the room grid, x outer, y inner; a slot's key is
 /// seen with the room's orientation `o` and lands where its cells land when the room is
 /// turned (`origin` is the turned room's corner). With `mark` (its eighth argument; overlays set
 /// it, node rooms do not), uniform-ground slots also give their ground to the corners x in
-/// `0..w`, y in `0..=h` (`0x141d0e130`). `base` is the room's height in storeys (an overlay
+/// `0..w`, y in `0..=h` (`0x141d0e2b0`). `base` is the room's height in storeys (an overlay
 /// room sits where its border corners meet the terrain, `overlay::room_height`); a slot's tile
 /// goes at `base` plus the slot's lowest corner height, and the key's corner heights are taken
 /// relative to that corner.
@@ -1141,7 +1141,7 @@ pub fn room_pass_oriented(
     Ok(())
 }
 
-/// Edge routing cost grid (`0x1420cdc30`): one `below(1024)` per map cell. Routing itself
+/// Edge routing cost grid (`0x1420cddb0`): one `below(1024)` per map cell. Routing itself
 /// (graphs with edges) is not ported yet.
 pub fn edge_cost_grid(map: &TileMap, rng: &mut TerrainRng) -> Vec<u32> {
     (0..map.width * map.height)
@@ -1149,8 +1149,8 @@ pub fn edge_cost_grid(map: &TileMap, rng: &mut TerrainRng) -> Vec<u32> {
         .collect()
 }
 
-/// Fill pass (`0x141f8f930` per empty cell, row by row): a weighted pick from the cell's
-/// ground's fill group (`default` without ground), then the orientation (`0x141f90d60`).
+/// Fill pass (`0x141f8fab0` per empty cell, row by row): a weighted pick from the cell's
+/// ground's fill group (`default` without ground), then the orientation (`0x141f90ee0`).
 pub fn fill_pass(
     map: &mut TileMap,
     master: &mut Master,
@@ -1207,7 +1207,7 @@ pub fn fill_pass(
     Ok(())
 }
 
-/// Mirror orientation across a shared side (`0x141fdd7c0`'s table): `[o][0]` for a left/right
+/// Mirror orientation across a shared side (`0x141fdd940`'s table): `[o][0]` for a left/right
 /// neighbour, `[o][1]` for an up/down one.
 const MIRROR: [[u8; 2]; 8] = [
     [4, 6],
@@ -1242,7 +1242,7 @@ fn origin_tile(map: &TileMap, x: i32, y: i32) -> Option<(usize, (i32, i32))> {
     Some((p, TileMap::oriented_size(piece.size, piece.orientation)))
 }
 
-/// `0x141fde4b0`: tile-set tile `tile` with orientation `o` at `pos` would mirror a neighbour
+/// `0x141fde630`: tile-set tile `tile` with orientation `o` at `pos` would mirror a neighbour
 /// one tile-size away (up and left only, or all four sides): the same tile in the mirror
 /// orientation across the shared side.
 fn mirrors(map: &TileMap, master: &Master, pos: (i32, i32), tile: usize, o: u8, all: bool) -> bool {
@@ -1266,24 +1266,24 @@ struct Derepeat<'a> {
 }
 
 impl Derepeat<'_> {
-    /// `0x141fde210`: any cell of the block lies in a room.
+    /// `0x141fde390`: any cell of the block lies in a room.
     fn in_room(&self, map: &TileMap, pos: (i32, i32), (w, h): (i32, i32)) -> bool {
         (pos.1..pos.1 + h).any(|y| (pos.0..pos.0 + w).any(|x| map.index(x, y).is_some_and(|i| self.in_room[i])))
     }
 
-    /// `0x141fde360`: any corner of the block (far sides included) has a ground override.
+    /// `0x141fde4e0`: any corner of the block (far sides included) has a ground override.
     fn touches_override(&self, map: &TileMap, pos: (i32, i32), (w, h): (i32, i32)) -> bool {
         (pos.1..=pos.1 + h).any(|y| (pos.0..=pos.0 + w).any(|x| map.point_index(x, y).is_some_and(|i| self.overridden[i])))
     }
 
-    /// A placed piece's tile-set index key (`0x141d08a40` turned, `0x141d09900`: grounds with
+    /// A placed piece's tile-set index key (`0x141d08bc0` turned, `0x141d09a80`: grounds with
     /// `.gt` flag 0x10 dropped).
     fn key_of(&self, map: &TileMap, p: usize) -> Option<TileKey> {
         let piece = &map.pieces[p];
         Some(self.master.tiles.tiles[piece.tile?].key.oriented(piece.orientation))
     }
 
-    /// `0x141fde880` (its corner ground fix-ups are not ported).
+    /// `0x141fdea00` (its corner ground fix-ups are not ported).
     fn replace(&self, map: &mut TileMap, pos: (i32, i32), tile: usize, o: u8) {
         let def = &self.master.tiles.tiles[tile];
         // The new tile keeps the old one's height.
@@ -1291,9 +1291,9 @@ impl Derepeat<'_> {
         map.place(pos.0, pos.1, &def.path, &def.tdt, o, height, Some(tile));
     }
 
-    /// `0x141fdfa60`: re-pick the tile at `pos` (it mirrors the neighbour at `npos` across
+    /// `0x141fdfbe0`: re-pick the tile at `pos` (it mirrors the neighbour at `npos` across
     /// side `dir`) from its key's candidates minus mirroring ones; with none, try moving an edge
-    /// crossing (`0x141fdef90`).
+    /// crossing (`0x141fdf110`).
     fn repick(&self, map: &mut TileMap, pos: (i32, i32), npos: (i32, i32), dir: usize, rng: &mut TerrainRng) {
         let (p, size) = origin_tile(map, pos.0, pos.1).unwrap();
         let Some(key) = self.key_of(map, p) else { return };
@@ -1328,7 +1328,7 @@ impl Derepeat<'_> {
         }
     }
 
-    /// `0x141fdef90`: on another side with a (non-virtual) edge and a same-size neighbour that
+    /// `0x141fdf110`: on another side with a (non-virtual) edge and a same-size neighbour that
     /// is free to change, every other exit position whose tiles do not mirror up or left is a
     /// candidate; one is picked and kept if the neighbour has a tile with the matching exit.
     fn shift_edge(&self, map: &mut TileMap, pos: (i32, i32), size: (i32, i32), key: &TileKey, dir: usize, rng: &mut TerrainRng) {
@@ -1414,10 +1414,10 @@ impl Derepeat<'_> {
     }
 }
 
-/// De-repetition (`0x141fdd7c0`): cells row by row; a tile-set tile bigger than 1×1 without a
+/// De-repetition (`0x141fdd940`): cells row by row; a tile-set tile bigger than 1×1 without a
 /// feature, not of uniform ground, not touching a room ground override, that mirrors a
 /// neighbour one tile-size away (same tile, mirror orientation across the shared side; sides
-/// up, right, down, left) is re-picked (`0x141fdfa60`).
+/// up, right, down, left) is re-picked (`0x141fdfbe0`).
 pub fn derepeat_pass(map: &mut TileMap, master: &Master, rooms: &[RoomPlacement], rng: &mut TerrainRng) {
     // The same placements are the ones the doodad pass walks (`crate::doodads`).
     for r in rooms {
@@ -1459,7 +1459,7 @@ pub fn derepeat_pass(map: &mut TileMap, master: &Master, rooms: &[RoomPlacement]
                 continue;
             }
             let key = TileKey::from_tdt(&def.tdt).oriented(map.pieces[p].orientation);
-            // `0x141fd5c50`: no edge but wildcards (`.et` flag 0x80, `0x141ef23f0`), one ground.
+            // `0x141fd5dd0`: no edge but wildcards (`.et` flag 0x80, `0x141ef2570`), one ground.
             let wild = |e: &Option<String>| e.as_ref().is_none_or(|e| map.edge_flags.get(&e.to_ascii_lowercase()).is_some_and(|f| f & 0x80 != 0));
             let uniform = key.edges.iter().all(wild) && key.grounds.iter().all(|g| *g == key.grounds[0]);
             if uniform || d.touches_override(map, (x, y), size) {

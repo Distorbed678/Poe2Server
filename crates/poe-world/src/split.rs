@@ -1,4 +1,4 @@
-//! Splitting virtual edges into two parallel edges (`0x1420bc400` → `0x1420bb4f0`): a wide
+//! Splitting virtual edges into two parallel edges (`0x1420bc580` → `0x1420bb670`): a wide
 //! river becomes its two banks, each with its own edge type, at a random width per internal
 //! point. See `docs/re/terrain/tgr.md`, "Virtual edges".
 
@@ -20,7 +20,7 @@ fn mid(a: Pos, b: Pos) -> Pos {
     ((a.0 + b.0) / 2, (a.1 + b.1) / 2)
 }
 
-/// `0x1420b9c30`: the two points `w` either side of `b` on the bisector of `a → b → c` (a miter),
+/// `0x1420b9db0`: the two points `w` either side of `b` on the bisector of `a → b → c` (a miter),
 /// clamped to the map (`size` in grid cells).
 pub fn miter(a: Pos, b: Pos, c: Pos, w: i32, size: Pos) -> [Pos; 2] {
     let dy_ab = a.1 - b.1;
@@ -99,7 +99,7 @@ impl LayoutGraph {
     }
 }
 
-/// `0x1420ba050`: at a junction split into `node` and `new`, re-attach whichever of the
+/// `0x1420ba1d0`: at a junction split into `node` and `new`, re-attach whichever of the
 /// previous edge and its clone does not cross the other to `new`.
 fn join(g: &mut LayoutGraph, pe: usize, pc: usize, node: usize, new: usize, first: bool) {
     let a = g.next_to(pe, node);
@@ -146,7 +146,7 @@ fn join(g: &mut LayoutGraph, pe: usize, pc: usize, node: usize, new: usize, firs
         if hit {
             pc
         } else {
-            // `0x142196290` (distance comparison) not ported yet: keep the clone.
+            // `0x1421963e0` (distance comparison) not ported yet: keep the clone.
             pc
         }
     };
@@ -158,13 +158,13 @@ fn join(g: &mut LayoutGraph, pe: usize, pc: usize, node: usize, new: usize, firs
     g.attach(new, target);
 }
 
-/// `0x1420bb0c0`: the split edge types and chiralities of an edge and its clone.
+/// `0x1420bb240`: the split edge types and chiralities of an edge and its clone.
 fn assign_types(g: &mut LayoutGraph, e: usize, c: usize, cur: usize, types: &dyn Fn(&str) -> SplitType) {
     let d = types(&g.edges[e].edge_type);
     let sym = |t: &SplitType| t.height_change == 0 && t.grounds[0] == t.grounds[1];
     let f0 = d.splits[0].1;
     let f1 = d.splits[1].1;
-    // The client also asks `0x141d047b0` about the split type when both splits are the same;
+    // The client also asks `0x141d04930` about the split type when both splits are the same;
     // assumed true here.
     let symmetric = sym(&d) && (!d.virtual_edge || (d.splits[0].0 == d.splits[1].0 && f0 != f1));
     let cur1 = cur != 0;
@@ -193,7 +193,7 @@ fn assign_types(g: &mut LayoutGraph, e: usize, c: usize, cur: usize, types: &dyn
     g.edges[e].chirality ^= bit;
 }
 
-/// `0x1420baa20`: moves the internal points of `e` and its clone apart, one random width per
+/// `0x1420baba0`: moves the internal points of `e` and its clone apart, one random width per
 /// point, walking away from end `cur`.
 #[allow(clippy::too_many_arguments)]
 fn split_points(
@@ -240,7 +240,7 @@ fn split_points(
     }
 }
 
-/// `0x1420bb4f0`: splits the chain of virtual edges starting with `e0` at `node0`.
+/// `0x1420bb670`: splits the chain of virtual edges starting with `e0` at `node0`.
 fn split_chain(
     g: &mut LayoutGraph,
     e0: usize,
@@ -342,7 +342,7 @@ fn split_chain(
     }
 }
 
-/// `0x1420ba340`: a virtual edge ending in a dead end on the map border gets its virtual end
+/// `0x1420ba4c0`: a virtual edge ending in a dead end on the map border gets its virtual end
 /// points on the border itself (a random half width `u` either side of the node along the
 /// border; in a corner one on each of the two borders), so its two banks run off the map
 /// instead of meeting in a node. Dead ends inside the map are left alone. Returns false when the
@@ -425,14 +425,14 @@ fn off_map_end(g: &mut LayoutGraph, e: usize, idx: usize, size: Pos, rng: &mut T
     true
 }
 
-/// `0x1420bc400`: splits every virtual edge (those with virtual end points first).
+/// `0x1420bc580`: splits every virtual edge (those with virtual end points first).
 pub fn split_virtual(
     g: &mut LayoutGraph,
     types: &dyn Fn(&str) -> SplitType,
     size: Pos,
     rng: &mut TerrainRng,
 ) {
-    // The first pass over the edges (`0x1420da240`): off-map ends of virtual dead ends.
+    // The first pass over the edges (`0x1420da3c0`): off-map ends of virtual dead ends.
     for e in 0..g.edges.len() {
         if g.edges[e].virtual_edge {
             off_map_end(g, e, 0, size, rng);

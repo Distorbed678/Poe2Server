@@ -1,18 +1,18 @@
-//! The client's Voronoi diagram (`0x141ef73e0`, run by `0x141ef4720`): Steven Fortune's
+//! The client's Voronoi diagram (`0x141ef7560`, run by `0x141ef48a0`): Steven Fortune's
 //! sweepline in the `VoronoiDiagramGenerator` layout, adapted by GGG to 32-bit integers. The
 //! generator uses it to jitter graph nodes inside their cells (`crate::layout`), so it is
 //! ported operation by operation, integer rounding and overflow included
 //! (`docs/re/terrain/tgr.md`, "Graph layout").
 //!
-//! - Sites are sorted by (y, x) (`0x141f05c10`); the bounding box is `(0, 0, w, h)` in grid
+//! - Sites are sorted by (y, x) (`0x141f05d90`); the bounding box is `(0, 0, w, h)` in grid
 //!   cells.
 //! - An edge `a·x… ` is stored unnormalised: `b = dx`, `a = -dy`,
 //!   `c = (dx² + dy²)/2 + x₀·dx + y₀·dy` (so `b·x - a·y = c`).
 //! - The edge and event hashes degenerate with integer arithmetic (every bucket index is the
 //!   first or the last), so the beach line is searched from its left or right end and the
 //!   event queue is one list sorted by (ystar, x).
-//! - `clip_line` (`0x141ef7ee0`) pushes each finished edge to the front of the output list
-//!   with both sites' numbers, and records which vertices it joins (`0x141ef9180`); vertices
+//! - `clip_line` (`0x141ef8060`) pushes each finished edge to the front of the output list
+//!   with both sites' numbers, and records which vertices it joins (`0x141ef9300`); vertices
 //!   joined to one or three edges are the diagram's vertex list.
 
 #[derive(Debug, Clone, Copy)]
@@ -59,7 +59,7 @@ pub struct Diagram {
     pub vertices: Vec<(i32, i32)>,
 }
 
-/// The client's integer square root (`0x14196e010`): floor(sqrt(n)).
+/// The client's integer square root (`0x14196e190`): floor(sqrt(n)).
 pub fn isqrt(n: u32) -> u32 {
     let (mut rem, mut root) = if n < 0x4000_0000 {
         (n, 0u32)
@@ -161,7 +161,7 @@ impl Fortune {
         self.edges.len() - 1
     }
 
-    /// `0x141ef7a40`.
+    /// `0x141ef7bc0`.
     fn right_of(&self, he: usize, p: (i32, i32)) -> bool {
         let h = &self.he[he];
         let e = &self.edges[h.edge.expect("right_of on an end")];
@@ -217,7 +217,7 @@ impl Fortune {
         if h.pm != 0 { !above } else { above }
     }
 
-    /// `0x141ef76f0`: the beach-line half edge left of `p`.
+    /// `0x141ef7870`: the beach-line half edge left of `p`.
     fn el_leftbnd(&self, p: (i32, i32)) -> usize {
         let start = if self.deltax != 0 && (p.0.wrapping_sub(self.xmin)) / self.deltax >= 1 {
             RIGHT_END
@@ -244,7 +244,7 @@ impl Fortune {
         }
     }
 
-    /// `0x141ef78f0`.
+    /// `0x141ef7a70`.
     fn intersect(&mut self, el1: usize, el2: usize) -> Option<usize> {
         let e1 = self.edges[self.he[el1].edge?].clone();
         let e2 = self.edges[self.he[el2].edge?].clone();
@@ -310,7 +310,7 @@ impl Fortune {
         self.vertices.push(v);
     }
 
-    /// `0x141ef9180`.
+    /// `0x141ef9300`.
     fn join(&mut self, a: i32, b: i32) {
         let need = a.max(b) as usize + 1;
         if self.adjacency.len() < need {
@@ -332,7 +332,7 @@ impl Fortune {
         }
     }
 
-    /// `0x141ef7ee0`.
+    /// `0x141ef8060`.
     fn clip_line(&mut self, e: usize) {
         let edge = self.edges[e].clone();
         let (r0, r1) = (self.points[edge.reg[0]], self.points[edge.reg[1]]);

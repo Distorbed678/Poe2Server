@@ -1160,7 +1160,7 @@ mod tests {
             &p,
             std::fs::read_to_string(&p)
                 .unwrap()
-                .replace("0.5.5e", "0.4.0"),
+                .replace("0.5.5e.hotfix1", "0.4.0"),
         )
         .unwrap();
         let both = dir.join("both-mod");
@@ -1195,7 +1195,7 @@ mod tests {
         };
         let host = ModHost::load(&HostConfig {
             mods,
-            game_version: "0.5.5e".into(),
+            game_version: "0.5.5e.hotfix1".into(),
             server_version: "0.0.0".into(),
             server_dir: dir.to_owned(),
             reserved_commands: vec!["help".into(), "who".into()],
@@ -1270,7 +1270,7 @@ mod tests {
                 dir: dir.to_owned(),
                 ..Default::default()
             },
-            game_version: "0.5.5e".into(),
+            game_version: "0.5.5e.hotfix1".into(),
             server_version: "0.0.0".into(),
             server_dir: dir.to_owned(),
             reserved_commands: vec![],

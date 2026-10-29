@@ -43,7 +43,7 @@ pub type StatPublic = Arc<dyn Fn(&str) -> bool + Send + Sync>;
 
 /// `0x1ca`: an action event without a body (with every roll start and when an attack ends a
 /// sprint; `ActionEvent` in `instance.toml`). The client only decrements a counter for it
-/// (Actor case `0x14214a13e`).
+/// (Actor case `0x14214a2be`).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ActionEvent {
     pub header: SimulationHeader,

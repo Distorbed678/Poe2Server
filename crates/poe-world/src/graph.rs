@@ -12,7 +12,7 @@
 //! <a> <b> <p> (<x> <y>)*p <i> <i> <i> "<.et>" <i> <i>                          (m lines)
 //! ```
 //! `.dgr` (dungeon graph) files have the same layout plus dungeon fields, which the client
-//! reads with `0x14292e8e0` into the same graph: a `Default%: <branching> <extra door>
+//! reads with `0x14292eb20` into the same graph: a `Default%: <branching> <extra door>
 //! <fuzzy>` line after the ground types (and, from version 23, an
 //! `open_extra_doors_into_impenetrable_rooms` bool line); node lines end with a void flag
 //! (`Y`/`N`) and, from version 22, a branching bool; edge lines end after the `.et` with

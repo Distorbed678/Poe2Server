@@ -1,4 +1,4 @@
-//! Dungeon layouts (`.dgr` topologies, `0x1420ac3e0`): rooms on a grid of room units, joined by
+//! Dungeon layouts (`.dgr` topologies, `0x1420ac560`): rooms on a grid of room units, joined by
 //! corridors. Findings: `docs/re/terrain/dungeon.md`. Ported so far: typed-node room placement.
 
 use std::collections::HashMap;
@@ -33,7 +33,7 @@ pub struct EdgeFields {
 }
 
 impl EdgeFields {
-    /// The edge fields by file version (`0x14292e8e0`): chance2; chance1 (version >= 16, else
+    /// The edge fields by file version (`0x14292eb20`): chance2; chance1 (version >= 16, else
     /// 100 when chance2 is set); depth limit (>= 21); branching type (>= 18); extra door %
     /// (zero below 17, read anyway); extra door type (>= 20); fuzzy %; impenetrability;
     /// impenetrable value; void; accessibility.
@@ -87,7 +87,7 @@ pub struct Exit {
     pub chiral: bool,
 }
 
-/// `0x141d00fd0`: where ring position `i` of a `w`×`h` room goes when the room is turned by `o`.
+/// `0x141d01150`: where ring position `i` of a `w`×`h` room goes when the room is turned by `o`.
 pub fn turn_index(w: u32, h: u32, i: u32, o: u8) -> u32 {
     const A: [u32; 9] = [0, 1, 1, 2, 0, 1, 1, 2, 0];
     const B: [u32; 9] = [0, 0, 1, 1, 1, 1, 2, 2, 0];
@@ -97,7 +97,7 @@ pub fn turn_index(w: u32, h: u32, i: u32, o: u8) -> u32 {
     (i + A[o] * h + B[o] * w) % n
 }
 
-/// The unit cell outside ring position `u` of a `w`×`h` room at `origin` (`0x1420af280`):
+/// The unit cell outside ring position `u` of a `w`×`h` room at `origin` (`0x1420af400`):
 /// top left→right, right top→bottom, bottom right→left, left bottom→top.
 fn ring_cell(origin: (i32, i32), (w, h): (u32, u32), u: u32) -> (i32, i32) {
     let (x, y) = origin;
@@ -120,7 +120,7 @@ fn ring_inner(origin: (i32, i32), size: (u32, u32), u: u32) -> (i32, i32) {
     (cx.clamp(origin.0, origin.0 + w - 1), cy.clamp(origin.1, origin.1 + h - 1))
 }
 
-/// `0x142f10760`: angle (0x8000 = π) for `cos·127 + 127`, 0..=255.
+/// `0x142f10780`: angle (0x8000 = π) for `cos·127 + 127`, 0..=255.
 const ACOS: [u16; 256] = [
     0x8000, 0x7ae2, 0x78c2, 0x7720, 0x75bf, 0x7487, 0x736d, 0x7269, 0x7176, 0x7092, 0x6fb9, 0x6eeb,
     0x6e25, 0x6d67, 0x6cb0, 0x6bff, 0x6b54, 0x6aad, 0x6a0b, 0x696d, 0x68d3, 0x683c, 0x67a8, 0x6718,
@@ -146,7 +146,7 @@ const ACOS: [u16; 256] = [
     0x073e, 0x051e, 0x0000, 0x0000,
 ];
 
-/// `0x14196e010`: integer square root.
+/// `0x14196e190`: integer square root.
 fn isqrt(v: u32) -> u32 {
     let mut r = (v as f64).sqrt() as u32;
     while r.saturating_mul(r) > v {
@@ -158,7 +158,7 @@ fn isqrt(v: u32) -> u32 {
     r
 }
 
-/// `0x1421c4e50`: the angle between two vectors (`ACOS` units; 0 for a zero vector).
+/// `0x1421c5090`: the angle between two vectors (`ACOS` units; 0 for a zero vector).
 fn angle(a: (i32, i32), b: (i32, i32)) -> u16 {
     if a == (0, 0) || b == (0, 0) {
         return 0;
@@ -178,19 +178,19 @@ struct DungeonRoom {
     path: String,
     /// The room type (the `.arm` tag; empty for `special…` rooms, whose tag the parser clears).
     tag: String,
-    /// Kept out of the type buckets and size map (`0x141f99b20`): `special…` rooms and the
+    /// Kept out of the type buckets and size map (`0x141f99ca0`): `special…` rooms and the
     /// shrine, mission, stone circle, preunique and injector types.
     generic: bool,
     /// The `.arm` uniqueness flag (room data +6).
     unique: bool,
-    /// Room data +8: a `special` / `specialN` / `specialchance N` tag (`0x142931cf0`).
+    /// Room data +8: a `special` / `specialN` / `specialchance N` tag (`0x142931f30`).
     special: bool,
     /// Room data +4: the special list (`specialN`; 0xff: the chance list).
     list: u8,
     /// Room data +5: `specialchance N` (default 100).
     chance: u8,
     weight: u32,
-    /// Room data +0x180: the root slot's first set edge (`0x141f99b20` counts a room without a
+    /// Room data +0x180: the root slot's first set edge (`0x141f99ca0` counts a room without a
     /// non-default door under it; G2_12's `entrance.arm` under `cart_walkway.et`).
     root_door: Option<String>,
     mask: u8,
@@ -203,7 +203,7 @@ struct DungeonRoom {
     blank: bool,
     /// The `.arm` side length (room data +0): the unit size the room is built for.
     side: u32,
-    /// Slots with the `missiontile` feature (the key of the mission table, `0x141f99b20`).
+    /// Slots with the `missiontile` feature (the key of the mission table, `0x141f99ca0`).
     missions: u32,
 }
 
@@ -226,14 +226,14 @@ pub struct PlacedRoom {
     pub size: (u32, u32),
     pub orientation: u8,
     pub exits: Vec<Exit>,
-    /// The extra door type the node's edge pick chose (`0x1420966f0`).
+    /// The extra door type the node's edge pick chose (`0x142096870`).
     pub extra_door: Option<String>,
     /// Room height (+0x12): the node's, or the edge's on a corridor.
     pub height: i32,
     /// Flags +0x15 bit 0: reachable (an accessible edge or tag).
     pub accessible: bool,
     /// Reachable only through the edgeless typed node rule (`node_accessible`): the room flag is
-    /// not set yet when the ground-only cells are listed (`0x142097cb0`; the pre-unique room
+    /// not set yet when the ground-only cells are listed (`0x142097e30`; the pre-unique room
     /// sees those cells as inaccessible, G1_13_2), only for the fill later.
     pub late_access: bool,
     /// Flags +0x15 bit 1: closed to extra doors (typed or tagged nodes, impenetrable edges).
@@ -242,9 +242,9 @@ pub struct PlacedRoom {
     pub extra_pct: u32,
     /// +0x40: the door type a placeholder's room must take (its node's or corridor's edge type).
     pub door_type: Option<String>,
-    /// Kind 8 (+0x14): a special room placed over a generic one (`0x1420a7da0`).
+    /// Kind 8 (+0x14): a special room placed over a generic one (`0x1420a7f20`).
     pub special: bool,
-    /// A `graph` node's subgraph (`0x1420adfd0`): the rectangle another graph fills later.
+    /// A `graph` node's subgraph (`0x1420ae150`): the rectangle another graph fills later.
     pub subgraph: Option<String>,
 }
 
@@ -256,14 +256,14 @@ impl PlacedRoom {
 }
 
 /// A league feature room waiting for a `missiontile` slot (the generator's pending list,
-/// `0x141f8ab50`): the `.arm` and the orientation drawn for it.
+/// `0x141f8acd0`): the `.arm` and the orientation drawn for it.
 #[derive(Debug, Clone)]
 pub struct Pending {
     pub room: String,
     pub orientation: u8,
 }
 
-/// The unit grid (`0x141ff05f0`'s 0x70-byte object).
+/// The unit grid (`0x141ff0770`'s 0x70-byte object).
 #[derive(Clone)]
 pub struct Grid {
     pub w: u32,
@@ -273,7 +273,7 @@ pub struct Grid {
     pub rooms: Vec<PlacedRoom>,
     /// Grid +0x34: the tiles rooms share at their borders (master +0x14b).
     pub overlap: u32,
-    /// Door types whose two sides differ (`0x141d047b0`): their doors carry a chirality.
+    /// Door types whose two sides differ (`0x141d04930`): their doors carry a chirality.
     pub chiral: std::collections::HashSet<String>,
     /// League feature rooms queued for the mission rooms' `missiontile` slots.
     pub pending: Vec<Pending>,
@@ -284,7 +284,7 @@ impl Grid {
         self.chiral.contains(door)
     }
 
-    /// A room's door ring turned by `o` (`0x141f964f0`): mirrored orientations flip the
+    /// A room's door ring turned by `o` (`0x141f96670`): mirrored orientations flip the
     /// chirality of chiral doors.
     fn turned(&self, w: u32, h: u32, exits: &[Exit], o: u8) -> Vec<Exit> {
         let n = exits.len() as u32;
@@ -303,12 +303,12 @@ impl Grid {
         (x >= 0 && y >= 0 && (x as u32) < self.w && (y as u32) < self.h).then(|| self.cells[(y as u32 * self.w + x as u32) as usize])
     }
 
-    /// `0x1420a6d30`.
+    /// `0x1420a6eb0`.
     fn free(&self, origin: (i32, i32), (w, h): (u32, u32)) -> bool {
         (0..h as i32).all(|dy| (0..w as i32).all(|dx| self.state((origin.0 + dx, origin.1 + dy)).is_some_and(|s| s < 2)))
     }
 
-    /// `0x1420a73d0` (`0x1420a6fb0` gives a placeholder an empty door ring).
+    /// `0x1420a7550` (`0x1420a7130` gives a placeholder an empty door ring).
     fn stamp(&mut self, mut room: PlacedRoom) -> Result<(), GenError> {
         if room.exits.is_empty() {
             room.exits = vec![Exit { door: None, height: 0, chiral: false }; (2 * (room.size.0 + room.size.1)) as usize];
@@ -357,7 +357,7 @@ impl FileGroups {
         FileGroups { groups }
     }
 
-    /// `0x1420adfd0`: a file of the group by `below(count)`; when the group gave files before,
+    /// `0x1420ae150`: a file of the group by `below(count)`; when the group gave files before,
     /// the unused ones are drawn again (`below(left)`) if any are left. The pick is recorded.
     pub fn pick(&self, group: &str, used: &mut HashMap<String, Vec<String>>, rng: &mut TerrainRng) -> Result<String, GenError> {
         let list = self
@@ -417,15 +417,15 @@ fn dungeon_room(r: &crate::rooms::RoomDef) -> DungeonRoom {
     DungeonRoom { path: r.path.clone(), tag: if special { String::new() } else { r.tag.clone() }, generic, unique, special, list, chance, weight: r.weight, root_door, mask: r.orientations, units, exits, corners, blank, side: arm.dimensions.side_length, missions }
 }
 
-/// The dungeon layout of a pruned `.dgr` graph (`0x1420ac3e0`); `overlap` is the master's
+/// The dungeon layout of a pruned `.dgr` graph (`0x1420ac560`); `overlap` is the master's
 /// `RoomOverlap`.
 pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet, overlap: u32, unit_size: u32, fill_height: Option<i32>, file_groups: &FileGroups, paired: Option<&[PlacedRoom]>, rng: &mut TerrainRng) -> Result<Grid, GenError> {
     let mut types = TerrainTypes::default();
     let mut rooms: Vec<DungeonRoom> = set.rooms.iter().map(dungeon_room).collect();
-    // `0x141f99b20` → `0x141f9a830` → `0x141f98bb0`: the room set loader adds every room to the
+    // `0x141f99ca0` → `0x141f9a9b0` → `0x141f98d30`: the room set loader adds every room to the
     // per-ground size lists once per distinct door type of its exits; a door-less room once for
     // its default type, and once more when that type is virtual with equal split types (the
-    // `0x141f9a830` lambda). MapSunTemple's `open_01..05` (root edges
+    // `0x141f9a9b0` lambda). MapSunTemple's `open_01..05` (root edges
     // `capped_thickwall_virtual.et`) count twice, MapUberBoss_CopperCitadel's `dune_fill_01`
     // once. Taken as the room's first root-key edge (room data +0x180, not confirmed).
     // `POE_FILLER_SETS=1`: the older rule (blank rooms of all the area's room sets, summed).
@@ -475,9 +475,9 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
     }
     let fields: Vec<EdgeFields> = graph.edges.iter().map(|e| EdgeFields::parse(&e.extra, graph.version)).collect::<Result<_, _>>()?;
     // A node's side slots (node +0x58..+0x78): its edges in slot order. The loader fills them
-    // by edge index (`0x141d1c580`); an edge merged by the prune (`remove_node`, `0x141fec1c0`)
+    // by edge index (`0x141d1c700`); an edge merged by the prune (`remove_node`, `0x141fec340`)
     // takes its new node's first free slot, so it can come after edges of higher index (the
-    // typeless room size pick `0x1420afa40` reads the first slot of a non-default type).
+    // typeless room size pick `0x1420afbc0` reads the first slot of a non-default type).
     let touches = |e: usize, n: usize| !removed[e] && (graph.edges[e].from as usize == n || graph.edges[e].to as usize == n);
     let slots: Vec<Vec<usize>> = (0..graph.nodes.len())
         .map(|n| {
@@ -514,7 +514,7 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
     let height = |n: usize| graph.nodes[n].values.get(1).copied().unwrap_or(0);
     let priority = |n: usize| graph.nodes[n].values.get(2).copied().unwrap_or(0) as i8;
 
-    // `0x1420aa500`: typed nodes, then typeless ones, each stable-sorted by priority.
+    // `0x1420aa680`: typed nodes, then typeless ones, each stable-sorted by priority.
     let mut typed: Vec<usize> = (0..graph.nodes.len()).filter(|&n| !graph.nodes[n].room_type.is_empty()).collect();
     let mut typeless: Vec<usize> = (0..graph.nodes.len()).filter(|&n| graph.nodes[n].room_type.is_empty()).collect();
     typed.sort_by_key(|&n| std::cmp::Reverse(priority(n)));
@@ -522,7 +522,7 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
     let _ = &typeless;
 
     let void = |n: usize| graph.nodes[n].extra.first().is_some_and(|v| v.eq_ignore_ascii_case("V"));
-    // `0x1420ad420` / `0x141fa8710`: each void edge blocks the cells of a line through its
+    // `0x1420ad5a0` / `0x141fa8890`: each void edge blocks the cells of a line through its
     // points (and its end nodes that are void).
     for (e, edge) in graph.edges.iter().enumerate() {
         if removed[e] || !fields[e].void {
@@ -566,7 +566,7 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
         }
     }
 
-    // `0x142095d90`: an accessible edge, or an `accessible` / `default` / `entrance…` /
+    // `0x142095f10`: an accessible edge, or an `accessible` / `default` / `entrance…` /
     // `sideentrance…` tag.
     let node_early = |n: usize| {
         slots[n].iter().any(|&e| fields[e].accessible)
@@ -579,11 +579,11 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
     let node_accessible = |n: usize| {
         // An edgeless typed node (`bonfire` of the Gallows village graphs) is reachable: the client's
         // fill treats its cells as walkable (chest fill rooms are offered; G1_13_2). The rule behind
-        // it is not found (`0x142095d90` returns 0 for it, no extra door reaches it); it is derived
+        // it is not found (`0x142095f10` returns 0 for it, no extra door reaches it); it is derived
         // from the traces (G1_13_2: 1835 of 1842 jobs match with it).
         node_late(n) || node_early(n)
     };
-    // `0x1420af7d0`: typed or tagged nodes, or nodes with an impenetrable edge.
+    // `0x1420af950`: typed or tagged nodes, or nodes with an impenetrable edge.
     let node_blocked = |n: usize| {
         !graph.nodes[n].room_type.is_empty() || !graph.nodes[n].tags.is_empty() || slots[n].iter().any(|&e| fields[e].impenetrable.eq_ignore_ascii_case("I"))
     };
@@ -594,7 +594,7 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
             continue;
         }
         let node = &graph.nodes[n];
-        // `0x1420adfd0`: a `graph` node reserves its subgraph's rectangle (tags: graph file or
+        // `0x1420ae150`: a `graph` node reserves its subgraph's rectangle (tags: graph file or
         // file group, width, height; turned with the region).
         if node.room_type.eq_ignore_ascii_case("graph") {
             let tag = |i: usize| node.tags.get(i).cloned().unwrap_or_default();
@@ -618,7 +618,7 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
             let chiral = grid.is_chiral(&door) && ((edge.from as usize == n) ^ (edge.values.get(1).copied().unwrap_or(0) != 0));
             Exit { door: Some(door), height: h, chiral }
         };
-        // Required exits (`0x1420ad6b0`, `0x141f96730`).
+        // Required exits (`0x1420ad830`, `0x141f968b0`).
         let required: Vec<Exit> = slots[n].iter().map(|&e| exit_for(e)).collect();
         // The type's rooms in every allowed orientation (`RoomSet` entries).
         let mut all: Vec<Candidate> = Vec::new();
@@ -638,7 +638,7 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
         }
         let cands: Vec<Candidate> = if no == 9 {
             // `(best)`: each edge takes the free side closest to its direction, then
-            // `GetExactRooms` (`0x141fc0350`), else the looser `0x141fc0460`.
+            // `GetExactRooms` (`0x141fc04d0`), else the looser `0x141fc05e0`.
             match best_sides(graph, &slots[n], n) {
                 Some(sides) => {
                     let sides: [Exit; 4] = sides.map(|s| s.map_or(empty.clone(), exit_for));
@@ -663,13 +663,13 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
                 None => Vec::new(),
             }
         } else {
-            // `GetPossibleRooms` (`0x141f9b8f0`): doors containing the required ones.
+            // `GetPossibleRooms` (`0x141f9ba70`): doors containing the required ones.
             all.into_iter().filter(|c| contains(&c.exits, &required)).collect()
         };
         if cands.is_empty() {
             return Err(unsupported(format!("dungeon node {n} ({}): no room (GetFeatureRooms not ported)", node.room_type)));
         }
-        // `0x1420d1110`: orientation and fit; candidates whose doors disagree with a neighbour
+        // `0x1420d1290`: orientation and fit; candidates whose doors disagree with a neighbour
         // are dropped when others remain.
         let pos = unit(n);
         if std::env::var("POE_DBG").is_ok() {
@@ -705,7 +705,7 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
         let extra_door = extra_door_pick(&slots[n], &fields, rng);
         grid.stamp(PlacedRoom { path: rooms[c.room].path.clone(), node: Some(n), origin, size: c.size, orientation: c.o, exits: c.exits, extra_door, height: height(n), accessible: node_accessible(n), blocked: node_blocked(n), extra_pct: node_extra(n), door_type: None, special: false, late_access: node_late(n), subgraph: None })?;
     }
-    // Typeless nodes (`0x1420afdd0`): a room size drawn from the size map of the node's first
+    // Typeless nodes (`0x1420aff50`): a room size drawn from the size map of the node's first
     // edge type until one fits; the room itself comes later.
     let sizes = size_map_final(&rooms);
     for &n in &typeless {
@@ -723,7 +723,7 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
         if grid.cells[i] != 0 {
             return Err(unsupported(format!("dungeon node {n} overlaps another room at {pos:?}")));
         }
-        // `0x1420afa40`: the first edge whose type is not the default, else the default.
+        // `0x1420afbc0`: the first edge whose type is not the default, else the default.
         let door = slots[n]
             .iter()
             .map(|&e| graph.edges[e].edge_type.to_ascii_lowercase())
@@ -754,7 +754,7 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
             let origin = size_origin(graph.region, pos, (w, h));
             let inside = origin.0 >= 0 && origin.1 >= 0 && origin.0 as u32 + w <= grid.w && origin.1 as u32 + h <= grid.h;
             let clear = inside && (0..h as i32).all(|dy| (0..w as i32).all(|dx| grid.state((origin.0 + dx, origin.1 + dy)) == Some(0)));
-            // `0x1420af6a0`: the rectangle must not hold another node.
+            // `0x1420af820`: the rectangle must not hold another node.
             let swallows = |m: usize| {
                 let p = unit(m);
                 m != n && p.0 >= origin.0 && p.0 < origin.0 + w as i32 && p.1 >= origin.1 && p.1 < origin.1 + h as i32
@@ -775,9 +775,9 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
         }
     }
     corridors(files, graph, removed, &fields, &rooms, &sizes, &mut grid, &mut types, rng)?;
-    // `0x1420a9590` (open door counts) draws nothing; filler rooms (`0x1420b19f0`), the special
-    // rooms (`0x1420aa710`; the request-driven steps after it, `0x1420aab60` / `0x1420aacf0`
-    // extra rooms and `0x1420abf60` shrines, have nothing to place for a plain area), then the
+    // `0x1420a9710` (open door counts) draws nothing; filler rooms (`0x1420b1b70`), the special
+    // rooms (`0x1420aa890`; the request-driven steps after it, `0x1420aace0` / `0x1420aae70`
+    // extra rooms and `0x1420ac0e0` shrines, have nothing to place for a plain area), then the
     // reserved cells are freed and the filler rooms run again.
     filler_rooms(&rooms, &fillers, &mut grid, &mut types, files, fill_height, rng)?;
     special_rooms(files, &rooms, &mut grid, &mut types, rng)?;
@@ -796,7 +796,7 @@ pub fn layout(files: &dyn Files, graph: &Graph, removed: &[bool], set: &RoomSet,
     Ok(grid)
 }
 
-/// `0x1420ad6b0` for `(best)` nodes: per edge, the sides its direction leans to (x first, then
+/// `0x1420ad830` for `(best)` nodes: per edge, the sides its direction leans to (x first, then
 /// y) with their angle to that side; sorted by angle, the smallest first takes its side if free
 /// (dropping the edge's other proposals). `None` unless every edge gets a side. Sides: 0 up,
 /// 1 right, 2 down, 3 left.
@@ -822,7 +822,7 @@ fn best_sides(graph: &Graph, slots: &[usize], n: usize) -> Option<[Option<usize>
             props.push((e, 2, angle(d, (0, 100)) as u32));
         }
     }
-    // `0x1420d5840`: stable, largest angle first.
+    // `0x1420d59c0`: stable, largest angle first.
     props.sort_by_key(|p| std::cmp::Reverse(p.2));
     let mut sides: [Option<usize>; 4] = [None; 4];
     while let Some(&(e, side, _)) = props.last() {
@@ -836,7 +836,7 @@ fn best_sides(graph: &Graph, slots: &[usize], n: usize) -> Option<[Option<usize>
     (sides.iter().flatten().count() == slots.len()).then_some(sides)
 }
 
-/// `0x141fc0350` (`loose` = `None`) / `0x141fc0460`: every side of the candidate's door ring
+/// `0x141fc04d0` (`loose` = `None`) / `0x141fc05e0`: every side of the candidate's door ring
 /// holds that side's required exit; the loose form also accepts a side with no required door
 /// whose doors may all be left closed (`.et` flag 0x10).
 fn exact_sides(c: &Candidate, sides: &[Exit; 4], mut loose: Option<&mut dyn FnMut(&str) -> bool>) -> bool {
@@ -858,7 +858,7 @@ fn exact_sides(c: &Candidate, sides: &[Exit; 4], mut loose: Option<&mut dyn FnMu
     })
 }
 
-/// `0x1420966f0`: the extra door type, drawn from the node's edges weighted by their extra
+/// `0x142096870`: the extra door type, drawn from the node's edges weighted by their extra
 /// door %.
 fn extra_door_pick(slots: &[usize], fields: &[EdgeFields], rng: &mut TerrainRng) -> Option<String> {
     let weighted: Vec<(usize, u32)> = slots.iter().map(|&e| (e, fields[e].extra_door)).filter(|w| w.1 != 0).collect();
@@ -878,7 +878,7 @@ fn extra_door_pick(slots: &[usize], fields: &[EdgeFields], rng: &mut TerrainRng)
     Some(if t.is_empty() { "metadata/terrain/dungeon/rooms.et".to_string() } else { t.to_ascii_lowercase() })
 }
 
-/// `0x1420d0000`: a `size:W` or `size:WxH` node tag.
+/// `0x1420d0180`: a `size:W` or `size:WxH` node tag.
 fn forced_size(tags: &[String]) -> Option<(u32, u32)> {
     let t = tags.iter().find_map(|t| t.strip_prefix("size:"))?;
     match t.split_once('x') {
@@ -887,7 +887,7 @@ fn forced_size(tags: &[String]) -> Option<(u32, u32)> {
     }
 }
 
-/// `0x1420afdd0`: the origin of a `w`×`h` size at a node's unit cell (the extent is taken off on
+/// `0x1420aff50`: the origin of a `w`×`h` size at a node's unit cell (the extent is taken off on
 /// axes the region mirrors; not clamped).
 fn size_origin(region: u8, pos: (i32, i32), (w, h): (u32, u32)) -> (i32, i32) {
     const TABLE: [[u8; 3]; 9] = crate::region::TABLE;
@@ -899,7 +899,7 @@ fn size_origin(region: u8, pos: (i32, i32), (w, h): (u32, u32)) -> (i32, i32) {
     (x, y)
 }
 
-/// The size lists per door type after `0x141f995a0`: sizes of generic rooms with their summed
+/// The size lists per door type after `0x141f99720`: sizes of generic rooms with their summed
 /// weights, keeping only sizes some non-unique generic room has.
 fn size_map_final(rooms: &[DungeonRoom]) -> Vec<(String, Vec<((u32, u32), u32)>)> {
     let mut all: Vec<(String, Vec<((u32, u32), u32)>)> = Vec::new();
@@ -910,7 +910,7 @@ fn size_map_final(rooms: &[DungeonRoom]) -> Vec<(String, Vec<((u32, u32), u32)>)
             continue;
         }
         let (w, h) = r.units;
-        // `0x141f99b20`: each distinct door type other than the default; a room with only
+        // `0x141f99ca0`: each distinct door type other than the default; a room with only
         // default doors counts under the default (room data +0x180).
         const DEFAULT: &str = "metadata/terrain/dungeon/rooms.et";
         let mut seen: Vec<&String> = Vec::new();
@@ -954,7 +954,7 @@ fn size_map_final(rooms: &[DungeonRoom]) -> Vec<(String, Vec<((u32, u32), u32)>)
                     Some(e) => e.1 += weight,
                     None => all[k].1.push((size, weight)),
                 }
-                // `0x141f98bb0`: a default-type room counts as a plain size only with every
+                // `0x141f98d30`: a default-type room counts as a plain size only with every
                 // position a default door at height 0.
                 let full = door != DEFAULT || r.exits.iter().all(|e| e.door.is_some() && e.height == 0);
                 if !r.unique && full && !plain[k].1.contains(&size) {
@@ -981,7 +981,7 @@ fn pick(kept: &[(Candidate, (i32, i32), bool)], mut r: u32) -> usize {
     kept.len() - 1
 }
 
-/// `0x141f9b7a0`: every required door is among the candidate's (as a multiset).
+/// `0x141f9b920`: every required door is among the candidate's (as a multiset).
 fn contains(exits: &[Exit], required: &[Exit]) -> bool {
     let mut count: HashMap<&Exit, i32> = HashMap::new();
     for e in exits {
@@ -994,7 +994,7 @@ fn contains(exits: &[Exit], required: &[Exit]) -> bool {
     })
 }
 
-/// `0x1420aefc0`: the room's origin for a node at unit `pos` (the room's extent is taken off on
+/// `0x1420af140`: the room's origin for a node at unit `pos` (the room's extent is taken off on
 /// axes the region mirrors), clamped into the grid.
 fn origin_for(grid: &Grid, region: u8, pos: (i32, i32), (w, h): (u32, u32)) -> (i32, i32) {
     const TABLE: [[u8; 3]; 9] = crate::region::TABLE;
@@ -1009,7 +1009,7 @@ fn origin_for(grid: &Grid, region: u8, pos: (i32, i32), (w, h): (u32, u32)) -> (
     (x, y)
 }
 
-/// `0x1420af280`: the room fits at `origin` (free cells; at least `need` doors lead into the
+/// `0x1420af400`: the room fits at `origin` (free cells; at least `need` doors lead into the
 /// grid). Returns whether a door faces a placed room whose door there differs.
 fn fits(grid: &Grid, c: &Candidate, origin: (i32, i32), need: u32, can_end: &mut dyn FnMut(&str) -> bool) -> Option<bool> {
     if !grid.free(origin, c.size) {
@@ -1028,7 +1028,7 @@ fn fits(grid: &Grid, c: &Candidate, origin: (i32, i32), need: u32, can_end: &mut
         if state < 2 || mismatch {
             continue;
         }
-        // The default door type and doors of an edge type that may end never mark (`0x1420af280`).
+        // The default door type and doors of an edge type that may end never mark (`0x1420af400`).
         if door == "metadata/terrain/dungeon/rooms.et" || can_end(door) {
             continue;
         }
@@ -1047,7 +1047,7 @@ fn fits(grid: &Grid, c: &Candidate, origin: (i32, i32), need: u32, can_end: &mut
     Some(mismatch)
 }
 
-/// `0x1420b1550`: a room right next to the rectangle is the same `.arm`.
+/// `0x1420b16d0`: a room right next to the rectangle is the same `.arm`.
 fn repeats(grid: &Grid, path: &str, origin: (i32, i32), (w, h): (u32, u32)) -> bool {
     let mut cells = Vec::new();
     for dx in 0..w as i32 {
@@ -1061,7 +1061,7 @@ fn repeats(grid: &Grid, path: &str, origin: (i32, i32), (w, h): (u32, u32)) -> b
     cells.iter().any(|&c| grid.state(c).is_some_and(|s| s >= 2 && grid.rooms[s as usize - 2].path.eq_ignore_ascii_case(path)))
 }
 
-/// The room-size map per door type (`0x141f98bb0`, room set +0x28): every generic room adds its
+/// The room-size map per door type (`0x141f98d30`, room set +0x28): every generic room adds its
 /// `.rs` weight to (w, h) under each door type it has (once per type), and to (h, w) when it is
 /// not square and its orientations include odd ones. Rooms tagged `shrine` or `mission` are kept
 /// apart and add nothing.
@@ -1112,7 +1112,7 @@ pub fn size_report(set: &RoomSet) -> String {
         .join("\n")
 }
 
-/// Per placed room (`0x1420a5e50` records, 0x30 bytes): a random cost and search state.
+/// Per placed room (`0x1420a5fd0` records, 0x30 bytes): a random cost and search state.
 #[derive(Debug, Clone, Default)]
 struct Record {
     /// +0: on an impenetrable corridor.
@@ -1132,9 +1132,9 @@ struct Record {
     heights: Vec<i32>,
 }
 
-/// The corridor stage of `0x1420ac3e0` (step 4): edge batches, the shuffle (`0x141fa8b60`), then
-/// per batch (`0x1420a2c70` → `0x1420acdd0`): placeholders on every free cell (`0x1420a6140`),
-/// records (`0x1420a6030`) and the edge connections (`0x1420a3a20`, not ported).
+/// The corridor stage of `0x1420ac560` (step 4): edge batches, the shuffle (`0x141fa8ce0`), then
+/// per batch (`0x1420a2df0` → `0x1420acf50`): placeholders on every free cell (`0x1420a62c0`),
+/// records (`0x1420a61b0`) and the edge connections (`0x1420a3ba0`, not ported).
 #[allow(clippy::too_many_arguments)]
 fn corridors(
     files: &dyn Files,
@@ -1152,13 +1152,13 @@ fn corridors(
     if graph.edges.is_empty() {
         return Ok(());
     }
-    // `0x1420ac3e0`: the corridor stage runs only when some edge batch is non-empty (void and
+    // `0x1420ac560`: the corridor stage runs only when some edge batch is non-empty (void and
     // removed edges make none); otherwise records, corridors, doors and room assignment are all
     // skipped (a container graph whose only edge is a void one).
     if !(0..graph.edges.len()).any(|e| !removed[e] && !fields[e].void) {
         return Ok(());
     }
-    // `0x1420a5e50`: one record per placed room with a `below(128)` cost.
+    // `0x1420a5fd0`: one record per placed room with a `below(128)` cost.
     let mut records: Vec<Record> = Vec::new();
     let grow = |records: &mut Vec<Record>, grid: &Grid, rng: &mut TerrainRng| {
         while records.len() < grid.rooms.len() {
@@ -1166,9 +1166,9 @@ fn corridors(
         }
     };
     grow(&mut records, grid, rng);
-    // `0x141fa8df0`: non-void edges by priority (ascending), then three containers (edge types
+    // `0x141fa8f70`: non-void edges by priority (ascending), then three containers (edge types
     // with exactly one room size, other types, the default type), each ordered by
-    // `0x141fa7920` with equal keys kept in edge order.
+    // `0x141fa7aa0` with equal keys kept in edge order.
     let priority = |e: usize| graph.edges[e].values.get(2).copied().unwrap_or(0) as i8;
     let mut keys: Vec<(i8, u8, (bool, i32, u8, String), usize)> = Vec::new();
     for e in 0..graph.edges.len() {
@@ -1205,7 +1205,7 @@ fn corridors(
         }
     }
     if std::env::var("POE_DBG_BATCHES").is_ok() { for k in &keys { eprintln!("BKEY edge {} prio {} cont {} key {:?}", k.3, k.0, k.1, k.2); } }
-    // `0x141fc00f0`: a discarded `below(n)`, a forward Fisher-Yates shuffle, then a stable sort
+    // `0x141fc0270`: a discarded `below(n)`, a forward Fisher-Yates shuffle, then a stable sort
     // by priority.
     for b in &mut batches {
         rng.below(b.len() as u32);
@@ -1221,7 +1221,7 @@ fn corridors(
     }
     let mut paths: Vec<Corridor> = Vec::new();
     let mark_used = |grid: &Grid, records: &mut [Record]| {
-        // `0x1420a6030`: rooms with an `.arm` count as used (placeholders with a tag list would
+        // `0x1420a61b0`: rooms with an `.arm` count as used (placeholders with a tag list would
         // too, but only typed nodes' rooms carry their tags, and those have an `.arm`).
         for (i, r) in grid.rooms.iter().enumerate() {
             if !r.is_placeholder() {
@@ -1240,17 +1240,17 @@ fn corridors(
         }
         compact(grid, &mut records, &mut paths);
     }
-    // `0x1420a50e0`: the corridor types sorted by path (`0x1420db6f0`), a discarded `below(n)`
+    // `0x1420a5260`: the corridor types sorted by path (`0x1420db870`), a discarded `below(n)`
     // and a shuffle, then stable-partitioned into types with exactly one room size
-    // (`0x1420a55b0`), other types, and the default type last; types with a branching edge get
-    // placeholders, records and branches (`0x1420a5680`).
+    // (`0x1420a5730`), other types, and the default type last; types with a branching edge get
+    // placeholders, records and branches (`0x1420a5800`).
     let mut keys: Vec<String> = Vec::new();
     for c in &paths {
         if !keys.contains(&c.key) {
             keys.push(c.key.clone());
         }
     }
-    // `0x1420db6f0` compares the resource paths as the graph spells them (case-sensitive).
+    // `0x1420db870` compares the resource paths as the graph spells them (case-sensitive).
     let original = |k: &str| -> String {
         graph.edges.iter().map(|e| e.edge_type.as_str()).chain(fields.iter().map(|f| f.branching_type.as_str())).find(|n| n.eq_ignore_ascii_case(k)).unwrap_or(k).to_string()
     };
@@ -1284,8 +1284,8 @@ fn corridors(
     Ok(())
 }
 
-/// `0x1420b0fe0` per used room (`0x1420da7c0`): a placeholder takes a non-unique generic room
-/// whose doors match its own (`RoomSet` size buckets, `0x141f9b280` / `0x141f9b430`), drawn by
+/// `0x1420b1160` per used room (`0x1420da940`): a placeholder takes a non-unique generic room
+/// whose doors match its own (`RoomSet` size buckets, `0x141f9b400` / `0x141f9b5b0`), drawn by
 /// weight, with an orientation drawn from the matching ones (`below(840)`); a second draw when a
 /// neighbour is the same room.
 fn assign_rooms(files: &dyn Files, graph: &Graph, rooms: &[DungeonRoom], grid: &mut Grid, records: &[Record], types: &mut TerrainTypes, rng: &mut TerrainRng) -> Result<(), GenError> {
@@ -1295,7 +1295,7 @@ fn assign_rooms(files: &dyn Files, graph: &Graph, rooms: &[DungeonRoom], grid: &
         if !r.generic || r.unique {
             continue;
         }
-        // The matcher merges consecutive entries of one `.arm` (`0x141f9b430`): a room listed
+        // The matcher merges consecutive entries of one `.arm` (`0x141f9b5b0`): a room listed
         // twice in a row in the `.rs` (G3_5 `1x1/tri_01.arm`) keeps the first line's weight.
         let ri = rooms.iter().position(|q| q.path.eq_ignore_ascii_case(&r.path)).unwrap_or(ri);
         let weight = rooms[ri].weight;
@@ -1364,7 +1364,7 @@ fn assign_rooms(files: &dyn Files, graph: &Graph, rooms: &[DungeonRoom], grid: &
     Ok(())
 }
 
-/// `0x141f9b430`: entries of the placeholder's size whose doors include its doors (type,
+/// `0x141f9b5b0`: entries of the placeholder's size whose doors include its doors (type,
 /// height); `mode` 2 allows no other doors, 1 only optional ones (`.et` flag 0x10), 0 any.
 /// Orientations of one room merge (mask); its weight is (empty matches² × 10 + 1) × the `.rs`
 /// weight of its first matching orientation.
@@ -1419,7 +1419,7 @@ fn open_into_impenetrable(graph: &Graph) -> bool {
     graph.extra_header.as_deref().is_some_and(|v| v != "0")
 }
 
-/// `0x1420a99e0`: extra doors. Per room with an extra door chance: its door positions (empty or
+/// `0x1420a9b60`: extra doors. Per room with an extra door chance: its door positions (empty or
 /// of its extra door type) facing a room it is not yet joined to (open, and one of the two
 /// accessible) are shuffled (a discarded `below(n)` first); each one both sides could take
 /// opens with `below(100)` under the chance (a chance over 100 opens more than one).
@@ -1474,12 +1474,12 @@ fn extra_doors(grid: &mut Grid, generic: &[(u32, u32, Vec<Exit>)], into_impenetr
     Ok(())
 }
 
-/// `0x141fa8320`: the rooms already share an open door.
+/// `0x141fa84a0`: the rooms already share an open door.
 fn joined(a: &PlacedRoom, b: &PlacedRoom) -> bool {
     (0..a.exits.len() as u32).any(|u| a.exits[u as usize].door.is_some() && facing(a, b, u).is_some_and(|v| b.exits[v as usize].door == a.exits[u as usize].door))
 }
 
-/// A corridor (`0x1420a3a20`'s 0x28-byte record under its type key): rooms from the edge's
+/// A corridor (`0x1420a3ba0`'s 0x28-byte record under its type key): rooms from the edge's
 /// to-node room back to its from-node room.
 #[derive(Debug, Clone)]
 struct Corridor {
@@ -1505,7 +1505,7 @@ fn generic_shapes(grid: &Grid, rooms: &[DungeonRoom]) -> Vec<(u32, u32, Vec<Exit
     out
 }
 
-/// `0x1420a2e90`: a corridor height on the room at `cell` (unused placeholders only).
+/// `0x1420a3010`: a corridor height on the room at `cell` (unused placeholders only).
 fn mark_height(grid: &Grid, records: &mut [Record], cell: (i32, i32), height: i32) {
     let Some(s) = grid.state(cell) else { return };
     if s < 2 {
@@ -1524,7 +1524,7 @@ fn mark_height(grid: &Grid, records: &mut [Record], cell: (i32, i32), height: i3
     }
 }
 
-/// `0x141d047b0`: a door type whose two sides differ (a height change, two grounds, or a virtual
+/// `0x141d04930`: a door type whose two sides differ (a height change, two grounds, or a virtual
 /// type whose split types differ or are themselves asymmetric with equal chirality bits).
 fn asymmetric(files: &dyn Files, types: &mut TerrainTypes, path: &str) -> Result<bool, GenError> {
     let et = types.edge(files, path)?.clone();
@@ -1537,7 +1537,7 @@ fn asymmetric(files: &dyn Files, types: &mut TerrainTypes, path: &str) -> Result
     Ok(asymmetric(files, types, &et.splits[0].0)? && et.splits[0].1 == et.splits[1].1)
 }
 
-/// The marking of `0x1420a2fb0` for edge `e`'s door type: `None` for a symmetric type (every
+/// The marking of `0x1420a3130` for edge `e`'s door type: `None` for a symmetric type (every
 /// door-less side), else which corridor sides mark (left ground, right ground: none or `.gt`
 /// flag 1).
 fn side_marks(files: &dyn Files, types: &mut TerrainTypes, graph: &Graph, e: usize) -> Result<Option<(bool, bool)>, GenError> {
@@ -1550,10 +1550,10 @@ fn side_marks(files: &dyn Files, types: &mut TerrainTypes, graph: &Graph, e: usi
     Ok(Some((side(&grounds[0]), side(&grounds[1]))))
 }
 
-/// `0x1420a2fb0`: with an overlap, the corridor's height goes to the rooms outside `room`'s
+/// `0x1420a3130`: with an overlap, the corridor's height goes to the rooms outside `room`'s
 /// door-less positions; `room` lies between `next` (towards the start) and `prev` on the
 /// corridor. For an asymmetric door type (`marks`) only the sides at the corridor's left or
-/// right are marked (`0x1420a34c0`): side `k` = (1 + 2·chirality + side of the door) & 3 for the
+/// right are marked (`0x1420a3640`): side `k` = (1 + 2·chirality + side of the door) & 3 for the
 /// doors to `next` (chirality flipped) and `prev`, per marking ground.
 #[allow(clippy::too_many_arguments)]
 fn mark_around(grid: &Grid, records: &mut [Record], room: usize, next: usize, prev: usize, door: &str, chir: bool, marks: Option<(bool, bool)>) {
@@ -1580,7 +1580,7 @@ fn mark_around(grid: &Grid, records: &mut [Record], room: usize, next: usize, pr
     }
 }
 
-/// `0x1420a34c0`: side `k` of the ring has no door: mark one strip; the ring side checked and
+/// `0x1420a3640`: side `k` of the ring has no door: mark one strip; the ring side checked and
 /// the strip marked differ as in the client (ring side top, right, bottom, left marks the strip
 /// above, below, left, right).
 fn mark_side(grid: &Grid, records: &mut [Record], room: usize, k: u32) {
@@ -1598,7 +1598,7 @@ fn mark_side(grid: &Grid, records: &mut [Record], room: usize, k: u32) {
     mark_strip(grid, records, room, k);
 }
 
-/// One strip of `0x1420a2fb0`'s plain marking: 0 above, 1 below, 2 left, 3 right of `room`.
+/// One strip of `0x1420a3130`'s plain marking: 0 above, 1 below, 2 left, 3 right of `room`.
 fn mark_strip(grid: &Grid, records: &mut [Record], room: usize, strip: u32) {
     let r = grid.rooms[room].clone();
     let (x, y, w, h) = (r.origin.0, r.origin.1, r.size.0 as i32, r.size.1 as i32);
@@ -1634,7 +1634,7 @@ fn mark_strip(grid: &Grid, records: &mut [Record], room: usize, strip: u32) {
     }
 }
 
-/// A branch start (`0x1420a4a10`, 0x18 bytes).
+/// A branch start (`0x1420a4b90`, 0x18 bytes).
 #[derive(Debug, Clone)]
 struct BranchCand {
     room: usize,
@@ -1648,7 +1648,7 @@ struct BranchCand {
     extra_door: String,
 }
 
-/// `0x1420a4910` / `0x1420a4a10`: neighbours of `parent` that can start a branch.
+/// `0x1420a4a90` / `0x1420a4b90`: neighbours of `parent` that can start a branch.
 #[allow(clippy::too_many_arguments)]
 fn branch_starts(grid: &Grid, records: &[Record], generic: &[(u32, u32, Vec<Exit>)], parent: usize, proto: &BranchCand, door: &str, out: &mut Vec<BranchCand>) {
     let height = proto.height;
@@ -1667,7 +1667,7 @@ fn branch_starts(grid: &Grid, records: &[Record], generic: &[(u32, u32, Vec<Exit
     }
 }
 
-/// `0x1420a4090`: a door from `a` towards `b`: an existing one at the height, or a free position
+/// `0x1420a4210`: a door from `a` towards `b`: an existing one at the height, or a free position
 /// of a placeholder that some untyped room could still take with that door added.
 fn can_branch(grid: &Grid, generic: &[(u32, u32, Vec<Exit>)], a: usize, b: usize, height: i32, door: &str) -> bool {
     let (ra, rb) = (&grid.rooms[a], &grid.rooms[b]);
@@ -1697,13 +1697,13 @@ fn chance_count(chance: i32, n: usize, rng: &mut TerrainRng) -> usize {
     (k as usize).min(n)
 }
 
-/// `0x1420a5680`: branches off the corridors of one type.
+/// `0x1420a5800`: branches off the corridors of one type.
 #[allow(clippy::too_many_arguments)]
 fn branch(graph: &Graph, fields: &[EdgeFields], marks: &[Option<(bool, bool)>], key: &str, generic: &[(u32, u32, Vec<Exit>)], grid: &mut Grid, records: &mut [Record], paths: &[Corridor], rng: &mut TerrainRng) -> Result<(), GenError> {
     let branching = |n: u32| graph.nodes[n as usize].extra.get(1).is_some_and(|v| v != "0");
     for c in paths.iter().filter(|c| c.key == key) {
         let edge = &graph.edges[c.edge];
-        // The first loop of `0x1420a5680`: the corner marking of `connect` again for every
+        // The first loop of `0x1420a5800`: the corner marking of `connect` again for every
         // inner room of the corridor. The placeholders of the branch pass are new (the unused
         // ones of the corridor pass left in `compact`), so they take their heights here.
         let (door, chir) = (edge.edge_type.to_ascii_lowercase(), edge.values.get(1).copied().unwrap_or(0) != 0);
@@ -1724,7 +1724,7 @@ fn branch(graph: &Graph, fields: &[EdgeFields], marks: &[Option<(bool, bool)>], 
             }
         }
     }
-    // `0x1420a4c90`: branch starts along each corridor with a branching chance.
+    // `0x1420a4e10`: branch starts along each corridor with a branching chance.
     let mut starts: Vec<BranchCand> = Vec::new();
     for c in paths.iter().filter(|c| c.key == key) {
         let f = &fields[c.edge];
@@ -1785,7 +1785,7 @@ fn branch(graph: &Graph, fields: &[EdgeFields], marks: &[Option<(bool, bool)>], 
     Ok(())
 }
 
-/// `0x1420a5ba0`: a branch room off its parent (a door; heights on its surroundings; deeper
+/// `0x1420a5d20`: a branch room off its parent (a door; heights on its surroundings; deeper
 /// starts while depth remains).
 fn grow_branch(grid: &mut Grid, records: &mut [Record], generic: &[(u32, u32, Vec<Exit>)], c: &BranchCand, door: &str, next: &mut Vec<BranchCand>, rng: &mut TerrainRng) -> Result<(), GenError> {
     let rec = &records[c.room];
@@ -1835,14 +1835,14 @@ fn centre(r: &PlacedRoom) -> (i32, i32) {
     (2 * r.origin.0 + r.size.0 as i32, 2 * r.origin.1 + r.size.1 as i32)
 }
 
-/// `0x1420a3a20`: an edge between the rooms under its nodes: A* over rooms (`0x1420a4330`),
-/// then doors along the path (`0x141fa8140`).
+/// `0x1420a3ba0`: an edge between the rooms under its nodes: A* over rooms (`0x1420a44b0`),
+/// then doors along the path (`0x141fa82c0`).
 fn connect(graph: &Graph, e: usize, f: &EdgeFields, marks: Option<(bool, bool)>, grid: &mut Grid, records: &mut [Record], paths: &mut Vec<Corridor>, rng: &mut TerrainRng) -> Result<(), GenError> {
     let edge = &graph.edges[e];
     let cell = |n: usize| (graph.nodes[n].x / 23, graph.nodes[n].y / 23);
     let (a, b) = (grid.state(cell(edge.from as usize)), grid.state(cell(edge.to as usize)));
     let (Some(a), Some(b)) = (a, b) else {
-        return Err(unsupported(format!("dungeon edge {e}: an end outside the grid (0x1420a3770 not ported)")));
+        return Err(unsupported(format!("dungeon edge {e}: an end outside the grid (0x1420a38f0 not ported)")));
     };
     if a < 2 || b < 2 {
         return Err(unsupported(format!("dungeon edge {e}: connects from a void room")));
@@ -1903,7 +1903,7 @@ fn connect(graph: &Graph, e: usize, f: &EdgeFields, marks: Option<(bool, bool)>,
     Ok(())
 }
 
-/// `0x1420a4330`: A* from `start` to `goal`; open set by g + h, then room index.
+/// `0x1420a44b0`: A* from `start` to `goal`; open set by g + h, then room index.
 #[allow(clippy::too_many_arguments)]
 fn search(grid: &Grid, records: &mut [Record], start: usize, goal: usize, height: i32, fuzzy: i32, door: &str, chir: bool, impenetrable: bool) -> bool {
     records[start].g = 0;
@@ -1953,7 +1953,7 @@ fn search(grid: &Grid, records: &mut [Record], start: usize, goal: usize, height
     }
 }
 
-/// `0x1420a7ab0`: rooms along the four strips around `room` (above, below, left, right), each
+/// `0x1420a7c30`: rooms along the four strips around `room` (above, below, left, right), each
 /// once per strip.
 fn neighbours(grid: &Grid, room: usize) -> Vec<usize> {
     let r = &grid.rooms[room];
@@ -1988,15 +1988,15 @@ fn neighbours(grid: &Grid, room: usize) -> Vec<usize> {
     out
 }
 
-/// Ring position of `b` facing ring position `u` of `a` (`0x141fa79e0`).
+/// Ring position of `b` facing ring position `u` of `a` (`0x141fa7b60`).
 fn facing(a: &PlacedRoom, b: &PlacedRoom, u: u32) -> Option<u32> {
     let outside = ring_cell(a.origin, a.size, u);
     let inner = ring_inner(a.origin, a.size, u);
     (0..b.exits.len() as u32).find(|&v| ring_cell(b.origin, b.size, v) == inner && ring_inner(b.origin, b.size, v) == outside)
 }
 
-/// `0x141fa7d40`: `a`'s ring positions on the border shared with `b` where both sides take a
-/// door of `door` (`0x141fa7bf0`: a placeholder's empty position, or that door already; for a
+/// `0x141fa7ec0`: `a`'s ring positions on the border shared with `b` where both sides take a
+/// door of `door` (`0x141fa7d70`: a placeholder's empty position, or that door already; for a
 /// chiral door type with `a` holding `!chir` and `b` holding `chir`). A chiral door of another
 /// type on either side of a checked position empties the list.
 fn shared_doors(grid: &Grid, a: &PlacedRoom, b: &PlacedRoom, door: &str, chir: bool) -> Vec<u32> {
@@ -2038,7 +2038,7 @@ fn shared_doors(grid: &Grid, a: &PlacedRoom, b: &PlacedRoom, door: &str, chir: b
     out
 }
 
-/// `0x1420a4260`: `a` can open towards `b` at the corridor height.
+/// `0x1420a43e0`: `a` can open towards `b` at the corridor height.
 fn connectable(grid: &Grid, a: usize, b: usize, height: i32, door: &str, chir: bool) -> bool {
     let (ra, rb) = (&grid.rooms[a], &grid.rooms[b]);
     shared_doors(grid, ra, rb, door, chir).into_iter().any(|u| {
@@ -2047,9 +2047,9 @@ fn connectable(grid: &Grid, a: usize, b: usize, height: i32, door: &str, chir: b
     })
 }
 
-/// `0x141fa8140` / `0x141fa7fd0`: a door between neighbouring rooms `a` and `b` at a shuffled
+/// `0x141fa82c0` / `0x141fa8150`: a door between neighbouring rooms `a` and `b` at a shuffled
 /// shared position (a discarded `below(n)`, then the shuffle); for a chiral type `a` takes
-/// chirality `!chir` and `b` takes `chir` (`0x141f96730`).
+/// chirality `!chir` and `b` takes `chir` (`0x141f968b0`).
 fn open_door(grid: &mut Grid, a: usize, b: usize, door: &str, chir: bool, either: bool, rng: &mut TerrainRng) -> Result<(), GenError> {
     let mut list = shared_doors(grid, &grid.rooms[a], &grid.rooms[b], door, chir);
     if std::env::var("POE_DBG_DOOR").is_ok() {
@@ -2084,8 +2084,8 @@ fn open_door(grid: &mut Grid, a: usize, b: usize, door: &str, chir: bool, either
     Ok(())
 }
 
-/// `0x1420a6610`: unused placeholders leave (each swapped with the last room), then the grid is
-/// stamped again (`0x1420a6bb0`).
+/// `0x1420a6790`: unused placeholders leave (each swapped with the last room), then the grid is
+/// stamped again (`0x1420a6d30`).
 fn compact(grid: &mut Grid, records: &mut Vec<Record>, paths: &mut [Corridor]) {
     if grid.rooms.is_empty() {
         return;
@@ -2131,7 +2131,7 @@ fn compact(grid: &mut Grid, records: &mut Vec<Record>, paths: &mut [Corridor]) {
     }
 }
 
-/// `0x1420a6140`: every free unit cell (row by row) gets a placeholder of a size drawn from the
+/// `0x1420a62c0`: every free unit cell (row by row) gets a placeholder of a size drawn from the
 /// edge type's list (up to five draws until one fits; else the list's first size, else 1×1).
 fn fill_placeholders(grid: &mut Grid, list: &[((u32, u32), u32)], door_type: Option<String>, rng: &mut TerrainRng) -> Result<(), GenError> {
     if list.is_empty() {
@@ -2179,12 +2179,12 @@ fn fill_placeholders(grid: &mut Grid, list: &[((u32, u32), u32)], door_type: Opt
     Ok(())
 }
 
-/// `0x141f01710` / `0x141f029b0` (`PairedRoomLayoutPlugin`): each room of the earlier graph, in
+/// `0x141f01890` / `0x141f02b30` (`PairedRoomLayoutPlugin`): each room of the earlier graph, in
 /// placement order, whose rectangle is inside this grid and free, and whose `.arm` is the first
 /// of a pair in the master's file groups (one group: its entries pair up in order, upper then
 /// lower; the master's own file groups, the same file for both graphs), puts the pair's second
 /// room here with the same origin, orientation, height and kind, after a `below(1)` over the one
-/// candidate (`0x1420a73d0`, no doors). Rooms without a partner are left out.
+/// candidate (`0x1420a7550`, no doors). Rooms without a partner are left out.
 fn paired_rooms(files: &dyn Files, earlier: &[PlacedRoom], groups: &FileGroups, grid: &mut Grid, rng: &mut TerrainRng) -> Result<(), GenError> {
     if groups.groups.len() != 1 {
         return Err(unsupported(format!("paired rooms: {} file groups (two groups split upper and lower: not ported)", groups.groups.len())));
@@ -2225,7 +2225,7 @@ fn paired_rooms(files: &dyn Files, earlier: &[PlacedRoom], groups: &FileGroups, 
     Ok(())
 }
 
-/// `0x1420aa710`: special rooms. The `.rs` order fills one list per `specialN` index, each
+/// `0x1420aa890`: special rooms. The `.rs` order fills one list per `specialN` index, each
 /// shuffled (a discarded `below(n)`, then a forward Fisher-Yates) and tried until one room
 /// places; the last list (`special` / `specialchance N`) places every room whose chance roll
 /// passes (`below(100)` only for chances 1..99).
@@ -2278,15 +2278,15 @@ fn special_rooms(files: &dyn Files, rooms: &[DungeonRoom], grid: &mut Grid, type
     Ok(())
 }
 
-/// `0x1420aacf0` for league features (`ExtraTerrainFeatures` rooms) in a room set with mission
-/// rooms: a 3x3 feature room is queued as a request (`0x1420abb90`), mission rooms of the room
+/// `0x1420aae70` for league features (`ExtraTerrainFeatures` rooms) in a room set with mission
+/// rooms: a 3x3 feature room is queued as a request (`0x1420abd10`), mission rooms of the room
 /// set (tag `mission`, built for the grid's unit size, keyed by their number of `missiontile`
-/// slots) are put over placed rooms until the requests are covered (`0x1420a7da0` with the
+/// slots) are put over placed rooms until the requests are covered (`0x1420a7f20` with the
 /// shuffled rooms of a table entry; the grid is restored from a snapshot before each attempt),
 /// then each served request draws its orientation (`below(0x348)`) and joins the grid's pending
-/// list, to be placed in a `missiontile` slot by the tile pass (`0x1420983d0`). A feature room
+/// list, to be placed in a `missiontile` slot by the tile pass (`0x142098550`). A feature room
 /// that is not 3x3, or with no mission table, would be placed as a dungeon room itself
-/// (`0x1420a7da0` on the `.arm`, only when its side length is the unit size; not ported).
+/// (`0x1420a7f20` on the `.arm`, only when its side length is the unit size; not ported).
 fn extra_features(files: &dyn Files, rooms: &[DungeonRoom], unit_size: u32, grid: &mut Grid, types: &mut TerrainTypes, rng: &mut TerrainRng) -> Result<(), GenError> {
     let feats = files.league_rooms();
     if feats.is_empty() {
@@ -2309,8 +2309,8 @@ fn extra_features(files: &dyn Files, rooms: &[DungeonRoom], unit_size: u32, grid
         if room.width() == 3 && room.height() == 3 && !table.is_empty() {
             requests.push(f.clone());
         } else if room.arm.dimensions.side_length == unit_size && std::env::var_os("POE_NO_FEATURE_ROOM").is_none() {
-            // `0x1420abb90`: a feature room built for the grid's unit size (not 3×3, or no mission
-            // table) is placed at once like a special room (`0x1420a7da0`, the request's
+            // `0x1420abd10`: a feature room built for the grid's unit size (not 3×3, or no mission
+            // table) is placed at once like a special room (`0x1420a7f20`, the request's
             // orientation mask) and the request is served.
             let key = match &room.arm.root_slot {
                 poe_data_tools::file_parsers::arm::types::Slot::K(k) => crate::generate::slot_key(k),
@@ -2333,7 +2333,7 @@ fn extra_features(files: &dyn Files, rooms: &[DungeonRoom], unit_size: u32, grid
     let nreq = requests.len();
     let snapshot = grid.clone();
     // One table entry's rooms shuffled (a discarded `below(n)`, then the forward Fisher-Yates)
-    // and offered to `0x1420a7da0`.
+    // and offered to `0x1420a7f20`.
     let place_group = |list: &Vec<usize>, grid: &mut Grid, types: &mut TerrainTypes, rng: &mut TerrainRng| -> Result<bool, GenError> {
         let mut l = list.clone();
         rng.below(l.len() as u32);
@@ -2370,8 +2370,8 @@ fn extra_features(files: &dyn Files, rooms: &[DungeonRoom], unit_size: u32, grid
                     }
                 }
             }
-            // Requests left: entries with fewer slots from the last one back (`0x1420ab6e0`),
-            // then every entry from the first (`0x1420ab7b0`).
+            // Requests left: entries with fewer slots from the last one back (`0x1420ab860`),
+            // then every entry from the first (`0x1420ab930`).
             'more: while rem != 0 {
                 if key > 1 {
                     let mut idx = table.len();
@@ -2430,23 +2430,23 @@ fn extra_features(files: &dyn Files, rooms: &[DungeonRoom], unit_size: u32, grid
     Ok(())
 }
 
-/// `0x1420a7da0`: a special room replaces a placed room. Candidates are reachable rooms with an
+/// `0x1420a7f20`: a special room replaces a placed room. Candidates are reachable rooms with an
 /// `.arm` that is neither special nor tagged, whose size and doors match the special room in
-/// some allowed orientation (`0x1420a8810`, `0x1420a7c40`: the first such orientation, weight 1);
+/// some allowed orientation (`0x1420a8990`, `0x1420a7dc0`: the first such orientation, weight 1);
 /// `below(count)` picks the room, `below(weight)` the orientation. The room keeps its doors and
 /// becomes kind 8 (+0x14).
 fn place_special(files: &dyn Files, rooms: &[DungeonRoom], entries: &[usize], grid: &mut Grid, types: &mut TerrainTypes, rng: &mut TerrainRng) -> Result<Option<usize>, GenError> {
     let mut exact: Vec<(usize, Vec<(usize, u8)>)> = Vec::new();
-    // `0x1420a8980`: spots where the special room would cover whole rooms (by position).
+    // `0x1420a8b00`: spots where the special room would cover whole rooms (by position).
     let mut split: Vec<((i32, i32), Vec<(usize, u8, (u32, u32))>)> = Vec::new();
     for &si in entries {
         let s = &rooms[si];
         if s.tag.to_ascii_lowercase().contains("injector") {
             return Err(unsupported(format!("dungeon: injector special room {}", s.path)));
         }
-        // `0x1420a7da0` has a branch for a special room whose flag +9 is set (no tag, one ground
+        // `0x1420a7f20` has a branch for a special room whose flag +9 is set (no tag, one ground
         // on all corners, no doors): its candidates must be such rooms of the same ground. A
-        // special room always carries its `special` tag, so the flag (`0x141f982b0`: tag length
+        // special room always carries its `special` tag, so the flag (`0x141f98430`: tag length
         // 0 and ...) is never set for one and the branch is not reachable.
         let variants: Vec<Option<((u32, u32), Vec<Exit>)>> = (0..8u8)
             .map(|o| {
@@ -2468,7 +2468,7 @@ fn place_special(files: &dyn Files, rooms: &[DungeonRoom], entries: &[usize], gr
             for (o, v) in variants.iter().enumerate() {
                 let Some((size, exits)) = v else { continue };
                 if *size == p.size && special_fits(files, &p.exits, exits, types)? {
-                    // `0x1420cf1d0`: the entries are kept sorted by room index.
+                    // `0x1420cf350`: the entries are kept sorted by room index.
                     match exact.binary_search_by_key(&i, |e| e.0) {
                         Ok(k) => exact[k].1.push((si, o as u8)),
                         Err(k) => exact.insert(k, (i, vec![(si, o as u8)])),
@@ -2497,7 +2497,7 @@ fn place_special(files: &dyn Files, rooms: &[DungeonRoom], entries: &[usize], gr
                 }
                 for pos in corners {
                     if split_fits(grid, rooms, *size, exits, pos) {
-                        // `0x1420cef60`: kept sorted by x·65536 + y.
+                        // `0x1420cf0e0`: kept sorted by x·65536 + y.
                         match split.binary_search_by_key(&(pos.0 * 0x10000 + pos.1), |e| e.0.0 * 0x10000 + e.0.1) {
                             Ok(k) => split[k].1.push((si, o as u8, *size)),
                             Err(k) => split.insert(k, (pos, vec![(si, o as u8, *size)])),
@@ -2511,7 +2511,7 @@ fn place_special(files: &dyn Files, rooms: &[DungeonRoom], entries: &[usize], gr
         if split.is_empty() {
             return Ok(None);
         }
-        // `0x1420a8448` / `0x1420a8461`: the spot, then the variant; the rooms under it leave
+        // `0x1420a85c8` / `0x1420a85e1`: the spot, then the variant; the rooms under it leave
         // (highest index first) and the special room takes their place at the height of the
         // last one removed.
         let k = rng.below(split.len() as u32) as usize;
@@ -2561,7 +2561,7 @@ fn place_special(files: &dyn Files, rooms: &[DungeonRoom], entries: &[usize], gr
     Ok(Some(i))
 }
 
-/// `0x1420a7c40`: the placed room's doors against a special room's (same size checked by the
+/// `0x1420a7dc0`: the placed room's doors against a special room's (same size checked by the
 /// caller). Where the special door is optional (`.et` flag 0x10) the placed one may be closed;
 /// elsewhere they must be equal. With optional special doors, the placed room needs at least
 /// one optional door of its own.
@@ -2592,7 +2592,7 @@ fn special_fits(files: &dyn Files, placed: &[Exit], special: &[Exit], types: &mu
     Ok(!(any_optional && own == 0))
 }
 
-/// `0x141d047b0`: an edge type whose sides differ (a height change or two grounds; a virtual
+/// `0x141d04930`: an edge type whose sides differ (a height change or two grounds; a virtual
 /// edge unless both halves are the same chiral type with equal flags).
 fn chiral_type(types: &mut TerrainTypes, files: &dyn Files, t: &str) -> Result<bool, GenError> {
     let e = types.edge(files, t)?.clone();
@@ -2610,9 +2610,9 @@ fn chiral_type(types: &mut TerrainTypes, files: &dyn Files, t: &str) -> Result<b
     Ok(true)
 }
 
-/// `0x1420a8bc0`: the special room at `pos` lies on the grid over free cells and whole
+/// `0x1420a8d40`: the special room at `pos` lies on the grid over free cells and whole
 /// non-special, untagged rooms of one height, and its doors agree with theirs along its sides
-/// (`0x1420a8fc0`; a default-type special door may face a closed one, but not all of them).
+/// (`0x1420a9140`; a default-type special door may face a closed one, but not all of them).
 fn split_fits(grid: &Grid, rooms: &[DungeonRoom], size: (u32, u32), exits: &[Exit], pos: (i32, i32)) -> bool {
     let (x0, y0) = pos;
     let (x1, y1) = (x0 + size.0 as i32, y0 + size.1 as i32);
@@ -2625,7 +2625,7 @@ fn split_fits(grid: &Grid, rooms: &[DungeonRoom], size: (u32, u32), exits: &[Exi
     let mut skipped = 0usize;
     let mut height: Option<i32> = None;
     let empty = [Exit { door: None, height: 0, chiral: false }, Exit { door: None, height: 0, chiral: false }, Exit { door: None, height: 0, chiral: false }, Exit { door: None, height: 0, chiral: false }];
-    // `0x1420a8fc0` for a record at `(px, py)`.
+    // `0x1420a9140` for a record at `(px, py)`.
     let mut check = |(px, py): (i32, i32), (pw, ph): (i32, i32), pe: &[Exit]| -> bool {
         let np = pe.len() as i32;
         let mut cmp = |s: &Exit, p: &Exit| -> bool {
@@ -2704,8 +2704,8 @@ fn split_fits(grid: &Grid, rooms: &[DungeonRoom], size: (u32, u32), exits: &[Exi
     defaults == 0 || skipped != defaults
 }
 
-/// `0x1420b19f0`: room sides whose two corners share a ground spread it into the empty cells
-/// beyond (`0x1420b1bd0`, per room in order: right, bottom, left, top sides); grounds with
+/// `0x1420b1b70`: room sides whose two corners share a ground spread it into the empty cells
+/// beyond (`0x1420b1d50`, per room in order: right, bottom, left, top sides); grounds with
 /// `.gt` flag 2 first, each pass repeated while it places anything.
 fn filler_rooms(rooms: &[DungeonRoom], fillers: &[DungeonRoom], grid: &mut Grid, types: &mut TerrainTypes, files: &dyn Files, fill_height: Option<i32>, rng: &mut TerrainRng) -> Result<(), GenError> {
     let _ = types;
@@ -2718,7 +2718,7 @@ fn filler_rooms(rooms: &[DungeonRoom], fillers: &[DungeonRoom], grid: &mut Grid,
         flags.insert(g.to_string(), f);
         Ok(f)
     };
-    // `0x142f087d0` (inverse orientation) and the corner turn table.
+    // `0x142f087c0` (inverse orientation) and the corner turn table.
     const INV: [usize; 9] = [0, 3, 2, 1, 4, 5, 6, 7, 8];
     const T: [[usize; 4]; 9] = [[0, 1, 2, 3], [1, 2, 3, 0], [2, 3, 0, 1], [3, 0, 1, 2], [1, 0, 3, 2], [2, 1, 0, 3], [3, 2, 1, 0], [0, 3, 2, 1], [0, 1, 2, 3]];
     for pass in [true, false] {
@@ -2746,7 +2746,7 @@ fn filler_rooms(rooms: &[DungeonRoom], fillers: &[DungeonRoom], grid: &mut Grid,
                     }
                     let mut any = false;
                     for (pos, k) in cells {
-                        // `0x1420b1bd0`: the master's `DungeonFillRoomHeightOverride` (+0x159 set, value
+                        // `0x1420b1d50`: the master's `DungeonFillRoomHeightOverride` (+0x159 set, value
                         // +0x14d) replaces the height of every filler room.
                         let height = fill_height.unwrap_or(p.height + p.exits[k as usize].height);
                         any |= spread(if fillers.is_empty() { rooms } else { fillers }, grid, pos, g.clone(), height, &mut gt, rng)?;
@@ -2774,9 +2774,9 @@ fn filler_rooms(rooms: &[DungeonRoom], fillers: &[DungeonRoom], grid: &mut Grid,
     Ok(())
 }
 
-/// `0x1420b23a0`: a filler room of `ground` at the empty cell `pos`: a size from the ground's
+/// `0x1420b2520`: a filler room of `ground` at the empty cell `pos`: a size from the ground's
 /// size list (`below(total)`, dropped and redrawn when it does not fit), placed so that it
-/// covers `pos` (`0x1420b2bb0`).
+/// covers `pos` (`0x1420b2d30`).
 fn spread(rooms: &[DungeonRoom], grid: &mut Grid, pos: (i32, i32), ground: Option<String>, height: i32, gt: &mut dyn FnMut(&str) -> Result<u8, GenError>, rng: &mut TerrainRng) -> Result<bool, GenError> {
     if grid.state(pos) != Some(0) {
         return Ok(false);
@@ -2785,7 +2785,7 @@ fn spread(rooms: &[DungeonRoom], grid: &mut Grid, pos: (i32, i32), ground: Optio
         None => true,
         Some(g) => gt(g)? & 4 != 0,
     };
-    // The ground's size list (`0x141f98bb0`, room set +0x98): per filler room in `.rs` order
+    // The ground's size list (`0x141f98d30`, room set +0x98): per filler room in `.rs` order
     // its size, and the turned size when it is not square, each with the room's weight.
     let mut sizes: Vec<((u32, u32), u32)> = Vec::new();
     for r in rooms.iter().filter(|r| r.blank && r.corners[0] == ground) {
@@ -2835,7 +2835,7 @@ fn spread(rooms: &[DungeonRoom], grid: &mut Grid, pos: (i32, i32), ground: Optio
     Ok(false)
 }
 
-/// `0x1420b2bb0` / `0x1420b2930`: the first free spot of `size` covering `pos` (its corner at
+/// `0x1420b2d30` / `0x1420b2ab0`: the first free spot of `size` covering `pos` (its corner at
 /// `pos`, then shifted left, up, up-left); the room drawn by weight among the ground's filler
 /// rooms of that size, its orientation by `below(840)` among those giving the size.
 #[allow(clippy::too_many_arguments)]
@@ -2852,7 +2852,7 @@ fn place_filler(rooms: &[DungeonRoom], grid: &mut Grid, pos: (i32, i32), size: (
         if o.0 < 0 || o.1 < 0 || o.0 + w > grid.w as i32 || o.1 + h > grid.h as i32 || !(0..h).all(|dy| (0..w).all(|dx| grid.state((o.0 + dx, o.1 + dy)) == Some(0))) {
             continue;
         }
-        // `0x141f9bb50`: the ground's filler rooms of this size.
+        // `0x141f9bcd0`: the ground's filler rooms of this size.
         let mut list: Vec<(usize, u8, u32)> = Vec::new();
         for (ri, r) in rooms.iter().enumerate() {
             if !r.blank || r.corners[0] != *ground {

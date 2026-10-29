@@ -7,7 +7,7 @@ use std::path::Path;
 
 use poe_world::{area::{Forced, Stage}, generate::TileMap, rng::TerrainRng, smoothing::LayoutGraph};
 
-/// Compares the edge tiles with the trace's `place` lines of `0x1420b85bf`.
+/// Compares the edge tiles with the trace's `place` lines of `0x1420b873f`.
 fn compare_edges(map: &TileMap, before: usize, lines: &[Vec<String>]) {
     let places: Vec<String> = lines.iter().filter(|f| f.len() > 4 && f[1] == "place" && f[2] == "1420b85bf").map(|f| format!("{} {}", f[3], f[4].to_ascii_lowercase())).collect();
     let ours: Vec<String> = map.pieces[before..].iter().map(|p| format!("{} {} o{} h0 {}", p.x, p.y, p.orientation, p.path.to_ascii_lowercase())).collect();

@@ -1,7 +1,7 @@
 //! Hashes the client uses to identify game content compactly.
 
 /// MurmurHash2 (32-bit). With seed 0 over the ASCII metadata path, this is the object type
-/// key the client looks up (`0x1416936c0`) for server-spawned entities, e.g.
+/// key the client looks up (`0x141693840`) for server-spawned entities, e.g.
 /// `"Metadata/Characters/Dex/DexFour"` -> `0xc393f3d5`.
 pub fn murmur2(data: &[u8], seed: u32) -> u32 {
     const M: u32 = 0x5bd1_e995;

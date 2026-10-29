@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Poe2Server is the server of the Poe2ModdingProject family (Path of Exile 2, client 0.5.5e). The project rules (hard rules, official servers read-only, no hardcoding, docs with code, commit and push after each step) and the roadmap are in the hub's CLAUDE.md:
+Poe2Server is the server of the Poe2ModdingProject family (Path of Exile 2, client 0.5.5e Hotfix 1). The project rules (hard rules, official servers read-only, no hardcoding, docs with code, commit and push after each step) and the roadmap are in the hub's CLAUDE.md:
 <https://github.com/Distorbed678/Poe2ModdingProject/blob/main/CLAUDE.md>. In the hub checkout this repo is `modules/server` and that file is `../../CLAUDE.md`.
 
 Specific to this repo:

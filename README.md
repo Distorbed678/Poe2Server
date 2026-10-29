@@ -1,6 +1,6 @@
 # Poe2Server
 
-The private server for **Path of Exile 2 (client 0.5.5e)**, written in Rust: login server, instance server (one shared world per area), the web API and the web admin, accounts on SQLite, and a mod host for native server mods. It is a personal, educational project; it never touches official servers.
+The private server for **Path of Exile 2 (client 0.5.5e Hotfix 1)**, written in Rust: login server, instance server (one shared world per area), the web API and the web admin, accounts on SQLite, and a mod host for native server mods. It is a personal, educational project; it never touches official servers.
 
 This repository is one part of the Poe2ModdingProject family. The hub, [Poe2ModdingProject](https://github.com/Distorbed678/Poe2ModdingProject), holds the documentation, the plans, the reverse-engineering notes and the dev tooling, and has this repo as the submodule `modules/server`. The overview of all repositories and how they depend on each other: [Project overview](https://github.com/Distorbed678/Poe2ModdingProject/blob/main/docs/overview.md).
 

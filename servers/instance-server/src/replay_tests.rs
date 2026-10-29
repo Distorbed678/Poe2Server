@@ -35,9 +35,10 @@ pub(crate) const MOVE_SKILL: u32 = 0x2000_2909;
 pub(crate) const ROLL_SKILL: u32 = 0x8000_0040;
 pub(crate) const ROLL_ACTION_TYPE: u16 = 60748;
 
-/// The build the official captures of these tests come from (history, not configuration: the
-/// tests replay those captures). Its opcode folder comes from `modules/protocol/versions/<version>.toml`.
-pub(crate) const CAPTURE_VERSION: &str = "0.5.5e";
+/// The build whose opcodes replay the official captures of these tests (recorded on 0.5.5e, same
+/// protocol; kept under `dumps/0.5.5e.hotfix1/captures`). Its opcode folder comes from
+/// `modules/protocol/versions/<version>.toml`.
+pub(crate) const CAPTURE_VERSION: &str = "0.5.5e.hotfix1";
 
 /// The opcode folder of [`CAPTURE_VERSION`].
 pub(crate) fn capture_opcodes_dir() -> std::path::PathBuf {

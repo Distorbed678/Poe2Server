@@ -1,4 +1,4 @@
-//! A port of the client's grid pathfinder (0.5.5e, `FUN_141ed0390`; the algorithm and the
+//! A port of the client's grid pathfinder (`FUN_141ed0510`; the algorithm and the
 //! addresses are in `docs/re/pathfinding.md`), for static terrain.
 //!
 //! The client plans every walk, WASD step, roll frame and sprint frame with this search, so a

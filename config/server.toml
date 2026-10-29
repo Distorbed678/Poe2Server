@@ -67,7 +67,7 @@ first_entity_id = 12000
 
 [movement]
 # Server-side movement simulation (crates/poe-game, docs/protocol/movement.md). Skill ids,
-# walking speed and roll distance come from game data; these are the official 0.5.5e values.
+# walking speed and roll distance come from game data; these are the values of the official captures.
 # BuffDefinitions rows of the three buffs a sprint adds.
 sprint_buff_rows = [2758, 2737, 2853]
 # After a sprint ends the client's walk is over and it coasts to a stop along its last direction

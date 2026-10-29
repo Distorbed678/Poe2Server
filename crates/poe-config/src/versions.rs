@@ -381,7 +381,7 @@ mod tests {
         let e = VersionFile::load(Path::new(REPO), "9.9.9z")
             .unwrap_err()
             .to_string();
-        assert!(e.contains("9.9.9z") && e.contains("0.5.5e"), "{e}");
+        assert!(e.contains("9.9.9z") && e.contains("0.5.5e.hotfix1"), "{e}");
         assert!(VersionFile::load(Path::new(REPO), "../Cargo").is_err());
     }
 

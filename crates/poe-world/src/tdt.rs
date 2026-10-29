@@ -9,7 +9,7 @@
 //! data, doodads, entities) is kept raw for now.
 //!
 //! A tile that inherits another (`*_Reorient_N.tdt`) has a `u8` of override flags after the
-//! `inherits` reference (`0x1429153f0`) and carries only the overridden parts: 1 `tgt`, 8 the
+//! `inherits` reference (`0x142915630`) and carries only the overridden parts: 1 `tgt`, 8 the
 //! header from `feature` on and the corner points, 0x10 the size and sub-tile geometry, 0x20 the
 //! orientation mask. [`Tdt::resolve`] applies them to the parent.
 
@@ -36,13 +36,13 @@ pub struct Tdt {
     /// Height per corner point (data +0xc0; empty when the file has none).
     pub point_heights: Vec<i8>,
     /// Orientations the tile may be used in (data +0x171, bit per orientation; 0 or 0xff:
-    /// all), intersected with the `.tst` rotation list by the tile-set index (`0x141d09ab0`).
+    /// all), intersected with the `.tst` rotation list by the tile-set index (`0x141d09c30`).
     pub orientation_mask: u8,
-    /// Data `+0x16f` bit 1 (`0x141d053a0`): the tile's model data (the `.tmd` the tile data names) has an
+    /// Data `+0x16f` bit 1 (`0x141d05520`): the tile's model data (the `.tmd` the tile data names) has an
     /// object whose type path contains `Spawner`. Only filled by `load_tdt` for tiles without a
     /// real edge (the only ones `place_tile` asks).
     pub spawner: bool,
-    /// The tile's model data path (`.tmd`, the string after the corner points; `0x141d06730`).
+    /// The tile's model data path (`.tmd`, the string after the corner points; `0x141d068b0`).
     pub tmd: Option<String>,
     /// Override flags of an inheriting tile (see the module docs).
     pub inherit_flags: u8,
@@ -54,7 +54,7 @@ pub struct Tdt {
     pub hull_masks: Vec<u8>,
 }
 
-/// One sub-tile's data (`0x1429153f0`): flag byte, the 23×23 byte map of cell codes and the
+/// One sub-tile's data (`0x142915630`): flag byte, the 23×23 byte map of cell codes and the
 /// byte list that follows it.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct SubTile {
@@ -204,7 +204,7 @@ impl Tdt {
         if (1..0xff).contains(&self.orientation_mask) { m & self.orientation_mask } else { m }
     }
 
-    /// The body up to the corner points (`0x1429153f0`): flags, hull planes, sub-tiles (each
+    /// The body up to the corner points (`0x142915630`): flags, hull planes, sub-tiles (each
     /// with an optional compressed byte map and a byte list), then per-point grounds (flag 2)
     /// and heights (flag 1).
     fn read_points(&mut self, r: &mut Reader) -> Result<(), TdtError> {
@@ -307,7 +307,7 @@ impl Tdt {
     }
 }
 
-/// A sub-tile byte map (`0x1429179c0`): raw 0x211 bytes before version 10, else a header byte
+/// A sub-tile byte map (`0x142917c00`): raw 0x211 bytes before version 10, else a header byte
 /// (kind in bits 0..2, extra size bytes in bits 3..4, size in bits 5..7) and, for kinds 1..4, an
 /// LZ4 block of that size that decodes to 69 (kind 1: 2 palette bytes and 1 bit per cell),
 /// 137 (kind 2: 4 palette bytes, 2 bits), 281 (kind 3: 16 palette bytes, 4 bits) or 529 bytes
@@ -415,7 +415,7 @@ pub fn lz4_decode(src: &[u8]) -> Option<Vec<u8>> {
 mod tests {
     use super::*;
 
-    /// `Metadata/Terrain/Blank.tdt` (0.5.5e), the whole file.
+    /// `Metadata/Terrain/Blank.tdt`, the whole file.
     #[test]
     fn blank() {
         let mut data = Vec::new();

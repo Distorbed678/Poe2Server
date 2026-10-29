@@ -743,7 +743,7 @@ async fn send_instance_details(server: &LoginServer, conn: &mut Connection, tick
     };
     let mut out = server.protocol.login.encode(&details)?;
     // Official servers follow InstanceDetails with 0x0017 0x0014, which makes the client shut
-    // its login connection down (handler `0x1420e7140` -> `0x1420e71d0`: `shutdown()`). We keep
+    // its login connection down (handler `0x1420e72c0` -> `0x1420e7350`: `shutdown()`). We keep
     // the connection: in-game transfers arrive on it (`[login] close_after_handoff`).
     if server.config.network.login.close_after_handoff {
         out.extend(

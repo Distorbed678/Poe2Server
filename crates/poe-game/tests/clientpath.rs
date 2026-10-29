@@ -18,7 +18,7 @@ fn grid(tile: u64) -> Option<Grid> {
     let name = format!("terrain_grid_{tile}.bin");
     ["terrain/grids-keep", "terrain/grids"]
         .iter()
-        .map(|d| root.join("dumps/0.5.5e").join(d).join(&name))
+        .map(|d| root.join("dumps/0.5.5e.hotfix1").join(d).join(&name))
         .find_map(|p| std::fs::read(p).ok())
         .and_then(|d| Grid::parse(&d))
 }

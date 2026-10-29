@@ -1,11 +1,11 @@
-//! Node tiles (`0x1420cade0`): after the virtual split and the first rounding, every graph node
-//! without a room that `0x1420c7400` sorted into the tile list and that is not a dead end at the
+//! Node tiles (`0x1420caf60`): after the virtual split and the first rounding, every graph node
+//! without a room that `0x1420c7580` sorted into the tile list and that is not a dead end at the
 //! map border gets a tile from the tile set: a dead end inside the map, a junction of three or
 //! more edges, or two edges of different `.et` types (a transition tile such as
-//! `NarrowRiver_Mud/StMS_01.tdt`). Like a room node (`0x1420c87a0`): the node's key, candidates
+//! `NarrowRiver_Mud/StMS_01.tdt`). Like a room node (`0x1420c8920`): the node's key, candidates
 //! by edges and size, a weighted draw, centred position; then the tiles push the graph away
-//! (`0x1420cbe60` without the room flag), are placed (`0x1420c9970`), and each edge of the node
-//! ends at its exit, the node split per exit (`0x1420c5b50`, `0x141ef2800`).
+//! (`0x1420cbfe0` without the room flag), are placed (`0x1420c9af0`), and each edge of the node
+//! ends at its exit, the node split per exit (`0x1420c5cd0`, `0x141ef2980`).
 
 use std::collections::BTreeSet;
 
@@ -65,9 +65,9 @@ impl EdgeView for LayoutView<'_> {
     }
 }
 
-/// `0x1420c7400`: whether a room-less node goes to the tile list (dead ends, junctions of three
+/// `0x1420c7580`: whether a room-less node goes to the tile list (dead ends, junctions of three
 /// or more edges, two edges of different types; nodes at a virtual edge only as dead ends at
-/// the border, which `0x1420c75c0` handles).
+/// the border, which `0x1420c7740` handles).
 pub fn needs_tile(lg: &LayoutGraph, n: usize, near_border: bool, types: &mut TerrainTypes, files: &dyn Files) -> Result<bool, GenError> {
     let edges: Vec<usize> = lg.nodes[n].slots.iter().flatten().copied().collect();
     let mut virtual_end = false;
@@ -106,7 +106,7 @@ pub struct Entry {
     pub size: (u8, u8),
 }
 
-/// `0x141d09700` non-empty: the tile set has tiles of `feature` with these edges (in some
+/// `0x141d09880` non-empty: the tile set has tiles of `feature` with these edges (in some
 /// orientation).
 pub fn feature_has_edges(set: &TileSet, feature: &str, edges: &[Option<String>; 4]) -> bool {
     set.tiles.iter().any(|t| {
@@ -120,10 +120,10 @@ fn base_size(t: &crate::tileset::TileDef, o: u8) -> (u8, u8) {
     t.key.oriented(o).size
 }
 
-/// `0x1420c76d0`, tile branch: the sizes the feature's tiles with the key's edges come in
-/// (`0x141d09700`, sorted), and per size every tile entry with those edges and that size
-/// (`0x141d0a7d0`; the size swapped when there is none) of that feature, filtered by the node's
-/// orientation, or for `(any)` by `0x1420b87b0` (with the climb check, then without).
+/// `0x1420c7850`, tile branch: the sizes the feature's tiles with the key's edges come in
+/// (`0x141d09880`, sorted), and per size every tile entry with those edges and that size
+/// (`0x141d0a950`; the size swapped when there is none) of that feature, filtered by the node's
+/// orientation, or for `(any)` by `0x1420b8930` (with the climb check, then without).
 #[allow(clippy::too_many_arguments)]
 pub fn candidates(view: &dyn EdgeView, node: usize, node_o: u8, feature: &str, key: &TileKey, sides: &[usize; 4], set: &TileSet, types: &mut TerrainTypes, files: &dyn Files) -> Result<Vec<Entry>, GenError> {
     let mut all = Vec::new();
@@ -137,7 +137,7 @@ pub fn candidates(view: &dyn EdgeView, node: usize, node_o: u8, feature: &str, k
                 continue;
             }
             let k = base.oriented(o);
-            // The filter lambdas (`0x143505830`/`0x143505a10`) keep the node's feature only.
+            // The filter lambdas (`0x143505a58`/`0x143505a28`) keep the node's feature only.
             if k.edges == key.edges && t.tdt.feature.as_deref().unwrap_or("").eq_ignore_ascii_case(feature) {
                 all.push((i, o, t.weight, k, true));
             }
@@ -169,7 +169,7 @@ pub fn candidates(view: &dyn EdgeView, node: usize, node_o: u8, feature: &str, k
     Ok(out)
 }
 
-/// `0x141d00f00` for a quarter turn: orientation `o` turned once more (`r` 1) or back (`r` 3).
+/// `0x141d01080` for a quarter turn: orientation `o` turned once more (`r` 1) or back (`r` 3).
 pub(crate) fn turn(o: u8, r: u8) -> u8 {
     const ONE: [u8; 8] = [1, 2, 3, 0, 5, 6, 7, 4];
     const THREE: [u8; 8] = [3, 0, 1, 2, 7, 4, 5, 6];
@@ -179,7 +179,7 @@ pub(crate) fn turn(o: u8, r: u8) -> u8 {
     if r == 1 { ONE[o as usize] } else { THREE[o as usize] }
 }
 
-/// `0x1420b8e20`: how far the node's edges point away from their sides (degrees).
+/// `0x1420b8fa0`: how far the node's edges point away from their sides (degrees).
 pub(crate) fn side_cost(view: &dyn EdgeView, node: usize, sides: &[usize; 4]) -> i32 {
     let slots = view.slots(node);
     let (nx, ny) = view.pos(node);
@@ -195,7 +195,7 @@ pub(crate) fn side_cost(view: &dyn EdgeView, node: usize, sides: &[usize; 4]) ->
     cost
 }
 
-/// The node's alignment (`0x141ef3290`): an `align<N>` tag, else its largest edge size.
+/// The node's alignment (`0x141ef3410`): an `align<N>` tag, else its largest edge size.
 fn alignment(view: &LayoutView, node: usize, types: &mut TerrainTypes, files: &dyn Files) -> Result<i32, GenError> {
     if let Some(n) = view.gnode(node) {
         for t in &n.tags {
@@ -213,7 +213,7 @@ fn alignment(view: &LayoutView, node: usize, types: &mut TerrainTypes, files: &d
     Ok(a)
 }
 
-/// `0x1420c59e0`: keep a tile `margin` tiles (twice for virtual edges) off the map border on
+/// `0x1420c5b60`: keep a tile `margin` tiles (twice for virtual edges) off the map border on
 /// each side its key has an edge.
 fn keep_off_border(pos: &mut (i32, i32), size: (i32, i32), edges: &[Option<String>; 4], margin: i32, tiles: (i32, i32), types: &mut TerrainTypes, files: &dyn Files) -> Result<(), GenError> {
     let (w, h) = size;
@@ -238,13 +238,13 @@ fn keep_off_border(pos: &mut (i32, i32), size: (i32, i32), edges: &[Option<Strin
     Ok(())
 }
 
-/// `0x1420c87a0` for a room-less node: draws its tile and position.
+/// `0x1420c8920` for a room-less node: draws its tile and position.
 #[allow(clippy::too_many_arguments)]
 fn choose(view: &LayoutView, node: usize, master: &Master, map: &TileMap, tiles: (i32, i32), types: &mut TerrainTypes, files: &dyn Files, rng: &mut TerrainRng) -> Result<NodeTile, GenError> {
     let (mut sides, mut key) = node_key(view, node, types, files)?;
     let node_o = view.gnode(node).map_or(8, |n| node_orientation(&n.orientation));
-    // `0x1420c5540` inside `0x1420c76d0`: no tile of the feature has the key's edges, so one
-    // edge moves to a free side (`0x1420c51c0`).
+    // `0x1420c56c0` inside `0x1420c7850`: no tile of the feature has the key's edges, so one
+    // edge moves to a free side (`0x1420c5340`).
     let any_match = |k: &TileKey| feature_has_edges(&master.tiles, "", &k.edges);
     if !any_match(&key) {
         crate::rooms::adjust_sides(view, node, &mut sides, &mut key, &any_match, types, files)?;
@@ -280,7 +280,7 @@ fn choose(view: &LayoutView, node: usize, master: &Master, map: &TileMap, tiles:
         let px = sx.max(0).min(tiles.0 - w);
         let py = sy.max(0).min(tiles.1 - h);
         let inside = px >= 0 && py >= 0 && px + w <= tiles.0 && py + h <= tiles.1;
-        // No rectangle test against the tiles chosen before: the map is still empty (`0x1420c87a0`
+        // No rectangle test against the tiles chosen before: the map is still empty (`0x1420c8920`
         // tests its cells), and the settle in `place` separates overlapping tiles (G3_1 topology 5
         // draws two `SandEdge_Water_St_01` for nodes 2 cells apart).
         if inside && map.free(px, py, w, h) {
@@ -299,14 +299,14 @@ fn choose(view: &LayoutView, node: usize, master: &Master, map: &TileMap, tiles:
             }
             return Ok(NodeTile { node, tile: c.tile, orientation, pos, size: key.size, sides, key, align });
         }
-        // `0x1420c87a0`: the first entry of that tile and orientation goes.
+        // `0x1420c8920`: the first entry of that tile and orientation goes.
         if let Some(k) = list.iter().position(|o| o.tile == c.tile && o.orientation == c.orientation) {
             list.remove(k);
         }
     }
 }
 
-/// `0x1420c9d70`: a quarter turn (1 or 3) when that points the node's edges better at their
+/// `0x1420c9ef0`: a quarter turn (1 or 3) when that points the node's edges better at their
 /// sides and puts none against the map border the placement touches.
 pub(crate) fn quarter_turn(view: &dyn EdgeView, node: usize, sides: &[usize; 4], pos: (i32, i32), size: (u8, u8), tiles: (i32, i32)) -> Option<u8> {
     let turned = |d: usize| sides.map(|s| if s == 4 { 4 } else { (s + d) & 3 });
@@ -353,7 +353,7 @@ pub fn place_node_tiles(lg: &mut LayoutGraph, graph: &Graph, nodes: &[usize], ma
     Ok(chosen)
 }
 
-/// `0x1420cbe60` with the room flag clear: the tiles' rectangles push every node with other
+/// `0x1420cbfe0` with the room flag clear: the tiles' rectangles push every node with other
 /// than one edge (a tile's own node not at all) and every internal point; then each tile is
 /// centred on its node again where it fits.
 fn repel(lg: &mut LayoutGraph, graph: &Graph, chosen: &mut [NodeTile], map: &TileMap, tiles: (i32, i32), types: &mut TerrainTypes, files: &dyn Files) -> Result<(), GenError> {
@@ -455,11 +455,11 @@ fn repel(lg: &mut LayoutGraph, graph: &Graph, chosen: &mut [NodeTile], map: &Til
     Ok(())
 }
 
-/// `0x1420c9970`: the tile into the map, the node's edges cut at the tile and ended at its
-/// exits (`0x1420c5750`, `0x1420c5b50`), the node split per exit (`0x141ef2800`).
+/// `0x1420c9af0`: the tile into the map, the node's edges cut at the tile and ended at its
+/// exits (`0x1420c58d0`, `0x1420c5cd0`), the node split per exit (`0x141ef2980`).
 fn place(lg: &mut LayoutGraph, region: u8, t: &NodeTile, master: &Master, map: &mut TileMap, types: &mut TerrainTypes, files: &dyn Files) -> Result<(), GenError> {
     let mut pos = crate::region::snap(region, t.pos, t.align);
-    // `0x1420c9970` first lets a tile that does not fit move (`0x1420c9260`, as for rooms).
+    // `0x1420c9af0` first lets a tile that does not fit move (`0x1420c93e0`, as for rooms).
     {
         let mut pr = crate::rooms::PlacedRoom { node: t.node, room: usize::MAX, tile: Some(t.tile), orientation: t.orientation, pos, size: t.size, sides: t.sides, key: t.key.clone() };
         if !crate::rooms::settle(map, &mut pr, t.align, region, types, files)? {
@@ -517,9 +517,9 @@ fn place(lg: &mut LayoutGraph, region: u8, t: &NodeTile, master: &Master, map: &
     Ok(())
 }
 
-/// `0x1420cb200`: before routing, a junction (or a virtual node no tile fits) gets one point
-/// 23 cells out of the node on each edge's side (`0x1420d1220`), after its edges drop the
-/// points within twice that of it (`0x1420c6b80` with radius `2 · 23`: hotfix `0x1420cb3c8`
+/// `0x1420cb380`: before routing, a junction (or a virtual node no tile fits) gets one point
+/// 23 cells out of the node on each edge's side (`0x1420d13a0`), after its edges drop the
+/// points within twice that of it (`0x1420c6d00` with radius `2 · 23`: hotfix `0x1420cb548`
 /// passes `esi + esi`; MapCrimsonShores 921210055: a junction's exit point 27 cells from the
 /// next junction is dropped).
 pub fn explode(g: &mut crate::rooms::PlacedGraph, node: usize, tiles: (i32, i32), types: &mut TerrainTypes, files: &dyn Files) -> Result<(), GenError> {
@@ -560,13 +560,13 @@ pub fn explode(g: &mut crate::rooms::PlacedGraph, node: usize, tiles: (i32, i32)
     Ok(())
 }
 
-/// `0x1420c6cd0`, after smoothing: a virtual node no tile fitted. With three or more edges,
+/// `0x1420c6e50`, after smoothing: a virtual node no tile fitted. With three or more edges,
 /// its edges first drop the points within the widest edge's maximum width of it
-/// (`0x1420c6b80`); then, for each pair of neighbouring slots, a virtual edge next to a
+/// (`0x1420c6d00`); then, for each pair of neighbouring slots, a virtual edge next to a
 /// non-virtual one gets a virtual end point a random width (`below(max − min + 1) + min` of the
-/// virtual edge) from the node towards the other edge (`0x1420c6420`), filled into its end two
-/// points at a time and ordered (`0x1420c6860`). Last (any edge count ≥ 2), the node splits:
-/// each edge after the first moves to a new node at the same place (`0x1420c5ee0`).
+/// virtual edge) from the node towards the other edge (`0x1420c65a0`), filled into its end two
+/// points at a time and ordered (`0x1420c69e0`). Last (any edge count ≥ 2), the node splits:
+/// each edge after the first moves to a new node at the same place (`0x1420c6060`).
 pub fn virtual_junction(lg: &mut LayoutGraph, n: usize, rng: &mut TerrainRng) -> Result<(), GenError> {
     let slots = lg.nodes[n].slots;
     let live: Vec<usize> = (0..4).filter(|&k| slots[k].is_some()).collect();
@@ -631,7 +631,7 @@ pub fn virtual_junction(lg: &mut LayoutGraph, n: usize, rng: &mut TerrainRng) ->
                 }
                 (true, true) => {
                     // Two virtual edges side by side: one width from the first's range, one
-                    // shared corner point (`0x1420c64f0`), both edges get it.
+                    // shared corner point (`0x1420c6670`), both edges get it.
                     if lg.edges[a].edge_type != lg.edges[b].edge_type {
                         return Err(GenError::Unsupported(format!("Mismatched edge-types while handling tile-less virtual node at {node:?}")));
                     }
@@ -644,7 +644,7 @@ pub fn virtual_junction(lg: &mut LayoutGraph, n: usize, rng: &mut TerrainRng) ->
                 }
             }
         }
-        // `0x1420c6860`: two points per end, ordered by the side of the edge they fall on.
+        // `0x1420c69e0`: two points per end, ordered by the side of the edge they fall on.
         let mut first: std::collections::HashMap<(usize, usize), (i32, i32)> = Default::default();
         for (e, end, v) in pending {
             match first.remove(&(e, end)) {
@@ -676,7 +676,7 @@ pub fn virtual_junction(lg: &mut LayoutGraph, n: usize, rng: &mut TerrainRng) ->
             return Err(GenError::Unsupported(format!("tile-less virtual node {n}: an edge end got one virtual point")));
         }
     }
-    // `0x1420c5ee0`: one node per edge; neighbouring edges with a virtual one between them
+    // `0x1420c6060`: one node per edge; neighbouring edges with a virtual one between them
     // stay logically linked (their end nodes).
     let ends: Vec<usize> = live.iter().map(|&k| slots[k].unwrap()).collect();
     let mut end_nodes = vec![n];
@@ -706,7 +706,7 @@ pub fn virtual_junction(lg: &mut LayoutGraph, n: usize, rng: &mut TerrainRng) ->
     Ok(())
 }
 
-/// `0x1420c64f0`: the corner of two virtual edges meeting at `node` (from the points `a` and `b`
+/// `0x1420c6670`: the corner of two virtual edges meeting at `node` (from the points `a` and `b`
 /// next to it, `c` the third edge's): the intersection of the two lines offset by `w` on one side,
 /// the candidate on the side of the midpoint of `a` and `b` unless `c` falls on another side.
 fn virtual_corner(a: (i32, i32), node: (i32, i32), b: (i32, i32), c: (i32, i32), w: i32) -> (i32, i32) {
@@ -749,7 +749,7 @@ fn virtual_corner(a: (i32, i32), node: (i32, i32), b: (i32, i32), c: (i32, i32),
     }
 }
 
-/// `0x142196290`: squared distance of `p` from the segment `a`–`b` as a fraction
+/// `0x1421963e0`: squared distance of `p` from the segment `a`–`b` as a fraction
 /// `(numerator, denominator)`.
 fn seg_dist(p: (i32, i32), a: (i32, i32), b: (i32, i32)) -> (i64, i64) {
     let sq = |x: i64, y: i64| x * x + y * y;
@@ -794,12 +794,12 @@ fn move_end(lg: &mut LayoutGraph, e: usize, from: usize, to: usize) {
     }
 }
 
-/// `0x1420bcff0`, after the virtual split: each logical link joins the nodes it holds at the
-/// same place (`0x1420bc630`, `0x1420bd1f0`: the node with one edge hands it to the other);
-/// a link without such pairs (`0x1420bc9a0`) hands the split virtual node nearest the plain
+/// `0x1420bd170`, after the virtual split: each logical link joins the nodes it holds at the
+/// same place (`0x1420bc7b0`, `0x1420bd370`: the node with one edge hands it to the other);
+/// a link without such pairs (`0x1420bcb20`) hands the split virtual node nearest the plain
 /// edge to the plain node, which moves there. Emptied nodes are erased (later indices move
 /// up). Returns the linked nodes left with more than two edges (they join the tile list,
-/// `0x1420bd530`) and the old → new index map.
+/// `0x1420bd6b0`) and the old → new index map.
 pub fn resolve_links(lg: &mut LayoutGraph) -> Result<(Vec<usize>, Vec<Option<usize>>), GenError> {
     let mut removed = vec![false; lg.nodes.len()];
     let mut emptied: Vec<usize> = Vec::new();
@@ -824,7 +824,7 @@ pub fn resolve_links(lg: &mut LayoutGraph) -> Result<(Vec<usize>, Vec<Option<usi
             }
         }
         if pairs.is_empty() {
-            // `0x1420bc9a0`
+            // `0x1420bcb20`
             let (plain, v1, v2) = match (link[2], link[3]) {
                 (None, Some(s3)) => (p0, p1, s3),
                 (Some(s2), None) => (p1, p0, s2),

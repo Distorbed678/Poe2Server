@@ -54,7 +54,7 @@ fn load(dir: &Path) -> Option<Job> {
 }
 
 /// The bounded draws `(n, result)` of the doodad pass in an export's `generator_trace.tsv`
-/// (callers inside `0x141fe7520`, the choice and scale draws), when it has one.
+/// (callers inside `0x141fe76a0`, the choice and scale draws), when it has one.
 fn client_draws(dir: &Path) -> Option<(Vec<(u32, u32)>, bool)> {
     let text = std::fs::read_to_string(dir.join("generator_trace.tsv")).ok()?;
     let lines: Vec<Vec<&str>> = text.lines().map(|l| l.split('\t').collect()).collect();
@@ -67,10 +67,10 @@ fn client_draws(dir: &Path) -> Option<(Vec<(u32, u32)>, bool)> {
         if f.len() > 3 && f[1] == "below" && in_doodads {
             let caller = u64::from_str_radix(f[2].split(',').next().unwrap_or(""), 16).unwrap_or(0);
             // The server-only scatter branch (out of scope) starts with its position draws.
-            if (0x141ff6000..0x141ff7000).contains(&caller) {
+            if (0x141ff6180..0x141ff7180).contains(&caller) {
                 return Some((out, true));
             }
-            if (0x141fe7520..0x141fe78d0).contains(&caller) {
+            if (0x141fe76a0..0x141fe7a50).contains(&caller) {
                 let n: u32 = f[3].parse().ok()?;
                 let v = lines.get(i + 2).filter(|l| l.len() > 4 && l[1] == "uniform").and_then(|l| l[4].parse().ok()).unwrap_or(0);
                 out.push((n, v));

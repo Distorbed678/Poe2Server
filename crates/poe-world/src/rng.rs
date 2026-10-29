@@ -1,6 +1,6 @@
 //! The terrain generator's random number generator, bit-exact with the client
 //! (`docs/re/terrain/README.md`): MSVC's `std::mt19937`, kept thread-local by the client and
-//! seeded with the area seed (`0x141f9c020`), and MSVC's `uniform_int` draw (`0x141f0d7f0`).
+//! seeded with the area seed (`0x141f9c1a0`), and MSVC's `uniform_int` draw (`0x141f0d970`).
 
 const N: usize = 624;
 const M: usize = 397;
@@ -80,7 +80,7 @@ impl TerrainRng {
         self.mt.next_u32()
     }
 
-    /// MSVC `uniform_int` over `0..n` (`0x141f0d7f0`): rejection sampling on whole 32-bit
+    /// MSVC `uniform_int` over `0..n` (`0x141f0d970`): rejection sampling on whole 32-bit
     /// draws; `n == 1` draws nothing.
     pub fn uniform(&mut self, n: u32) -> u32 {
         if n <= 1 {
@@ -95,7 +95,7 @@ impl TerrainRng {
         }
     }
 
-    /// `0..n` (`0x141f9c270`; 0 counts as 1).
+    /// `0..n` (`0x141f9c3f0`; 0 counts as 1).
     pub fn below(&mut self, n: u32) -> u32 {
         let v = if self.disabled {
             0
@@ -112,7 +112,7 @@ impl TerrainRng {
         v
     }
 
-    /// `a..=b` (`0x141f9c340`; `b < a` counts as `b = a`).
+    /// `a..=b` (`0x141f9c4c0`; `b < a` counts as `b = a`).
     pub fn range(&mut self, a: u32, b: u32) -> u32 {
         let v = if self.disabled {
             a
@@ -132,7 +132,7 @@ impl TerrainRng {
     }
 }
 
-/// The topology choice's index (`0x141025cf0`, 0.5.5e.hotfix1 `0x141025ef0`; also the world-map
+/// The topology choice's index (`0x141025ef0`; also the world-map
 /// pin consolidation): a C `rand`-style LCG seeded with `seed` (`x = x·1103515245 + 12345`,
 /// 15 bits `(x >> 16) & 0x7fff` per step, the first step giving the high bits), enough bits for
 /// `n - 1`, values `>= n` rejected; `n < 2` gives 0 without stepping.

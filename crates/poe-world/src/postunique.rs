@@ -1,14 +1,14 @@
-//! Post-unique tiles (`0x141ff2090`, per region after the fill and the de-repetition, before the
+//! Post-unique tiles (`0x141ff2210`, per region after the fill and the de-repetition, before the
 //! outer buffer): tiles of the tile set whose `.tdt` feature is `postunique` (quest item drops
 //! such as `T2_WeaponDrop_01..10` in `G1_5`) each replace one tile that has the same tile-set
-//! key. They are not in the tile-set index (`0x141d09ab0` puts them on the master's own list,
+//! key. They are not in the tile-set index (`0x141d09c30` puts them on the master's own list,
 //! in `.tst` order, with their rotation mask).
 //!
 //! Per list entry: the index keys of the tile in each allowed orientation; every region cell
 //! (row by row) that is the origin of a feature-less tile with at least one walkable corner
 //! (lattice flag 8 clear on one of the four corners of its footprint) and whose oriented index
 //! key equals one of the entry's keys is a candidate, with an orientation drawn among the
-//! equal ones (`0x141ff2920`: `below(n)`, none when no key is equal); then `below(candidates)`
+//! equal ones (`0x141ff2aa0`: `below(n)`, none when no key is equal); then `below(candidates)`
 //! picks the cell, and the tile is placed there. No candidate is an error of the client's
 //! ("Failed to place post-unique tile").
 

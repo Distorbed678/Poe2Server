@@ -45,7 +45,7 @@ fn the_sdk_hello_server_mod_loads_and_answers_hello() {
             dir: dir.clone(),
             ..Default::default()
         },
-        game_version: "0.5.5e".into(),
+        game_version: "0.5.5e.hotfix1".into(),
         server_version: "0.1.0".into(),
         server_dir: tmp.path().to_owned(),
         reserved_commands: vec!["help".into(), "where".into()],
@@ -109,12 +109,12 @@ fn a_mod_for_another_server_api_or_game_version_is_refused_but_the_server_goes_o
         (
             "another server API",
             text.replace("server_api = 1", "server_api = 2"),
-            "0.5.5e",
+            "0.5.5e.hotfix1",
         ),
         (
             "an older server API",
             text.replace("server_api = 1", "server_api = 0"),
-            "0.5.5e",
+            "0.5.5e.hotfix1",
         ),
         ("another game version", text.clone(), "0.6.0"),
     ] {

@@ -63,7 +63,7 @@ impl Generated {
     }
 }
 
-/// The topology graphs (`.tgr`/`.dgr`) an area chooses from (`0x141fdfe30`): those whose last
+/// The topology graphs (`.tgr`/`.dgr`) an area chooses from (`0x141fdffb0`): those whose last
 /// Topologies column (league/mode, topology +0x40) equals `mode`, else those marked 0x39 (any);
 /// none at all retries with mode 1 (the default).
 pub fn topologies(gd: &GameData, area_id: &str) -> Result<Vec<String>, GenError> {
@@ -76,7 +76,7 @@ pub fn topologies_for(gd: &GameData, area_id: &str, mode: i64) -> Result<Vec<Str
 
 /// Every `WorldAreas.Topologies` entry of an area in table order whatever its league mode:
 /// `(graph path, orientation mask, mode)`. This is the list `map_force_topology` indexes
-/// (`0x141ff9280` checks the stat against row `+0x60` and `0x141ff90f0` takes entry `stat - 1`
+/// (`0x141ff9400` checks the stat against row `+0x60` and `0x141ff9270` takes entry `stat - 1`
 /// of row `+0x68`, no mode filter); [`topology_entries`] is the mode-filtered list the client
 /// draws from when nothing is forced.
 pub fn raw_topology_entries(gd: &GameData, area_id: &str) -> Result<Vec<(String, u8, i64)>, GenError> {
@@ -149,10 +149,10 @@ pub struct Forced {
 }
 
 /// [`generate`] with a caller's RNG (for draw logs) and optionally a forced topology
-/// (`map_force_topology`, stat key 0xb92: 1-based index into [`topologies`]; `0x141ff90f0`
+/// (`map_force_topology`, stat key 0xb92: 1-based index into [`topologies`]; `0x141ff9270`
 /// still draws the topology value).
 ///
-/// Without one the client chooses by the world map (`0x141ff9280` → `0x141fa6440`: the
+/// Without one the client chooses by the world map (`0x141ff9400` → `0x141fa65c0`: the
 /// directions of the connected areas' map pins against each topology's direction list, three
 /// passes from exact to adjacent, [`crate::map_dirs`]) and only falls back to the index draw
 /// when nothing matches. This uses a fresh generation state with seed 0 (this server's loads);
@@ -174,7 +174,7 @@ pub fn generate_probed(gd: &GameData, area_id: &str, rng: &mut TerrainRng, force
     generate_probed_files(gd, gd.files(), area_id, rng, forced, probe)
 }
 
-/// The files plus the `SpecialTiles` table (`OverlayBlank` is row 2, `0x141d08fe0`).
+/// The files plus the `SpecialTiles` table (`OverlayBlank` is row 2, `0x141d09160`).
 struct WithSpecialTiles<'a> {
     inner: &'a dyn crate::generate::Files,
     special: Vec<String>,
@@ -256,7 +256,7 @@ pub struct Choice {
 /// `generate` picks for `area_id` and `seed` with `forced` (either side may be set; the rest is
 /// the client's natural choice, [`crate::map_dirs`], with a fresh generation state of seed 0),
 /// without generating the map. Forcing the result gives the same layout as not forcing it: the
-/// client makes the same sub-seed draw either way (`0x141ff9280`).
+/// client makes the same sub-seed draw either way (`0x141ff9400`).
 pub fn choose_layout(gd: &GameData, files: &dyn crate::generate::Files, area_id: &str, seed: u32, forced: Forced) -> Result<Forced, GenError> {
     let c = choose(gd, files, area_id, &mut TerrainRng::new(seed), forced, &mut PinState::default())?.0;
     Ok(Forced { topology: Some(c.topology), orientation: Some(c.orientation) })
@@ -275,7 +275,7 @@ fn raw_index(gd: &GameData, area_id: &str, k: usize) -> Result<u32, GenError> {
         .ok_or_else(|| data(format!("{area_id}: no topology {k} in the mode-filtered list")))
 }
 
-/// The prologue of `TerrainGen_Run` up to the layout choice (`0x141ff9280`): hideouts draw
+/// The prologue of `TerrainGen_Run` up to the layout choice (`0x141ff9400`): hideouts draw
 /// nothing, league rolls, the natural candidates, the sub-seed draw, the pick.
 fn choose(gd: &GameData, files: &dyn crate::generate::Files, area_id: &str, rng: &mut TerrainRng, forced: Forced, state: &mut PinState) -> Result<(Choice, crate::league::Rolled), GenError> {
     // `TerrainGen_Run` seeds with `disabled` set for hideouts (WorldAreas `IsHideout`, row
@@ -289,7 +289,7 @@ fn choose(gd: &GameData, files: &dyn crate::generate::Files, area_id: &str, rng:
     }
     // `phase_cad0`: league mechanic rolls come before the topology choice.
     let rolled = crate::league::roll_area(gd, area_id, rng);
-    // `0x141ff9280`: a forced topology indexes the raw list (all league modes); the client throws
+    // `0x141ff9400`: a forced topology indexes the raw list (all league modes); the client throws
     // for an index past its end ("Cannot force graph"). Without one the world-map match
     // (`crate::map_dirs`) gives (topology, orientation) candidates of the mode-filtered list.
     let area_row = gd.table("WorldAreas").map_err(data)?.find_by_str("Id", area_id).map_err(data)?.map(|r| r.index());
@@ -301,7 +301,7 @@ fn choose(gd: &GameData, files: &dyn crate::generate::Files, area_id: &str, rng:
     // The sub-seed is drawn unless the area's kind (`+0x1b4`, the unnamed i32 column 45 of
     // `WorldAreas`) is 0x21, a world-map panel: it is then the generation state's seed and the
     // main stream is not touched. With candidates it picks one (`lcg_index`), else
-    // `0x141ff90f0` draws from the whole list.
+    // `0x141ff9270` draws from the whole list.
     let sub = if area_kind(gd, area_id) == Some(0x21) { state.seed } else { rng.below(u32::MAX) };
     let (dgr, mask, topology, picked) = match forced.topology {
         Some(f) if f >= 1 => {
@@ -324,7 +324,7 @@ fn choose(gd: &GameData, files: &dyn crate::generate::Files, area_id: &str, rng:
         }
     };
     // Region orientation: forced, else the natural candidate's. Without a candidate the client
-    // draws it from the topology's list with the same sub-seed (`0x141ff90f0`:
+    // draws it from the topology's list with the same sub-seed (`0x141ff9270`:
     // `region::pick(mask, lcg_index(sub, 0x348))`).
     let orientation = forced.orientation.filter(|&o| o < 8).or(picked).unwrap_or_else(|| crate::region::pick(mask, lcg_index(sub, 0x348)));
     Ok((Choice { path: dgr, mask, topology, orientation }, rolled))
@@ -339,11 +339,11 @@ pub fn generate_stated(gd: &GameData, files: &dyn crate::generate::Files, area_i
     let (Choice { path: dgr, orientation, .. }, rolled) = choose(gd, files, area_id, rng, forced, state)?;
     let mut graph = Graph::parse_bytes(&files.read(&dgr)?).map_err(|e| data(format!("{dgr}: {e:?}")))?;
     turn(files, &mut graph, orientation)?;
-    // `ShipPlugin` (`0x141f03c40` via `0x141ff9860` / `0x141ff89e0`): the plugin adds the `G4_ship`
+    // `ShipPlugin` (`0x141f03dc0` via `0x141ff99e0` / `0x141ff8b60`): the plugin adds the `G4_ship`
     // area as a second graph job: a topology draw among its topologies, then its region
     // orientation draw (`below(0x348)` among the topology's allowed ones). It is generated after
     // the main graph and sits beside the finished map.
-    // `UltimatumPlugin` (G3_10, `0x141f10060`): the plugin rebuilds the trial graph (entrance, the
+    // `UltimatumPlugin` (G3_10, `0x141f101e0`): the plugin rebuilds the trial graph (entrance, the
     // trial's rooms, end, `exit_ruin`, the trial master graphs); the `.dgr` is that graph without
     // trial rooms. Below area level 75 (area +0xbc) the end node is `end_lowlevel` and only joins
     // `entrance2`, else `end` with `teleport1` and `entrance2`.
@@ -361,7 +361,7 @@ pub fn generate_stated(gd: &GameData, files: &dyn crate::generate::Files, area_i
     if area_plugin(gd, area_id).as_deref() == Some(SHIP_PLUGIN) {
         extras.push(extra_job(gd, files, rng, SHIP_AREA)?);
     }
-    // G4_13's expedition sub-area (`0x141efcec0` adds `ExpeditionSubArea_Kalguur_Act4` for the area
+    // G4_13's expedition sub-area (`0x141efd040` adds `ExpeditionSubArea_Kalguur_Act4` for the area
     // whose id hashes to 0x1c03): a third graph job drawn like the ship's, appended after it.
     if area_id == KALGUUR_HOST {
         extras.push(extra_job(gd, files, rng, KALGUUR_AREA)?);
@@ -384,7 +384,7 @@ fn area_kind(gd: &GameData, area_id: &str) -> Option<i64> {
     area.get_index(45).ok()?.as_int()
 }
 
-/// The `TerrainPlugins` row name of a `WorldAreas` row (`0x141d04820` registers the plugins by
+/// The `TerrainPlugins` row name of a `WorldAreas` row (`0x141d049a0` registers the plugins by
 /// name).
 fn area_plugin(gd: &GameData, area_id: &str) -> Option<String> {
     let areas = gd.table("WorldAreas").ok()?;
@@ -394,18 +394,18 @@ fn area_plugin(gd: &GameData, area_id: &str) -> Option<String> {
 }
 
 /// The plugin whose hook adds a second area to the generation, and that area (the client's
-/// hook, `0x141f03c40`, looks `G4_ship` up in `WorldAreas` by this literal).
+/// hook, `0x141f03dc0`, looks `G4_ship` up in `WorldAreas` by this literal).
 const SHIP_PLUGIN: &str = "ShipPlugin";
 /// The plugin whose layout hook copies an earlier graph's rooms into a later graph of the same
 /// grid size (MapKarst's abyss under the upper level).
 const PAIRED_PLUGIN: &str = "PairedRoomLayoutPlugin";
-/// The plugin whose graph hook picks the trial's end room by area level (`0x141f10060`).
+/// The plugin whose graph hook picks the trial's end room by area level (`0x141f101e0`).
 const ULTIMATUM_PLUGIN: &str = "UltimatumPlugin";
 const SHIP_AREA: &str = "G4_ship";
 const KALGUUR_HOST: &str = "G4_13";
 const KALGUUR_AREA: &str = "ExpeditionSubArea_Kalguur_Act4";
 
-/// A second graph job of another `WorldAreas` row (`0x141ff89e0`): a topology draw among its
+/// A second graph job of another `WorldAreas` row (`0x141ff8b60`): a topology draw among its
 /// topologies, then its region orientation draw (`below(0x348)` among the topology's allowed ones).
 /// It is generated after the main graph and sits beside the finished map.
 fn extra_job(gd: &GameData, files: &dyn crate::generate::Files, rng: &mut TerrainRng, area: &str) -> Result<Graph, GenError> {
@@ -474,11 +474,11 @@ fn turn(files: &dyn crate::generate::Files, graph: &mut Graph, o: u8) -> Result<
     Ok(())
 }
 
-/// `0x141fe9970`: existence rolls (nodes, node +0x44 = value 0: 0 removes, ≥100 keeps, else
+/// `0x141fe9af0`: existence rolls (nodes, node +0x44 = value 0: 0 removes, ≥100 keeps, else
 /// `below(100)`; then every edge with a non-zero chance), the `shuffle` groups and the `unique`
 /// groups. Removed nodes leave the graph (later node indices move up, as the client erases
 /// them) and take their edges with them; removed edges stay as `true` in the returned flags.
-/// `0x141fea2e0` / `0x141fee830` (`.dgr`, before the existence rolls): each node with a random
+/// `0x141fea460` / `0x141fee9b0` (`.dgr`, before the existence rolls): each node with a random
 /// offset (values 5..9: x min, y min, x max, y max) moves by min + `range(0, max - min)` on x,
 /// then on y.
 fn random_offsets(graph: &mut Graph, rng: &mut TerrainRng) {
@@ -493,7 +493,7 @@ fn random_offsets(graph: &mut Graph, rng: &mut TerrainRng) {
         n.x += dx;
         n.y += dy;
     }
-    // `0x141fea420` / `0x141fee6e0` (right after the offsets, all nodes): a room type holding a
+    // `0x141fea5a0` / `0x141fee860` (right after the offsets, all nodes): a room type holding a
     // comma list (`Gates_N, Gates_FN`) keeps one entry, `below(count)`.
     for n in &mut graph.nodes {
         if n.room_type.contains(',') {
@@ -507,7 +507,7 @@ fn random_offsets(graph: &mut Graph, rng: &mut TerrainRng) {
 }
 
 thread_local! {
-    /// The job's lettered-unique history (`0x141feb050`), by letter; cleared per generated area.
+    /// The job's lettered-unique history (`0x141feb1d0`), by letter; cleared per generated area.
     static LETTER_HISTORY: std::cell::RefCell<std::collections::BTreeMap<u8, Vec<usize>>> = Default::default();
 }
 
@@ -526,7 +526,7 @@ fn prune(graph: &Graph, rng: &mut TerrainRng) -> Result<(Graph, Vec<bool>), GenE
         })
         .collect();
     let mut g = graph.clone();
-    // `0x141d1c580` gives each edge, in file order, the first free slot of both its nodes: a node's
+    // `0x141d1c700` gives each edge, in file order, the first free slot of both its nodes: a node's
     // slots hold its edges by edge index (the node line lists them in its own order). `.dgr` only: sorting the
     // `.tgr` slots loses 1,172 of the match sample's outdoor jobs.
     if g.dungeon_defaults.is_some() {
@@ -542,7 +542,7 @@ fn prune(graph: &Graph, rng: &mut TerrainRng) -> Result<(Graph, Vec<bool>), GenE
     }
     let drop_node_before = dropped.clone();
     shuffle_nodes(&mut g, &drop_node_before, rng);
-    // `unique<N>[#count]` / `unique<L><N>[#count]` (`0x141feb3b0`, collected by `0x141fe96e0`).
+    // `unique<N>[#count]` / `unique<L><N>[#count]` (`0x141feb530`, collected by `0x141fe9860`).
     let mut groups: Vec<(u32, Vec<usize>)> = Vec::new();
     let mut letters: std::collections::BTreeMap<u8, (u32, Vec<Vec<usize>>)> = Default::default();
     for (i, n) in g.nodes.iter().enumerate() {
@@ -587,10 +587,10 @@ fn prune(graph: &Graph, rng: &mut TerrainRng) -> Result<(Graph, Vec<bool>), GenE
             }
         }
     }
-    // Letter groups (`0x141fe9970`): the numbered subgroups that stay are kept per letter in
-    // the job's history of this graph (the vector `0x141feb050` returns), empty on the first
+    // Letter groups (`0x141fe9af0`): the numbered subgroups that stay are kept per letter in
+    // the job's history of this graph (the vector `0x141feb1d0` returns), empty on the first
     // generation: a discarded `below(n)`, a partial shuffle of `0..n` for `count` steps
-    // (`0x141fecde0`), cut to `count`; the nodes of the other subgroups go.
+    // (`0x141fecf60`), cut to `count`; the nodes of the other subgroups go.
     for (letter, (count, subgroups)) in letters {
         let n = subgroups.len();
         let mut keep: Vec<usize> = LETTER_HISTORY.with(|h| h.borrow().get(&letter).cloned().unwrap_or_default());
@@ -649,10 +649,10 @@ fn live_slots(g: &Graph, removed: &[bool], n: usize) -> [Option<usize>; 4] {
     s
 }
 
-/// `0x141feb9d0`: removes a node. Two edges of one type with the far nodes at the node's
-/// height merge into one through it (`0x141fec1c0`: the first edge takes the second's far
+/// `0x141febb50`: removes a node. Two edges of one type with the far nodes at the node's
+/// height merge into one through it (`0x141fec340`: the first edge takes the second's far
 /// node, the node's position and the second edge's points); a room node with two or more
-/// edges only loses its room; anything else goes with its edges (`0x141fec520`).
+/// edges only loses its room; anything else goes with its edges (`0x141fec6a0`).
 fn remove_node(g: &mut Graph, removed: &mut [bool], dropped: &mut Vec<bool>, n: usize) {
     let slots: Vec<usize> = live_slots(g, removed, n).into_iter().flatten().collect();
     let height = |g: &Graph, i: usize| g.nodes[i].values.get(1).copied().unwrap_or(0);
@@ -702,7 +702,7 @@ fn remove_node(g: &mut Graph, removed: &mut [bool], dropped: &mut Vec<bool>, n: 
         g.nodes[n].orientation = "(any)".into();
         return;
     }
-    // `0x141fec520`: an edge with internal points ends at a new node on its nearest point
+    // `0x141fec6a0`: an edge with internal points ends at a new node on its nearest point
     // instead of going.
     for e in slots {
         if g.edges[e].points.is_empty() {
@@ -770,7 +770,7 @@ fn shuffle_nodes(g: &mut Graph, dropped: &[bool], rng: &mut TerrainRng) {
     }
 }
 
-/// `0x141d14d10`: an edge type that a mirrored region leaves alone (no height change, the same
+/// `0x141d14e90`: an edge type that a mirrored region leaves alone (no height change, the same
 /// ground either side, and for a virtual edge a symmetric split).
 fn edge_symmetric(types: &mut TerrainTypes, files: &dyn crate::generate::Files, et: &str) -> Result<bool, GenError> {
     let t = types.edge(files, et)?.clone();
@@ -802,7 +802,7 @@ pub(crate) fn master_entries(bytes: &[u8], tsi_path: &str) -> std::collections::
 /// (`crate::dungeon_tiles`).
 fn generate_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[bool], rng: &mut TerrainRng, extra: &[Graph], probe: &mut dyn FnMut(Stage)) -> Result<TileMap, GenError> {
     let mut built = build_dungeon(files, graph, removed, rng, None, &[])?;
-    // `0x141ff7e00` / `0x141ff05f0`: each `graph` node's subgraph is generated after the main
+    // `0x141ff7f80` / `0x141ff0770`: each `graph` node's subgraph is generated after the main
     // graph's fill and de-repetition, straight into its reserved rectangle of the map.
     let mut done: Vec<(Built, (i32, i32), Margins)> = Vec::new();
     // A subgraph's own `graph` nodes (BossRush_Area1's `_TheForsakenSon.dgr`) are generated after the
@@ -814,7 +814,7 @@ fn generate_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: 
             eprintln!("SUBDRAWS {file} starts at draw {}", rng.log.as_ref().map_or(0, |l| l.len()));
         }
         let mut sub = Graph::parse_bytes(&files.read(&file)?).map_err(|e| data(format!("{file}: {e:?}")))?;
-        // Turned like the main graph (`0x141ff05f0` sets the parent's region).
+        // Turned like the main graph (`0x141ff0770` sets the parent's region).
         turn(files, &mut sub, graph.region)?;
         let is_dgr = sub.dungeon_defaults.is_some();
         if is_dgr {
@@ -900,7 +900,7 @@ fn generate_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: 
         job_maps.push(finish_dungeon(files, b, &[], &HashMap::new(), &[], repair, rng)?);
     }
     job_maps.reverse();
-    // `0x141ff7a10`: the outer fill and outer buffer per graph, the last subgraph first, then the
+    // `0x141ff7b90`: the outer fill and outer buffer per graph, the last subgraph first, then the
     // main graph's below.
     // `StoreyHeight` (tile records keep heights in world units): each cell takes the one of the
     // graph that placed it (a subgraph's own cells and the outer fill and buffer cells it added,
@@ -936,8 +936,8 @@ fn generate_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: 
     // The unbuffered main map lies inside the main master's margins of the final map.
     let main_margins = Margins::parse(&crate::text::decode_utf16(&built.tsi_bytes));
     let main_at = (main_margins.left as i32, main_margins.top as i32);
-    // `0x141ffde60`: a tile's storeys become world units with the `StoreyHeight` of the last graph
-    // region (`0x141d02d60`: main first, then the subgraphs' reserved blocks in the final map)
+    // `0x141ffdfe0`: a tile's storeys become world units with the `StoreyHeight` of the last graph
+    // region (`0x141d02ee0`: main first, then the subgraphs' reserved blocks in the final map)
     // that holds the tile's corner cell, else the main graph's.
     let regions: Vec<((i32, i32, i32, i32), i16)> = done
         .iter()
@@ -1024,8 +1024,8 @@ fn finish_dungeon(files: &dyn crate::generate::Files, built: Built, owner: &[Opt
     Ok(map)
 }
 
-/// The outer fill's height repair (`0x141fd5ff0`'s third argument): generator `+8`, which
-/// `0x141ff05f0` ORs with each dungeon graph's map view flag `+0x20` after its tile pass:
+/// The outer fill's height repair (`0x141fd6170`'s third argument): generator `+8`, which
+/// `0x141ff0770` ORs with each dungeon graph's map view flag `+0x20` after its tile pass:
 /// some tile or corner was set with a non-zero height (flat graphs: G4_4_3, HideoutLimestone,
 /// Design_Lite place the outer fill plain). Switches: `POE_NO_REPAIR_ALL`, `POE_REPAIR_ALL`.
 fn repair_flag(built: &[&Built]) -> bool {
@@ -1065,7 +1065,7 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
         Some(p) => RoomSet::load(files, &p)?,
         None => RoomSet { rooms: Vec::new(), path: String::new() },
     };
-    // `RoomOverlap` is master +0x14b; the parser's default is 1 (constructor `0x14292e190`).
+    // `RoomOverlap` is master +0x14b; the parser's default is 1 (constructor `0x14292e3d0`).
     let overlap: u32 = tsi.get("RoomOverlap").and_then(|v| v.trim().parse().ok()).unwrap_or(1);
     // `DungeonFillRoomHeightOverride` is master +0x14d (a byte), present flag +0x159.
     let fill_height: Option<i32> = tsi.get("DungeonFillRoomHeightOverride").and_then(|v| v.trim().parse::<i32>().ok()).map(|v| v as u8 as i32);
@@ -1079,7 +1079,7 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
     let unit: u32 = tsi.get("RoomUnitSize").and_then(|v| v.trim().parse().ok()).unwrap_or(9);
     // The features still on the generator's list when the graph starts (the layout below takes the ones its mission rooms serve).
     let league = files.league_rooms();
-    // `PairedRoomLayoutPlugin` (`0x141f01710`): the first earlier graph with the same grid size
+    // `PairedRoomLayoutPlugin` (`0x141f01890`): the first earlier graph with the same grid size
     // lends its rooms, each replaced by its `Pairs` partner.
     let paired = if files.paired_rooms() && std::env::var_os("POE_NO_PAIRED").is_none() {
         earlier.iter().find(|e| (e.0, e.1) == (graph.width, graph.height)).map(|e| e.2.as_slice())
@@ -1100,7 +1100,7 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
         _ => return Err(data("master names FillTiles without a TileSet")),
     };
     // `OuterFillHeightOverride` (master +0x161 set, value +0x153): the outer fill places plain.
-    // The league features' tiles join the tile set when the features are added (`0x141f8aed0`).
+    // The league features' tiles join the tile set when the features are added (`0x141f8b050`).
     for lr in &league {
         for t in &lr.tiles {
             master.add_extra_tile(files, t)?;
@@ -1198,16 +1198,16 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
         }
         std::fs::write(format!("{path}.{}x{}", map.width, map.height), out).ok();
     }
-    // Overlays around the fill (`0x14209c4c0`: the context `0x141fa0ac0`, phase 1, the fill of
+    // Overlays around the fill (`0x14209c640`: the context `0x141fa0c40`, phase 1, the fill of
     // the listed cells, phase 2). The generator's room list (`+0x58`) holds the rooms placed
     // before it (below).
-    // `0x14209c150`: the pre-unique room, before the overlay context is built.
+    // `0x14209c2d0`: the pre-unique room, before the overlay context is built.
     let mut cells = cells;
     let (mut pre_rooms, mut pre_wiggle) = (pass.hosted.take(), Vec::new());
-    // League mechanics' rooms come first (`0x14209a620`, before the injectors and the pre-unique room).
+    // League mechanics' rooms come first (`0x14209a7a0`, before the injectors and the pre-unique room).
     if rel("FillTiles").is_some() && std::env::var("POE_NO_DGR_LEAGUE").is_err() {
         let league_rooms = files.league_rooms();
-        // `0x14209a620`: a room set with mission rooms (`mission` tag) leaves the features without
+        // `0x14209a7a0`: a room set with mission rooms (`mission` tag) leaves the features without
         // the priority flag (+0x60; not the stone circle) to the mission-tile slots of the rooms.
         let has_missions = set.rooms.iter().any(|r| r.tag.eq_ignore_ascii_case("mission"));
         if !league_rooms.is_empty() && !has_missions {
@@ -1243,7 +1243,7 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
                     Some(crate::overlay::RoomRect { rect, feature: !room.arm.tag.is_empty() && (!r.special || room.arm.tag.eq_ignore_ascii_case("mission")), described: r.node.is_some_and(|n| !graph.nodes[n].tags.is_empty()), inset })
                 })
                 // Rooms placed before the overlay context (league rooms, the pre-unique room
-                // `0x14209c150`) join the room list as feature rooms, as on `.tgr` maps (P1_4
+                // `0x14209c2d0`) join the room list as feature rooms, as on `.tgr` maps (P1_4
                 // 1187622552: a 3 x 3 pre-unique room marked 8, its centre 4).
                 .chain(pre_rooms.iter().filter(|r| std::env::var_os("POE_NO_LEAGUE_RECTS").is_none() && !r.room.arm.tag.is_empty()).map(|r| {
                     let (w, h) = (r.room.width() as i32, r.room.arm.grid.len() as i32);
@@ -1274,7 +1274,7 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
     if let Some(o) = &mut overlays {
         o.run(1, &mut map, &mut master, &mut types, files, rng)?;
     }
-    // The rooms' lattice settle (`0x142099e90`) gives a ground again to the corners the overlay
+    // The rooms' lattice settle (`0x14209a010`) gives a ground again to the corners the overlay
     // rooms cleared and left without one (MapFrozenFalls: a bend overlay's far corners keep the
     // graph's `upper_ground.gt`, which the fill reads); verified on the client's fill groups.
     if std::env::var_os("POE_NO_RESETTLE").is_none() {
@@ -1319,7 +1319,7 @@ fn build_dungeon(files: &dyn crate::generate::Files, graph: &Graph, removed: &[b
     derepeat_pass(&mut map, &master, &placements, rng);
     dbg_cell(&map, "post-derepeat");
     drop(placements);
-    // `0x141ff2090` (post-unique tiles, per region after the de-repetition: the village graphs of
+    // `0x141ff2210` (post-unique tiles, per region after the de-repetition: the village graphs of
     // G1_13_2 place `Fields_01`-style tiles of the tile set's own list here).
     // Generator `+8` takes the view's flag right after the tile pass, before the post-unique tiles.
     let raised = map.raised;
@@ -1449,7 +1449,7 @@ fn build_tgr(files: &dyn crate::generate::Files, graph: &Graph, removed: Vec<boo
     let mut placed_graph = PlacedGraph { graph, nodes: nodes.iter().map(|n| n.pos).collect(), ends: vec![[None; 2]; graph.edges.len()], points: edge_points, removed };
     let mut types = TerrainTypes::default();
 
-    // `0x1420c7400` sorts the room-less nodes before placement: virtual nodes (touching a
+    // `0x1420c7580` sorts the room-less nodes before placement: virtual nodes (touching a
     // virtual edge; not dead ends at the border) and junctions of three or more edges get
     // exploded before routing (virtual ones only when no tile fits them at the room stage).
     let (mut virtual_nodes, mut junctions) = (Vec::new(), Vec::new());
@@ -1497,7 +1497,7 @@ fn build_tgr(files: &dyn crate::generate::Files, graph: &Graph, removed: Vec<boo
         }
         placed.push(p);
     }
-    // `0x1420caa40`, second loop: the nodes touching a virtual edge are tried like rooms (rooms
+    // `0x1420cabc0`, second loop: the nodes touching a virtual edge are tried like rooms (rooms
     // of the empty type, else tiles); those nothing fits are exploded below.
     let mut placed_virtual: Vec<usize> = Vec::new();
     for &n in &virtual_nodes {
@@ -1520,7 +1520,7 @@ fn build_tgr(files: &dyn crate::generate::Files, graph: &Graph, removed: Vec<boo
         map.copy_lattice(outer, origin);
     }
     for p in placed.iter_mut() {
-        // `0x1420c9970` first lets a room that does not fit move (`0x1420c9260`).
+        // `0x1420c9af0` first lets a room that does not fit move (`0x1420c93e0`).
         let align = crate::rooms::node_alignment(&placed_graph, p.node, &mut types, files)?;
         let before = p.pos;
         if std::env::var_os("POE_DEBUG_ROOMS").is_some() {
@@ -1530,7 +1530,7 @@ fn build_tgr(files: &dyn crate::generate::Files, graph: &Graph, removed: Vec<boo
             return Err(data(format!("Overlapping node tiles at {:?}", p.pos)));
         }
         match p.tile {
-            // `0x1420c9970`: a node that took a tile places just that tile.
+            // `0x1420c9af0`: a node that took a tile places just that tile.
             Some(t) => {
                 let def = &master.tiles.tiles[t];
                 map.place(p.pos.0, p.pos.1, &def.path, &def.tdt, p.orientation, 0, Some(t));
@@ -1540,7 +1540,7 @@ fn build_tgr(files: &dyn crate::generate::Files, graph: &Graph, removed: Vec<boo
     }
     probe(Stage::Rooms(&map));
 
-    // Edge ends at the rooms' exits (`0x1420c5750`, `0x1420c5b50`), then routing.
+    // Edge ends at the rooms' exits (`0x1420c58d0`, `0x1420c5cd0`), then routing.
     let mut route: Vec<RouteEdge> = Vec::new();
     let mut route_index = vec![usize::MAX; graph.edges.len()];
     for (i, e) in graph.edges.iter().enumerate() {
@@ -1623,7 +1623,7 @@ fn build_tgr(files: &dyn crate::generate::Files, graph: &Graph, removed: Vec<boo
         }
     }
     // The client has cut the rooms' edges and split the room nodes per exit before it
-    // explodes anything (`0x1420c9970` before `0x1420cb200`): node keys of junctions see the
+    // explodes anything (`0x1420c9af0` before `0x1420cb380`): node keys of junctions see the
     // exits as the other ends.
     for (i, ri) in route_index.iter().enumerate() {
         if *ri != usize::MAX {
@@ -1632,8 +1632,8 @@ fn build_tgr(files: &dyn crate::generate::Files, graph: &Graph, removed: Vec<boo
         }
     }
 
-    // Exploded nodes (`0x1420cb200`). A virtual node that a tile fits is placed with the rooms
-    // instead (`0x1420caa40`), which is not ported yet.
+    // Exploded nodes (`0x1420cb380`). A virtual node that a tile fits is placed with the rooms
+    // instead (`0x1420cabc0`), which is not ported yet.
     for &n in virtual_nodes.iter().chain(&junctions) {
         if virtual_nodes.contains(&n) {
         }
@@ -1649,11 +1649,11 @@ fn build_tgr(files: &dyn crate::generate::Files, graph: &Graph, removed: Vec<boo
     for e in &route {
         router.reserve(e);
     }
-    // `0x1420cdc30`: edges that fail keep their reservation and are retried after the others
+    // `0x1420cddb0`: edges that fail keep their reservation and are retried after the others
     // (the client gives up when a whole round routes none).
     crate::routing::route_reserved(&mut router, &mut route, rng).map_err(|e| data(format!("could not route edges: {e}")))?;
 
-    // The layout graph in the client's numbering (`0x141ef2800` splits room nodes per exit).
+    // The layout graph in the client's numbering (`0x141ef2980` splits room nodes per exit).
     let mut lg = LayoutGraph::default();
     for i in 0..graph.nodes.len() {
         let mut slots = [None; 4];
@@ -1711,12 +1711,12 @@ fn build_tgr(files: &dyn crate::generate::Files, graph: &Graph, removed: Vec<boo
     }
     smoothing::smooth(&mut lg);
     probe(Stage::Graph("smooth", &lg));
-    // Virtual nodes no tile fitted (`0x1420c6cd0`).
+    // Virtual nodes no tile fitted (`0x1420c6e50`).
     let nodes_before = lg.nodes.len();
     for &n in &virtual_nodes {
         node_tiles::virtual_junction(&mut lg, n, rng)?;
     }
-    // The nodes this split made were not in the tile list built at the start (`0x1420c7400` ran
+    // The nodes this split made were not in the tile list built at the start (`0x1420c7580` ran
     // on the original nodes).
     let junction_made: std::collections::HashSet<usize> = (nodes_before..lg.nodes.len()).collect();
 
@@ -1734,17 +1734,17 @@ fn build_tgr(files: &dyn crate::generate::Files, graph: &Graph, removed: Vec<boo
     let lookup = |t: &str| split_types.get(&t.to_ascii_lowercase()).cloned().unwrap_or_default();
     split_virtual(&mut lg, &lookup, (tiles.0 * 23, tiles.1 * 23), rng);
     probe(Stage::Graph("split", &lg));
-    // Logical links of tile-less virtual nodes (`0x1420bcff0`).
+    // Logical links of tile-less virtual nodes (`0x1420bd170`).
     let (link_tiles, moved_to) = node_tiles::resolve_links(&mut lg)?;
     // Erased nodes shifted the later indices: the nodes the junction split made keep their flag.
     let junction_made: std::collections::HashSet<usize> = junction_made.iter().filter_map(|&n| moved_to.get(n).copied().flatten()).collect();
 
-    // Rounding, border dead ends and node tiles (`0x1420cade0`), slot compaction, rounding,
+    // Rounding, border dead ends and node tiles (`0x1420caf60`), slot compaction, rounding,
     // end points.
     smoothing::round_corners(&mut lg);
     let mut tile_nodes = Vec::new();
     for n in 0..lg.nodes.len() {
-        // Sorted at the start of the tile stage (`0x1420c7400`): virtual nodes are not in the
+        // Sorted at the start of the tile stage (`0x1420c7580`): virtual nodes are not in the
         // tile list. Nodes the splits made (no original) count too unless they are fixed (they
         // copy the flag of the node they were made from).
         match lg.nodes[n].orig {
@@ -1836,11 +1836,11 @@ fn build_tgr(files: &dyn crate::generate::Files, graph: &Graph, removed: Vec<boo
     probe(Stage::Lattice("borders", &map));
     lattice::border_floods(&mut map, &master.tiles);
     probe(Stage::Lattice("flood", &map));
-    // The height pass (`0x1420c0a60`) runs between the `flood` and `heights` snapshots.
+    // The height pass (`0x1420c0be0`) runs between the `flood` and `heights` snapshots.
     if std::env::var_os("POE_NO_HEIGHT_PASS").is_none() {
         lattice::height_pass(&mut map, files).map_err(data)?;
     }
-    // The unwalkable marking (`0x141fe0fd0`) works from the real map's border: a subgraph's
+    // The unwalkable marking (`0x141fe1150`) works from the real map's border: a subgraph's
     // window marks nothing (G3_1's `End_*.tgr`: no corner gets flag 8).
     if window.is_none() {
         lattice::mark_unwalkable(&mut map, &master.tiles);
@@ -1854,11 +1854,11 @@ fn build_tgr(files: &dyn crate::generate::Files, graph: &Graph, removed: Vec<boo
         p.flags &= !4;
     }
     probe(Stage::Lattice("bdae0", &map));
-    // League mechanics' rooms (`0x1420bd890`, `0x1420be940`), before the overlays.
+    // League mechanics' rooms (`0x1420bda10`, `0x1420beac0`), before the overlays.
     let league_rooms = files.league_rooms();
     let pre_rooms = if league_rooms.is_empty() { Vec::new() } else { crate::fill::place_league_rooms(&mut map, &mut master, files, &league_rooms, rng)? };
     probe(Stage::Lattice("be360", &map));
-    // Overlays before and after the fill (`0x141fa1a70`).
+    // Overlays before and after the fill (`0x141fa1bf0`).
     let mut overlays = match rel("Overlays") {
         Some(toy) => {
             let rects: Vec<crate::overlay::RoomRect> = placed
@@ -1872,7 +1872,7 @@ fn build_tgr(files: &dyn crate::generate::Files, graph: &Graph, removed: Vec<boo
                         inset: 0,
                     }
                 })
-                // League rooms placed before the overlays (`0x1420bdae0`, e.g. a stone circle)
+                // League rooms placed before the overlays (`0x1420bdc60`, e.g. a stone circle)
                 // join the generator's room list as feature rooms, their inner rectangle shrunk
                 // by the room's own overlap (MapCaldera: the client marks a 3x3 stone circle 8,
                 // its centre 4).
@@ -1895,7 +1895,7 @@ fn build_tgr(files: &dyn crate::generate::Files, graph: &Graph, removed: Vec<boo
     if let Some(o) = &mut overlays {
         o.run(2, &mut map, &mut master, &mut types, files, rng)?;
     }
-    // The fill tiles' heights (`0x1420c19d0`), after the overlays' second phase.
+    // The fill tiles' heights (`0x1420c1b50`), after the overlays' second phase.
     if std::env::var_os("POE_NO_REFIX").is_none() {
         lattice::refix_fills(&mut map, files).map_err(data)?;
     }

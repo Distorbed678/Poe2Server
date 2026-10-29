@@ -134,7 +134,7 @@ impl CharacterClass {
 }
 
 /// An `Inventories` row: a kind of inventory (main bag, an equipment slot, ...). The row index
-/// is the slot index the client uses (inventory +0x144; 121 rows in 0.5.5e).
+/// is the slot index the client uses (inventory +0x144; 121 rows in 0.5.5e.hotfix1).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InventorySlot {
     pub index: u8,

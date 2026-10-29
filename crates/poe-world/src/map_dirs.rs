@@ -1,6 +1,6 @@
 //! The natural topology choice (`docs/re/terrain/shared-passes.md` "World-map pin directions in
 //! detail" in the hub): which of an area's topologies and region orientations the client picks
-//! when the server forces none. Client 0.5.5e.hotfix1 addresses (0.5.5e = hotfix − 0x180 here).
+//! when the server forces none. Client addresses are 0.5.5e Hotfix 1 ones.
 //!
 //! The generation state (world `+0x4b0`) holds a direction list (`+0x70`: per pin, the direction
 //! from the area's pin to it). A town or an area of kind 2 (`WorldAreas` `+0x14`, `+0x1b4`)

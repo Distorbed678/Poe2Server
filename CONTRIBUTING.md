@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for looking at the project. This repository is the server of an unofficial, personal and educational private server for **Path of Exile 2 client 0.5.5e**. Read the [disclaimer in the README](README.md#disclaimer) first: it is not affiliated with Grinding Gear Games, no game files are distributed, and nothing here is meant for official servers.
+Thanks for looking at the project. This repository is the server of an unofficial, personal and educational private server for **Path of Exile 2 client 0.5.5e Hotfix 1**. Read the [disclaimer in the README](README.md#disclaimer) first: it is not affiliated with Grinding Gear Games, no game files are distributed, and nothing here is meant for official servers.
 
 The project is spread over several repositories; the overview is [docs/overview.md of the hub](https://github.com/Distorbed678/Poe2ModdingProject/blob/main/docs/overview.md), and the hub's [CONTRIBUTING.md](https://github.com/Distorbed678/Poe2ModdingProject/blob/main/CONTRIBUTING.md) has the long form of everything below (documenting reverse-engineering findings, tests that need the game, the other repositories' checks).
 

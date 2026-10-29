@@ -1,6 +1,6 @@
-//! The dungeon tile pass (`0x14209c4c0`): every placed room's `.arm` slots become tiles
-//! (`0x1420983d0`, pass A), and the slots on the one-tile borders rooms share are merged with
-//! the neighbour's and tiled afterwards (`0x14209fbc0`, pass B).
+//! The dungeon tile pass (`0x14209c640`): every placed room's `.arm` slots become tiles
+//! (`0x142098550`, pass A), and the slots on the one-tile borders rooms share are merged with
+//! the neighbour's and tiled afterwards (`0x14209fd40`, pass B).
 
 use std::collections::HashMap;
 
@@ -38,7 +38,7 @@ impl Ecf {
         Self { rules }
     }
 
-    /// `0x1420a28c0`: the rule for the pair (either order) and height difference, then one
+    /// `0x1420a2a40`: the rule for the pair (either order) and height difference, then one
     /// without a height difference; without one, a lone edge stays and two edges give none.
     fn combine(&self, a: &Option<String>, b: &Option<String>, dh: i32) -> Option<String> {
         let pair = |r: &&(Option<String>, Option<String>, Option<String>, Option<i32>)| (&r.0 == a && &r.1 == b) || (&r.0 == b && &r.1 == a);
@@ -53,7 +53,7 @@ impl Ecf {
     }
 }
 
-/// A shared-border slot (`0x142097f80`'s 0x80-byte entry, kept sorted by x·65536 + y).
+/// A shared-border slot (`0x142098100`'s 0x80-byte entry, kept sorted by x·65536 + y).
 #[derive(Debug, Clone)]
 struct Border {
     key: TileKey,
@@ -69,9 +69,9 @@ struct Border {
 const CORNER_MASKS: [u8; 4] = [0x0c, 0x14, 0x12, 0x0a];
 const EDGE_MASKS: [u8; 4] = [0x04, 0x10, 0x02, 0x08];
 
-/// `0x1420972f0`: `b` (the stored key) with what `a` covers (`fa`) laid over it. Corners `a`
+/// `0x142097470`: `b` (the stored key) with what `a` covers (`fa`) laid over it. Corners `a`
 /// covers fully take its ground (none for `.gt` flag 0x10) and height (rebased from `ha` to
-/// `hb`); sides only `a` covers take its edge; sides both cover are combined (`0x142097620`).
+/// `hb`); sides only `a` covers take its edge; sides both cover are combined (`0x1420977a0`).
 #[allow(clippy::too_many_arguments)]
 fn merge(map: &TileMap, ecf: &Ecf, a: &TileKey, b: &TileKey, ha: i32, hb: i32, fa: u8, fb: u8, merged: &mut u8) -> Result<TileKey, GenError> {
     if a.size != b.size {
@@ -127,7 +127,7 @@ fn merge(map: &TileMap, ecf: &Ecf, a: &TileKey, b: &TileKey, ha: i32, hb: i32, f
     Ok(out)
 }
 
-/// `0x142097aa0`: a key with no edges whose corners share one ground (`.gt` flag 0x10 grounds
+/// `0x142097c20`: a key with no edges whose corners share one ground (`.gt` flag 0x10 grounds
 /// count as none; a height only matters on grounds with flag 1).
 fn uniform(map: &TileMap, key: &TileKey) -> bool {
     let g = |i: usize| key.grounds[i].clone().filter(|g| map.gt_flags(g) & 0x10 == 0);
@@ -138,19 +138,19 @@ fn uniform(map: &TileMap, key: &TileKey) -> bool {
     })
 }
 
-/// A ground-only cell for the fill (`0x142097cb0`'s 0x18-byte record at context +0x58).
+/// A ground-only cell for the fill (`0x142097e30`'s 0x18-byte record at context +0x58).
 #[derive(Debug, Clone)]
 pub struct GroundCell {
     pub pos: (i32, i32),
     pub ground: Option<String>,
     pub accessible: bool,
-    /// Accessible when listed (the pre-unique room's test, `0x14209c150` entry `+0x10`); the fill
+    /// Accessible when listed (the pre-unique room's test, `0x14209c2d0` entry `+0x10`); the fill
     /// reads the room flag later (`accessible`).
     pub early: bool,
     pub height: i32,
 }
 
-/// `0x142097cb0`: a ground-only slot. Its corners take the height where none is set yet, and
+/// `0x142097e30`: a ground-only slot. Its corners take the height where none is set yet, and
 /// each cell is listed with its ground for the fill.
 fn mark_ground(map: &mut TileMap, cells: &mut Vec<GroundCell>, pos: (i32, i32), key: &TileKey, height: i32, accessible: bool, early: bool) {
     let (w, h) = (key.size.0 as i32, key.size.1 as i32);
@@ -189,8 +189,8 @@ fn mark_ground(map: &mut TileMap, cells: &mut Vec<GroundCell>, pos: (i32, i32), 
 }
 
 /// Door bookkeeping (only with `door` tiles, tile pass +0x38): exit markers on room borders
-/// (`0x142096ad0`), groups of 1×1 passage tiles at shared exits and larger tiles there
-/// (`0x142097060`).
+/// (`0x142096c50`), groups of 1×1 passage tiles at shared exits and larger tiles there
+/// (`0x1420971e0`).
 #[derive(Default)]
 struct Doors {
     on: bool,
@@ -201,7 +201,7 @@ struct Doors {
 }
 
 impl Doors {
-    /// `0x142096ad0`: the middle cells (3, or 1 below 5 tiles) of every open exit's unit on the
+    /// `0x142096c50`: the middle cells (3, or 1 below 5 tiles) of every open exit's unit on the
     /// room's border line, flagged with the side (4 top, 0x10 right, 2 bottom, 8 left).
     fn mark(&mut self, p: &crate::dungeon::PlacedRoom, unit: i32, overlap: i32) {
         let step = unit - overlap;
@@ -233,7 +233,7 @@ impl Doors {
         }
     }
 
-    /// `0x142097060`.
+    /// `0x1420971e0`.
     fn add(&mut self, pos: (i32, i32), size: (u8, u8)) {
         if size != (1, 1) {
             self.large.push(pos);
@@ -253,7 +253,7 @@ impl Doors {
         }
     }
 
-    /// Pass B after a border tile is placed (`0x14209fbc0`): 3×3 tiles touching a shared exit,
+    /// Pass B after a border tile is placed (`0x14209fd40`): 3×3 tiles touching a shared exit,
     /// and straight passages across one, become door spots.
     fn after_border(&mut self, pos: (i32, i32), key: &TileKey) {
         if !self.on {
@@ -297,7 +297,7 @@ pub struct TilePass<'a> {
     /// `.tsi` `DisableDoors` (master +0x167): no door placement.
     pub doors_disabled: bool,
     /// `.tsi` `DoorEdgeType` (master +0x250, lower case) and its `can_end` flag (`.et` 0x10):
-    /// without a room overlap, door exits become walkways of this edge (`0x14209df50`).
+    /// without a room overlap, door exits become walkways of this edge (`0x14209e0d0`).
     pub door_edge: Option<(String, bool)>,
     /// The graph's ground types as the pass context holds them: +0x20 the default (graph line 2),
     /// +0x28 the ground of the lowest points (line 3), +0x30 that of the highest (line 1).
@@ -316,11 +316,11 @@ pub struct Host<'a> {
 }
 
 impl TilePass<'_> {
-    /// Passes A and B; returns the ground-only cells in fill order (`0x1420d5060`: stable, by
+    /// Passes A and B; returns the ground-only cells in fill order (`0x1420d51e0`: stable, by
     /// x then y).
     pub fn run(&self, grid: &Grid, rooms: &HashMap<String, Room>, map: &mut TileMap, rng: &mut TerrainRng) -> Result<(Vec<GroundCell>, Vec<(i32, i32)>), GenError> {
         let mut moved = Vec::new();
-        // `0x142099c80`: door bookkeeping only when the tile set's feature map has a `door`
+        // `0x142099e00`: door bookkeeping only when the tile set's feature map has a `door`
         // entry (tile pass +0x38). The map is keyed case-sensitively: ExpeditionLogBook_Tundra's
         // door tiles say `Door`, so its tile pass has no doors.
         let exact = std::env::var_os("POE_DOOR_ANYCASE").is_none();
@@ -328,7 +328,7 @@ impl TilePass<'_> {
         let mut cells: Vec<GroundCell> = Vec::new();
         let mut borders: Vec<((i32, i32), Border)> = Vec::new();
         let mut pending = grid.pending.clone();
-        // Pass +0x78: door exit cells with their side, sorted by x·65536 + y (`0x1420cfbd0`).
+        // Pass +0x78: door exit cells with their side, sorted by x·65536 + y (`0x1420cfd50`).
         let mut sides: Vec<((i32, i32), u8)> = Vec::new();
         for p in &grid.rooms {
             if p.path.is_empty() {
@@ -347,7 +347,7 @@ impl TilePass<'_> {
             self.room(p, room, map, &mut borders, &mut cells, &mut moved, &mut pending, rng)?;
         }
         self.borders(borders, map, &mut cells, &mut doors, rng)?;
-        // `0x14209c4c0` at `0x14209c677`: the door passes (`0x14209d180`, `0x14209dc90`) run
+        // `0x14209c640` at `0x14209c7f7`: the door passes (`0x14209d300`, `0x14209de10`) run
         // only without `DisableDoors` (master +0x167) and with a room overlap.
         if doors.on && !self.doors_disabled && (self.overlap != 0 || std::env::var_os("POE_DOORS_NO_OVERLAP").is_some()) {
             self.check_doors(&doors, map, rng)?;
@@ -357,7 +357,7 @@ impl TilePass<'_> {
                 self.walkways(&sides, &cells, door, map, rng)?;
             }
         }
-        // `0x141f9e780`: the rooms' ground overrides.
+        // `0x141f9e900`: the rooms' ground overrides.
         let step = (self.unit - self.overlap) as i32;
         for p in &grid.rooms {
             if let Some(room) = rooms.get(&p.path) {
@@ -367,11 +367,11 @@ impl TilePass<'_> {
         if std::env::var("POE_NO_SETTLE").is_err() {
             self.settle_rooms(grid, rooms, map);
         }
-        // The client sorts the list (`0x141f92ce0`) only after the pre-unique room; the caller does.
+        // The client sorts the list (`0x141f92e60`) only after the pre-unique room; the caller does.
         Ok((cells, moved))
     }
 
-    /// `0x142099e90` per room (after the ground overrides): lattice points of the room that have
+    /// `0x14209a010` per room (after the ground overrides): lattice points of the room that have
     /// no ground (never set, or set to none) take its ground, `Some` for a blank room (its one
     /// ground), else the graph's default; a point at the lowest or highest height takes the
     /// graph's low or high ground instead (unless the ground is `impassable_ground.gt`). The
@@ -412,7 +412,7 @@ pub fn settle_rooms(grounds: &[Option<String>; 3], unit: u32, overlap: u32, grid
                 y1 -= (p.origin.1 < grid.h as i32 - 1) as i32;
             }
             // A blank room (no tag, doors or second ground) carries its ground.
-            // Room data +10 (`0x141f982b0`, read by `0x142099e90`): a one-string `.arm`, or a
+            // Room data +10 (`0x141f98430`, read by `0x14209a010`): a one-string `.arm`, or a
             // blank room (no tag, `special…` tags counting as none; one ground on all root corners;
             // no doors) whose slots' corners are all as walkable as its root ground. Such a room
             // gives its root ground (+0x13a, when set) to the lattice.
@@ -420,12 +420,12 @@ pub fn settle_rooms(grounds: &[Option<String>; 3], unit: u32, overlap: u32, grid
                 poe_data_tools::file_parsers::arm::types::Slot::K(k) if std::env::var_os("POE_OLD_OWN").is_none() => {
                     let tag = room.arm.tag.to_ascii_lowercase();
                     let blank = (tag.is_empty() || tag.starts_with("special")) && room.arm.thingies.iter().all(|t| t.et_file.is_none()) && k.corners.iter().all(|c| c.ground == k.corners[0].ground);
-                    // `0x141f96da0`: the parser sets +10 when the `.arm`'s string table has fewer
+                    // `0x141f96f20`: the parser sets +10 when the `.arm`'s string table has fewer
                     // than two entries (a room naming one ground only: `Location_Compass_02`).
                     let flag = room.arm.strings.len() < 2 || (blank && uniform_walk(room));
                     if flag { k.corners[0].ground.clone() } else { None }
                 }
-                // Room data +10 (`0x141f982b0`): the arm's second bool, else a blank room (no tag,
+                // Room data +10 (`0x141f98430`): the arm's second bool, else a blank room (no tag,
                 // one ground, no doors) whose slots are as walkable as its ground.
                 poe_data_tools::file_parsers::arm::types::Slot::K(k) if (std::env::var_os("POE_ARM_OWN").is_some() && room.arm.bools.get(1).copied().unwrap_or(false)) || ((room.arm.tag.is_empty() || std::env::var_os("POE_OWN_TAG").is_some() || (p.special && std::env::var("POE_NO_SPECIAL_OWN").is_err())) && room.arm.thingies.iter().all(|t| t.et_file.is_none()) && k.corners.iter().all(|c| c.ground == k.corners[0].ground) && uniform_walk(room)) => k.corners[0].ground.clone(),
                 _ => None,
@@ -464,7 +464,7 @@ pub fn settle_rooms(grounds: &[Option<String>; 3], unit: u32, overlap: u32, grid
 
 }
 
-/// `0x142096e30` (rooms without overlap): every exit with a door lists the middle cell of its
+/// `0x142096fb0` (rooms without overlap): every exit with a door lists the middle cell of its
 /// unit on the room's border line with its side (0 top, 1 right, 2 bottom, 3 left); a cell
 /// listed again takes the later side.
 fn door_sides(sides: &mut Vec<((i32, i32), u8)>, p: &crate::dungeon::PlacedRoom, unit: i32, overlap: i32) {
@@ -497,10 +497,10 @@ fn door_sides(sides: &mut Vec<((i32, i32), u8)>, p: &crate::dungeon::PlacedRoom,
 const SIDE_STEP: [(i32, i32); 4] = [(0, -1), (1, 0), (0, 1), (-1, 0)];
 
 impl TilePass<'_> {
-    /// `0x14209df50`: every listed door cell whose neighbour across its side is listed with
-    /// the opposite side gets a walkway both ways (`0x14209e190`), when both ways can be tiled.
+    /// `0x14209e0d0`: every listed door cell whose neighbour across its side is listed with
+    /// the opposite side gets a walkway both ways (`0x14209e310`), when both ways can be tiled.
     fn walkways(&self, sides: &[((i32, i32), u8)], cells: &[GroundCell], door: &(String, bool), map: &mut TileMap, rng: &mut TerrainRng) -> Result<(), GenError> {
-        // Context +0x70: the ground-only cells by position (last write wins), from `0x142097cb0`.
+        // Context +0x70: the ground-only cells by position (last write wins), from `0x142097e30`.
         let mut ground: HashMap<(i32, i32), (Option<String>, i32)> = HashMap::new();
         for c in cells {
             ground.insert(c.pos, (c.ground.clone(), c.height));
@@ -520,7 +520,7 @@ impl TilePass<'_> {
         Ok(())
     }
 
-    /// `0x14209e190`: the cell at `pos` takes the door edge on the side facing back (opposite
+    /// `0x14209e310`: the cell at `pos` takes the door edge on the side facing back (opposite
     /// `dir`); when its key has no door edge yet, also on side `dir`, continuing into the next
     /// cell that way (a walkway that fails to continue only stands when the edge type may end).
     /// The tile is a `door` feature tile of the new key, picked with `below(total)` after the
@@ -591,7 +591,7 @@ impl TilePass<'_> {
         Ok(true)
     }
 
-    /// `0x14209eab0`: the tile's corner points lose their ground and flag 1, then the picked
+    /// `0x14209ec30`: the tile's corner points lose their ground and flag 1, then the picked
     /// tile is placed with the old cell's height.
     fn place_walkway(&self, map: &mut TileMap, key: &TileKey, origin: (i32, i32), height: i16, rng: &mut TerrainRng) {
         let list = self.master.tiles.candidates("door", key);
@@ -609,7 +609,7 @@ impl TilePass<'_> {
         map.place(origin.0, origin.1, &def.path, &def.tdt, c.orientation, height, Some(c.tile));
     }
 
-    /// `0x1420983d0`: a room's slots row by row.
+    /// `0x142098550`: a room's slots row by row.
     #[allow(clippy::too_many_arguments)]
     fn room(&self, p: &crate::dungeon::PlacedRoom, room: &Room, map: &mut TileMap, borders: &mut Vec<((i32, i32), Border)>, cells: &mut Vec<GroundCell>, moved: &mut Vec<(i32, i32)>, pending: &mut Vec<crate::dungeon::Pending>, rng: &mut TerrainRng) -> Result<(), GenError> {
         let o = p.orientation;
@@ -663,7 +663,7 @@ impl TilePass<'_> {
                     continue;
                 }
                 let border = self.on_border(&feature, &key, (xflag, yflag), (lx, ly), (tw, th));
-                // `0x142098b18`: square unnamed slots whose edges all have its size, with an edge
+                // `0x142098c98`: square unnamed slots whose edges all have its size, with an edge
                 // of wiggle 2 or more (1 on the border line), are recorded for the exit wiggle.
                 if feature.is_empty() && key.size.0 == key.size.1 {
                     let need = if border { 1 } else { 2 };
@@ -701,8 +701,8 @@ impl TilePass<'_> {
                 }
                 let list = self.master.tiles.candidates(&feature, &key);
                 if list.is_empty() && feature.eq_ignore_ascii_case("missiontile") {
-                    // `0x1420983d0`: a slot with no tile of its own takes a pending league feature
-                    // room of its size (`0x141f8b470`: `below(n)` among those that fit); none
+                    // `0x142098550`: a slot with no tile of its own takes a pending league feature
+                    // room of its size (`0x141f8b5f0`: `below(n)` among those that fit); none
                     // pending leaves it empty.
                     let (kw, kh) = (key.size.0 as u32, key.size.1 as u32);
                     let fits: Vec<usize> = match &self.host {
@@ -756,7 +756,7 @@ impl TilePass<'_> {
         Ok(())
     }
 
-    /// `0x142099b90`: an odd-sized slot centred on the room's border line (with a shared
+    /// `0x142099d10`: an odd-sized slot centred on the room's border line (with a shared
     /// border).
     fn on_border(&self, feature: &str, key: &TileKey, (xf, yf): (i32, i32), (lx, ly): (i32, i32), (tw, th): (i32, i32)) -> bool {
         if self.overlap == 0 || feature.eq_ignore_ascii_case("missiontile") {
@@ -773,7 +773,7 @@ impl TilePass<'_> {
         }
     }
 
-    /// `0x142097f80`.
+    /// `0x142098100`.
     #[allow(clippy::too_many_arguments)]
     fn add_border(&self, map: &TileMap, borders: &mut Vec<((i32, i32), Border)>, pos: (i32, i32), key: TileKey, height: i32, flags: u8, feature: String, (xf, yf): (i32, i32)) -> Result<(), GenError> {
         let at = borders.binary_search_by_key(&pos, |b| b.0);
@@ -810,7 +810,7 @@ impl TilePass<'_> {
         Ok(())
     }
 
-    /// `0x14209fbc0`: the shared-border slots in position order.
+    /// `0x14209fd40`: the shared-border slots in position order.
     fn borders(&self, mut borders: Vec<((i32, i32), Border)>, map: &mut TileMap, cells: &mut Vec<GroundCell>, doors: &mut Doors, rng: &mut TerrainRng) -> Result<(), GenError> {
         for idx in 0..borders.len() {
             let (pos, mut e) = borders[idx].clone();
@@ -821,7 +821,7 @@ impl TilePass<'_> {
         Ok(())
     }
 
-    /// One entry of `0x14209fbc0`.
+    /// One entry of `0x14209fd40`.
     #[allow(clippy::too_many_arguments)]
     fn border(&self, borders: &mut [((i32, i32), Border)], pos: (i32, i32), e: &mut Border, map: &mut TileMap, cells: &mut Vec<GroundCell>, doors: &mut Doors, rng: &mut TerrainRng) -> Result<(), GenError> {
         {
@@ -927,11 +927,11 @@ impl TilePass<'_> {
         Ok(())
     }
 
-    /// `0x14209f050`: the tile-set tiles of `feature` with `key`, `below(total)`, placed at
+    /// `0x14209f1d0`: the tile-set tiles of `feature` with `key`, `below(total)`, placed at
     /// `height`. Without tiles (and with `borders`, i.e. not for a neighbour's repair), sides
     /// whose exit is off the middle and that face another border entry move it to the middle
-    /// one by one until tiles exist (`0x14209fa10`); the neighbours across moved sides then
-    /// follow (`0x14209ec70`). The height fallback is not ported.
+    /// one by one until tiles exist (`0x14209fb90`); the neighbours across moved sides then
+    /// follow (`0x14209edf0`). The height fallback is not ported.
     #[allow(clippy::too_many_arguments)]
     fn place_border(&self, key: &TileKey, feature: &str, pos: (i32, i32), height: i32, map: &mut TileMap, rng: &mut TerrainRng, borders: Option<&mut [((i32, i32), Border)]>) -> Result<bool, GenError> {
         let lookup = |k: &TileKey| self.master.tiles.candidates(feature, k).to_vec();
@@ -950,7 +950,7 @@ impl TilePass<'_> {
                 }
             }
         }
-        // `0x14209fa10`: the sides take the middle exit one by one until tiles exist.
+        // `0x14209fb90`: the sides take the middle exit one by one until tiles exist.
         let middle = |k: &mut TileKey, changed: &mut Vec<usize>| -> Vec<Candidate> {
             for &i in &sides {
                 k.exits[i] = Self::mid(k, i);
@@ -963,7 +963,7 @@ impl TilePass<'_> {
             Vec::new()
         };
         let takes_height = |g: &Option<String>| g.as_ref().is_none_or(|g| map.gt_flags(g) & 1 != 0);
-        // `0x14209fb00`: one corner whose ground takes no height drops it.
+        // `0x14209fc80`: one corner whose ground takes no height drops it.
         let flatten_one = |k: &mut TileKey| -> Vec<Candidate> {
             for i in 0..4 {
                 if takes_height(&k.grounds[i]) {
@@ -1049,7 +1049,7 @@ impl TilePass<'_> {
         (if i & 1 == 0 { k.size.0 } else { k.size.1 } as u32 * 3 / 2) as u8
     }
 
-    /// `0x14209eb70`: the cell across side `i` of a tile at `pos`.
+    /// `0x14209ecf0`: the cell across side `i` of a tile at `pos`.
     fn across(&self, k: &TileKey, pos: (i32, i32), i: usize) -> (i32, i32) {
         let esize = |i: usize| k.edges[i].as_ref().and_then(|e| self.edge_types.get(e)).map_or(0, |et| et.size as i32);
         match i {
@@ -1060,7 +1060,7 @@ impl TilePass<'_> {
         }
     }
 
-    /// `0x14209ec70`: across each moved side, a placed tile with the same edge and side length
+    /// `0x14209edf0`: across each moved side, a placed tile with the same edge and side length
     /// moves its exit to the middle too and is drawn again; a border entry still to come takes
     /// the middle exit in its key.
     fn fix_across(&self, k: &TileKey, pos: (i32, i32), changed: &[usize], borders: &mut [((i32, i32), Border)], map: &mut TileMap, rng: &mut TerrainRng) -> Result<(), GenError> {
@@ -1116,7 +1116,7 @@ impl TilePass<'_> {
         Some((def.key.oriented(piece.orientation), def.tdt.feature.as_deref().is_some_and(|f| f.eq_ignore_ascii_case("door"))))
     }
 
-    /// The door sizes for a spot's edges (`0x141d09700`; the `+0x68` sets `0x141d09ab0`
+    /// The door sizes for a spot's edges (`0x141d09880`; the `+0x68` sets `0x141d09c30`
     /// builds): every `door` tile orientation with those edges, its oriented size, sorted.
     fn door_sizes(&self, edges: &[Option<String>; 4]) -> Vec<(u8, u8)> {
         let mut out: Vec<(u8, u8)> = Vec::new();
@@ -1134,7 +1134,7 @@ impl TilePass<'_> {
         out
     }
 
-    /// `0x14209d180`: a door tile on every door group without one, and `0x14209dc90` (not
+    /// `0x14209d300`: a door tile on every door group without one, and `0x14209de10` (not
     /// ported) for the 3×3 spots.
     fn check_doors(&self, doors: &Doors, map: &mut TileMap, rng: &mut TerrainRng) -> Result<(), GenError> {
         for g in &doors.groups {
@@ -1203,7 +1203,7 @@ impl TilePass<'_> {
             let height = map.index(pos.0, pos.1).and_then(|i| map.cells[i].as_ref()).map_or(0, |c| c.height);
             map.place(pos.0, pos.1, &def.path, &def.tdt, c.orientation, height, Some(c.tile));
         }
-        // `0x14209dc90`: per 3x3 spot whose cell holds the corner (offset 0, 0) of a tile without
+        // `0x14209de10`: per 3x3 spot whose cell holds the corner (offset 0, 0) of a tile without
         // a feature, a `door` tile for the tile's own oriented key replaces it (`below(total)`),
         // at the cell's height.
         for &p in &doors.large {
@@ -1249,7 +1249,7 @@ impl Wiggles {
         Ok(&self.edges[&key])
     }
 
-    /// `0x14209a2c0` / `0x1420969e0`: a square tile whose edges all have the tile's size and
+    /// `0x14209a440` / `0x142096b60`: a square tile whose edges all have the tile's size and
     /// one of them takes hashed exits.
     pub fn movable(&mut self, files: &dyn crate::generate::Files, tdt: &crate::tdt::Tdt) -> Result<bool, GenError> {
         if tdt.size.0 != tdt.size.1 || tdt.feature.as_deref().is_some_and(|f| !f.is_empty()) {
@@ -1267,7 +1267,7 @@ impl Wiggles {
     }
 }
 
-/// `0x1421969e0`: the hashed exit of side `side` (0 top, 1 right, 2 bottom, 3 left) at `(x, y)`
+/// `0x142196b30`: the hashed exit of side `side` (0 top, 1 right, 2 bottom, 3 left) at `(x, y)`
 /// for an edge of size `size`.
 pub fn hashed_exit(x: i32, y: i32, side: u32, size: u32) -> u8 {
     let (x, y) = (x as u32, y as u32);
@@ -1285,7 +1285,7 @@ pub fn hashed_exit(x: i32, y: i32, side: u32, size: u32) -> u8 {
     (k as u8).wrapping_add((size >> 1) as u8)
 }
 
-/// `0x1420a1f70` (after the fill): the recorded tiles, shuffled, each try their sides in a
+/// `0x1420a20f0` (after the fill): the recorded tiles, shuffled, each try their sides in a
 /// shuffled order; a side with a hashed edge whose hashed exit differs from the tile's takes
 /// it when tiles exist for both this key and the neighbour across (its opposite exit mirrored);
 /// then both are drawn again and placed.
@@ -1294,7 +1294,7 @@ pub fn wiggle(master: &mut Master, files: &dyn crate::generate::Files, map: &mut
         return Ok(());
     }
     let mut w = Wiggles::default();
-    // `0x141fff9b0`: a set ordered by x·65536 + y.
+    // `0x141fffb30`: a set ordered by x·65536 + y.
     list.sort_by_key(|p| p.0.wrapping_mul(0x10000).wrapping_add(p.1));
     list.dedup();
     if std::env::var("POE_DBG_WIGGLE").is_ok() { eprintln!("WLIST {:?}", list); }
@@ -1315,7 +1315,7 @@ pub fn wiggle(master: &mut Master, files: &dyn crate::generate::Files, map: &mut
         if !w.movable(files, &tdt)? {
             return Ok(None);
         }
-        // The indexed key (`0x141d09900`): grounds with `.gt` flag 0x10 left out.
+        // The indexed key (`0x141d09a80`): grounds with `.gt` flag 0x10 left out.
         let mut k = TileKey::from_tdt(&tdt);
         for g in &mut k.grounds {
             if g.as_ref().is_some_and(|g| map.gt_flags(g) & 0x10 != 0) {
@@ -1394,8 +1394,8 @@ pub fn wiggle(master: &mut Master, files: &dyn crate::generate::Files, map: &mut
 }
 
 
-/// Room data +10 (`0x141f982b0`): a blank room whose slots' corner grounds are all as walkable
-/// (none, or `.gt` flag 4) as the room's own ground; only then the settle (`0x142099e90`) uses
+/// Room data +10 (`0x141f98430`): a blank room whose slots' corner grounds are all as walkable
+/// (none, or `.gt` flag 4) as the room's own ground; only then the settle (`0x14209a010`) uses
 /// the room's ground instead of the graph's default.
 fn uniform_walk(room: &Room) -> bool {
     use poe_data_tools::file_parsers::arm::types::Slot;

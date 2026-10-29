@@ -26,7 +26,7 @@ use crate::{LogBuffer, LogLevel, WebState};
 
 pub(crate) const CONFIG: &str = r#"
     [game]
-    version = "0.5.5e"
+    version = "0.5.5e.hotfix1"
     game_dir = "g"
     schema = "s"
     protocol_dir = "p"
@@ -320,7 +320,7 @@ async fn server_info_is_public() {
     let (status, body) = f.call("GET", "/api/v1/server", None, None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["name"], "Test Realm");
-    assert_eq!(body["version"], "0.5.5e");
+    assert_eq!(body["version"], "0.5.5e.hotfix1");
     assert_eq!(body["cluster_id"], "test-cluster");
     assert_eq!(body["online"], 1);
     assert_eq!(body["open_registration"], false);

@@ -972,7 +972,7 @@ async fn validation_reports_the_line_and_column_of_the_problem() {
             .contains("interval_secs"),
         "{body}"
     );
-    let (_, body) = validate(CONFIG.replace("0.5.5e", "9.9.9")).await;
+    let (_, body) = validate(CONFIG.replace("0.5.5e.hotfix1", "9.9.9")).await;
     assert!(
         body["error"]["message"]
             .as_str()

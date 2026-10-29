@@ -479,7 +479,7 @@ pub(crate) mod tests {
         std::fs::write(
             d.join(MANIFEST_FILE),
             format!(
-                "manifest_version = 2\nid = \"{id}\"\nname = \"{id}\"\nversion = \"{version}\"\nside = \"server\"\n[game]\nversions = [\"0.5.5e\"]\n{extra}\n"
+                "manifest_version = 2\nid = \"{id}\"\nname = \"{id}\"\nversion = \"{version}\"\nside = \"server\"\n[game]\nversions = [\"0.5.5e.hotfix1\"]\n{extra}\n"
             ),
         )
         .unwrap();

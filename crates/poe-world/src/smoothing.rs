@@ -1,10 +1,10 @@
-//! Edge smoothing after routing (`0x1420bd650`): virtual edges leaving a room get an arc so
+//! Edge smoothing after routing (`0x1420bd7d0`): virtual edges leaving a room get an arc so
 //! they start (and end) along the exit's direction, then corners are rounded. All integer,
 //! no RNG. See `docs/re/terrain/tgr.md`, "Edge smoothing".
 
 pub type Pos = (i32, i32);
 
-/// `0x142f10660`: 256 samples of `127·sin`, signed.
+/// `0x142f10680`: 256 samples of `127·sin`, signed.
 const SINE: [i8; 256] = {
     const RAW: [u8; 256] = [
         0, 3, 6, 9, 12, 16, 19, 22, 25, 28, 31, 34, 37, 40, 43, 46, 49, 51, 54, 57, 60, 63, 65,
@@ -31,7 +31,7 @@ const SINE: [i8; 256] = {
     out
 };
 
-/// `0x1421c4f40`: a vector of length about `r / 2` at angle `a` (0x10000 = full turn). The
+/// `0x1421c5180`: a vector of length about `r / 2` at angle `a` (0x10000 = full turn). The
 /// client weights the two table samples the other way round (`T[i+1]·(255−f) + T[i]·f`).
 pub fn polar(r: i32, a: u16) -> Pos {
     let sample = |a: u16| -> i32 {
@@ -61,8 +61,8 @@ fn angle(a: Pos, b: Pos) -> u16 {
     crate::rooms::angle_between(a, b)
 }
 
-/// The arc points from the node towards the first point (`0x1420d1b70`, start = true) or the
-/// last point towards the end node (`0x1420d2470`). Returns the points to insert, in order.
+/// The arc points from the node towards the first point (`0x1420d1cf0`, start = true) or the
+/// last point towards the end node (`0x1420d25f0`). Returns the points to insert, in order.
 fn arc(node: Pos, p: Pos, off: Pos) -> Option<Vec<Pos>> {
     let (ox, oy) = off;
     let aligned = if ox == 0 { node.0 == p.0 } else { node.1 == p.1 };
@@ -195,7 +195,7 @@ fn arc(node: Pos, p: Pos, off: Pos) -> Option<Vec<Pos>> {
     Some(out)
 }
 
-/// `0x1420d1b70`: the arc at the edge's start; returns whether points were added.
+/// `0x1420d1cf0`: the arc at the edge's start; returns whether points were added.
 pub fn arc_start(e: &mut SmoothEdge) -> bool {
     let p = e.points.first().copied().unwrap_or(e.to);
     match arc(e.from, p, e.offsets[0]) {
@@ -207,12 +207,12 @@ pub fn arc_start(e: &mut SmoothEdge) -> bool {
     }
 }
 
-/// `0x1420d2470`: the arc at the edge's end.
+/// `0x1420d25f0`: the arc at the edge's end.
 pub fn arc_end(e: &mut SmoothEdge) -> bool {
     let p = e.points.last().copied().unwrap_or(e.from);
     match arc(e.to, p, e.offsets[1]) {
         Some(pts) => {
-            // `0x141fee340` appends the generated points from the last one back.
+            // `0x141fee4c0` appends the generated points from the last one back.
             e.points.extend(pts.into_iter().rev());
             true
         }
@@ -227,7 +227,7 @@ pub struct LNode {
     pub slots: [Option<usize>; 4],
     /// `+0x88`: a room node (or one of its exits), or a dead end pushed off the map.
     pub fixed: bool,
-    /// `+0x89`: next to a virtual edge's end (`0x1420c7400`, then the virtual split).
+    /// `+0x89`: next to a virtual edge's end (`0x1420c7580`, then the virtual split).
     pub virtual_end: bool,
     /// The `.tgr` node this is (None for nodes made later).
     pub orig: Option<usize>,
@@ -259,15 +259,15 @@ pub struct LEdge {
 pub struct LayoutGraph {
     pub nodes: Vec<LNode>,
     pub edges: Vec<LEdge>,
-    /// Logical links of tile-less virtual nodes (`0x1420c5ee0`): up to four nodes each (the
-    /// two edge ends, then the nodes the virtual split makes of them, `0x1420baf40`).
+    /// Logical links of tile-less virtual nodes (`0x1420c6060`): up to four nodes each (the
+    /// two edge ends, then the nodes the virtual split makes of them, `0x1420bb0c0`).
     pub links: Vec<[Option<usize>; 4]>,
     /// Links per node (`+0x90`/`+0x94`).
     pub node_links: std::collections::BTreeMap<usize, Vec<usize>>,
 }
 
 impl LayoutGraph {
-    /// `0x1420baf40`: `node` split off `new`; the links holding `node` take `new` as its partner.
+    /// `0x1420bb0c0`: `node` split off `new`; the links holding `node` take `new` as its partner.
     pub fn link_split(&mut self, node: usize, new: usize) {
         let Some(ls) = self.node_links.get(&node).cloned() else { return };
         for l in ls {
@@ -319,7 +319,7 @@ impl LayoutGraph {
         self.nodes[n].slots.iter().filter(|s| s.is_some()).count()
     }
 
-    /// `0x1420b2cd0`: removes corner `i` of `e` (or, at a node joining `e` and `other`, moves
+    /// `0x1420b2e50`: removes corner `i` of `e` (or, at a node joining `e` and `other`, moves
     /// the node onto the adjacent point and drops that point).
     fn remove_point(&mut self, e: usize, dir: usize, other: Option<(usize, usize)>, i: i32) -> bool {
         match other {
@@ -348,7 +348,7 @@ impl LayoutGraph {
         }
     }
 
-    /// `0x1420ced20`: inserts `v` at index `idx` (0 / `n + 2` move the end node and keep its
+    /// `0x1420ceea0`: inserts `v` at index `idx` (0 / `n + 2` move the end node and keep its
     /// old position as a point).
     fn insert_point(&mut self, e: usize, idx: i32, v: Pos) {
         let n = self.len(e);
@@ -375,7 +375,7 @@ struct RoundCtx {
     changed: bool,
 }
 
-/// `0x1420b2f60`: rounds the corners along `e` from its end `dir` (0 = from the start),
+/// `0x1420b30e0`: rounds the corners along `e` from its end `dir` (0 = from the start),
 /// continuing through nodes with two edges.
 fn round(g: &mut LayoutGraph, ctx: &mut RoundCtx, mut e: usize, mut dir: usize) {
     let n = g.len(e);
@@ -535,7 +535,7 @@ fn round(g: &mut LayoutGraph, ctx: &mut RoundCtx, mut e: usize, mut dir: usize) 
     }
 }
 
-/// `0x1420b3bd0`: one rounding pass over the graph; returns whether anything changed.
+/// `0x1420b3d50`: one rounding pass over the graph; returns whether anything changed.
 fn round_all(g: &mut LayoutGraph) -> bool {
     // `POE_DBG_ROUND`: each edge's points before and after the pass.
     let before: Option<Vec<Vec<Pos>>> = std::env::var_os("POE_DBG_ROUND").map(|_| (0..g.edges.len()).map(|e| (1..=g.len(e)).map(|i| g.p(e, i)).collect()).collect());
@@ -582,7 +582,7 @@ fn round_all_inner(g: &mut LayoutGraph) -> bool {
     ctx.changed
 }
 
-/// `0x1420bd650` with its flag set: arcs at virtual edges' room ends, then corner rounding.
+/// `0x1420bd7d0` with its flag set: arcs at virtual edges' room ends, then corner rounding.
 pub fn smooth(g: &mut LayoutGraph) {
     let starts: Vec<usize> = (0..g.edges.len())
         .filter(|&e| g.edges[e].virtual_edge && g.edges[e].offsets[0] != (0, 0))
@@ -625,7 +625,7 @@ pub fn smooth(g: &mut LayoutGraph) {
     }
 }
 
-/// `0x1420b3bd0` repeated up to 5 times while it changes something.
+/// `0x1420b3d50` repeated up to 5 times while it changes something.
 pub fn round_corners(g: &mut LayoutGraph) {
     for _ in 0..5 {
         if !round_all(g) {
@@ -634,7 +634,7 @@ pub fn round_corners(g: &mut LayoutGraph) {
     }
 }
 
-/// `0x1420bd5f0`: a node's edges moved to the first slots.
+/// `0x1420bd770`: a node's edges moved to the first slots.
 pub fn compact_slots(g: &mut LayoutGraph) {
     for n in &mut g.nodes {
         let edges: Vec<usize> = n.slots.iter().flatten().copied().collect();
@@ -645,7 +645,7 @@ pub fn compact_slots(g: &mut LayoutGraph) {
     }
 }
 
-/// `0x1420b6660`: each edge gets a point one step out of its end nodes along the end offsets.
+/// `0x1420b67e0`: each edge gets a point one step out of its end nodes along the end offsets.
 pub fn add_end_points(g: &mut LayoutGraph) {
     for e in 0..g.edges.len() {
         let [o0, o1] = g.edges[e].offsets;

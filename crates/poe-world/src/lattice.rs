@@ -1,4 +1,4 @@
-//! The corner lattice passes between edge tiles and the fill pass (`0x1420bec40`): grounds
+//! The corner lattice passes between edge tiles and the fill pass (`0x1420bedc0`): grounds
 //! flood out from tile borders into empty space, stopped by tile edges. Findings:
 //! `docs/re/terrain/shared-passes.md`, "Corner lattice".
 
@@ -9,7 +9,7 @@ use crate::{
     tileset::{TileKey, TileSet},
 };
 
-/// Lattice steps per direction (`0x142f0c608`): north, east, south, west.
+/// Lattice steps per direction (`0x142f0c660`): north, east, south, west.
 const DIR: [(i32, i32); 4] = [(0, -1), (1, 0), (0, 1), (-1, 0)];
 
 /// The tile on a cell: its origin, oriented size, offset of the cell and piece index.
@@ -26,12 +26,12 @@ fn tile_at(map: &TileMap, x: i32, y: i32) -> Option<((i32, i32), (i32, i32), (i3
     Some(((x - off.0, y - off.1), size, off, p))
 }
 
-/// `0x141fe0210`: the corner lies strictly inside a placed tile.
+/// `0x141fe0390`: the corner lies strictly inside a placed tile.
 fn inside(map: &TileMap, p: (i32, i32)) -> bool {
     tile_at(map, p.0, p.1).is_some_and(|(o, (w, h), _, _)| o.0 < p.0 && p.0 < o.0 + w && o.1 < p.1 && p.1 < o.1 + h)
 }
 
-/// `0x141fdffe0`: the tile's edge on `side` crosses that side of this cell.
+/// `0x141fe0160`: the tile's edge on `side` crosses that side of this cell.
 fn edge_crosses(map: &TileMap, tiles: &TileSet, cell: (i32, i32), side: usize) -> bool {
     let Some((_, (w, h), off, p)) = tile_at(map, cell.0, cell.1) else { return false };
     let piece = &map.pieces[p];
@@ -56,7 +56,7 @@ fn edge_crosses(map: &TileMap, tiles: &TileSet, cell: (i32, i32), side: usize) -
     flags & 4 != 0 && crate::edge_tiles::virtual_exit(tdt, o, side) / 3 == pos
 }
 
-/// `0x141fe0810` ("EdgeInTheWay"): a tile edge crosses the lattice segment `from → to`.
+/// `0x141fe0990` ("EdgeInTheWay"): a tile edge crosses the lattice segment `from → to`.
 fn edge_in_the_way(map: &TileMap, tiles: &TileSet, from: (i32, i32), to: (i32, i32), dir: usize) -> bool {
     if inside(map, from) {
         return !inside(map, to);
@@ -77,7 +77,7 @@ fn in_lattice(map: &TileMap, p: (i32, i32)) -> bool {
     p.0 >= 0 && p.1 >= 0 && p.0 as u32 <= map.width && p.1 as u32 <= map.height
 }
 
-/// `0x1420b9180`: a breadth-first flood of the ground at border corner `p` outward in `dir`
+/// `0x1420b9300`: a breadth-first flood of the ground at border corner `p` outward in `dir`
 /// (and to either side), over corners no tile set; grounds with `.gt` flag 8 also cover tile
 /// corners without a ground.
 fn flood(map: &mut TileMap, tiles: &TileSet, p: (i32, i32), dir: usize) {
@@ -112,7 +112,7 @@ fn flood(map: &mut TileMap, tiles: &TileSet, p: (i32, i32), dir: usize) {
     }
 }
 
-/// `0x1420b94d0`: floods from every border corner of every placed tile (columns, then rows;
+/// `0x1420b9650`: floods from every border corner of every placed tile (columns, then rows;
 /// per tile its top and bottom corners left to right, then its left and right corners).
 pub fn border_floods(map: &mut TileMap, tiles: &TileSet) {
     for x in 0..map.width as i32 {
@@ -135,7 +135,7 @@ pub fn border_floods(map: &mut TileMap, tiles: &TileSet) {
 
 const IMPASSABLE: &str = "metadata/terrain/impassable_ground.gt";
 
-/// State of the unwalkable marking (`0x141fe0fd0`): visited corners, the flood queue and the
+/// State of the unwalkable marking (`0x141fe1150`): visited corners, the flood queue and the
 /// corners whose neighbours get marked when the queue runs dry.
 struct Unwalkable<'a> {
     map: &'a mut TileMap,
@@ -166,7 +166,7 @@ impl Unwalkable<'_> {
         inside(self.map, p) && false
     }
 
-    /// `0x141fe2380`: start the flood at a border corner whose ground does not stop it.
+    /// `0x141fe2500`: start the flood at a border corner whose ground does not stop it.
     fn start(&mut self, p: (i32, i32), dir: usize) {
         if self.stops(p) {
             return;
@@ -179,7 +179,7 @@ impl Unwalkable<'_> {
         self.run();
     }
 
-    /// `0x141fe1df0`: look one step on; a stopping ground is marked (and its neighbours later),
+    /// `0x141fe1f70`: look one step on; a stopping ground is marked (and its neighbours later),
     /// anything else joins the flood unless an edge is in the way.
     fn step(&mut self, p: (i32, i32), dir: usize) {
         let n = (p.0 + DIR[dir].0, p.1 + DIR[dir].1);
@@ -196,8 +196,8 @@ impl Unwalkable<'_> {
         }
     }
 
-    /// `0x141fe2100`: the impassable flood (corners take the impassable ground where they have
-    /// none), then the stopping corners' walkable neighbours are marked (`0x141fe1fe0`).
+    /// `0x141fe2280`: the impassable flood (corners take the impassable ground where they have
+    /// none), then the stopping corners' walkable neighbours are marked (`0x141fe2160`).
     fn run(&mut self) {
         while let Some((p, d)) = self.queue.pop_front() {
             let k = self.map.point_index(p.0, p.1).unwrap();
@@ -225,9 +225,9 @@ impl Unwalkable<'_> {
     }
 }
 
-/// `0x141fe0fd0`: lattice flag 8 marks corners nobody can walk on: the impassable flood from
+/// `0x141fe1150`: lattice flag 8 marks corners nobody can walk on: the impassable flood from
 /// the border, the border itself, impassable grounds inside, and one ring of corners next to
-/// marked ones (unless their ground has `.gt` flag 4). Area transition tiles (`0x141fe0b40`)
+/// marked ones (unless their ground has `.gt` flag 4). Area transition tiles (`0x141fe0cc0`)
 /// and the tile-set option at `+0x165` are not ported yet (nothing in the Riverbank).
 pub fn mark_unwalkable(map: &mut TileMap, tiles: &TileSet) {
     let (w, h) = (map.width as i32, map.height as i32);
@@ -281,11 +281,11 @@ pub fn mark_unwalkable(map: &mut TileMap, tiles: &TileSet) {
     }
 }
 
-/// `0x141fe0b40` (end of `0x141fe0fd0`): a tile whose edge types are empty or wildcards and with one ground on all
+/// `0x141fe0cc0` (end of `0x141fe1150`): a tile whose edge types are empty or wildcards and with one ground on all
 /// four corners (a fill tile; not an inheriting `.tdt`) whose footprint corners on the outline
 /// are all unwalkable (flag 8, or off the map) becomes unwalkable inside as well: every corner
 /// of its footprint gets flag 8. Tiles are visited row by row, so earlier marks count for later
-/// tiles. (`0x141fe09b0` is the outline test, `0x141fd5c50` the tile test.)
+/// tiles. (`0x141fe0b30` is the outline test, `0x141fd5dd0` the tile test.)
 pub fn mark_enclosed_fills(map: &mut TileMap, files: &dyn crate::generate::Files) -> Result<(), crate::generate::GenError> {
     let (w, h) = (map.width as i32, map.height as i32);
     let mut tdts: std::collections::HashMap<String, crate::tdt::Tdt> = std::collections::HashMap::new();
@@ -306,7 +306,7 @@ pub fn mark_enclosed_fills(map: &mut TileMap, files: &dyn crate::generate::Files
             if t.inherits.is_some() || !uniform {
                 continue;
             }
-            // `0x141ef23f0`: an edge reference passes when it is empty or names a wildcard `.et`.
+            // `0x141ef2570`: an edge reference passes when it is empty or names a wildcard `.et`.
             let mut edgeless = true;
             for e in t.edges.iter().flatten() {
                 let ek = e.to_ascii_lowercase();
@@ -337,7 +337,7 @@ pub fn mark_enclosed_fills(map: &mut TileMap, files: &dyn crate::generate::Files
     Ok(())
 }
 
-/// `0x1420b9820` (height offsets not ported: the Riverbank has none): every corner is set; one
+/// `0x1420b99a0` (height offsets not ported: the Riverbank has none): every corner is set; one
 /// without a ground (or never set) takes the graph's default ground (graph +0xb0) if any.
 pub fn settle(map: &mut TileMap, default_ground: Option<&str>) {
     for p in &mut map.lattice {
@@ -356,18 +356,18 @@ fn lat_height(map: &TileMap, k: usize) -> i32 {
     if h < -0x78 { h + 0x100 } else { h }
 }
 
-/// The `.tgr` height pass `0x1420c0a60` (after the border floods, before the unwalkable
-/// marking): (1) per tile origin not yet reached, the fix-up flood `0x1420c06f0`: each tile
-/// takes the height its reached corners imply (`0x1420bfca0`: corners whose tile ground is
+/// The `.tgr` height pass `0x1420c0be0` (after the border floods, before the unwalkable
+/// marking): (1) per tile origin not yet reached, the fix-up flood `0x1420c0870`: each tile
+/// takes the height its reached corners imply (`0x1420bfe20`: corners whose tile ground is
 /// missing or takes heights, `.gt` flag 1; else all four outer corners; the lowest of several)
-/// and spreads to the neighbours across such corners (`0x1420c3b40`); (2) when the map has a
+/// and spreads to the neighbours across such corners (`0x1420c3cc0`); (2) when the map has a
 /// non-zero height (view `+0x20`): every corner and tile height drops by the lowest tile height
 /// and every corner gets flag 2; (3) unreached corners with exactly one reached neighbour take
-/// its height until nothing changes (`0x1420c0d90`). A tile with no such corner reached takes
+/// its height until nothing changes (`0x1420c0f10`). A tile with no such corner reached takes
 /// the heights implied through its real (not wildcard, `.et` `+0x48` bit 7 clear) edges: the
 /// reached neighbour cell at each edge's exit gives its height minus the tile's corner height
 /// plus its own at the shared corner; the flood also crosses such edges. Not ported: the room
-/// heights (`0x1420c0f00`).
+/// heights (`0x1420c1080`).
 pub fn height_pass(map: &mut TileMap, files: &dyn crate::generate::Files) -> Result<(), crate::generate::GenError> {
     let (w, h) = (map.width as i32, map.height as i32);
     let mut tdts: std::collections::HashMap<String, crate::tdt::Tdt> = std::collections::HashMap::new();
@@ -387,7 +387,7 @@ pub fn height_pass(map: &mut TileMap, files: &dyn crate::generate::Files) -> Res
             }
         }
     }
-    // The cells across the tile's real (not wildcard) edges (`0x1420bfca0` / `0x1420c3b40`):
+    // The cells across the tile's real (not wildcard) edges (`0x1420bfe20` / `0x1420c3cc0`):
     // per side, the neighbour cell at the edge's exit and the shared corner in the tile's frame.
     let edge_cells = |m: &TileMap, pi: usize, (tx, ty): (i32, i32), (sw, sh): (i32, i32)| -> Vec<((i32, i32), (i32, i32), usize)> {
         let p = &m.pieces[pi];
@@ -446,14 +446,14 @@ pub fn height_pass(map: &mut TileMap, files: &dyn crate::generate::Files) -> Res
                 continue;
             }
             if !tvis[(y * w + x) as usize] {
-                // `0x1420c06f0`.
+                // `0x1420c0870`.
                 let mut queue: VecDeque<(i32, i32)> = VecDeque::from([(x, y)]);
                 while let Some((ox, oy)) = queue.pop_front() {
                     if ox < 0 || oy < 0 || ox >= w || oy >= h || tvis[(oy * w + ox) as usize] {
                         continue;
                     }
                     let ((tx, ty), (sw, sh), pi) = tile(map, ox, oy);
-                    // `0x1420bfca0`.
+                    // `0x1420bfe20`.
                     let mut cands: Vec<i32> = Vec::new();
                     let push = |c: &mut Vec<i32>, v: i32| {
                         if !c.contains(&v) {
@@ -524,7 +524,7 @@ pub fn height_pass(map: &mut TileMap, files: &dyn crate::generate::Files) -> Res
                         let ph = pi.map(|pi| tdts[&map.pieces[pi].path.to_ascii_lowercase()].point_heights.clone()).unwrap_or_default();
                         eprintln!("HEIGHTS tile ({tx},{ty}) {sw}x{sh} cands {cands:?} -> {hh} points {ph:?}");
                     }
-                    // `0x1420bfac0`.
+                    // `0x1420bfc40`.
                     map.raised |= hh != 0;
                     match pi {
                         Some(pi) => {
@@ -553,7 +553,7 @@ pub fn height_pass(map: &mut TileMap, files: &dyn crate::generate::Files) -> Res
                             }
                         }
                     }
-                    // `0x1420c3b40`: the neighbours across corners that take heights.
+                    // `0x1420c3cc0`: the neighbours across corners that take heights.
                     let next = |q: &mut VecDeque<(i32, i32)>, m: &TileMap, nx: i32, ny: i32| {
                         let ((ax, ay), _, _) = tile(m, nx, ny);
                         q.push_back((ax, ay));
@@ -646,7 +646,7 @@ pub fn height_pass(map: &mut TileMap, files: &dyn crate::generate::Files) -> Res
             x += step;
         }
     }
-    // (3) `0x1420c0d90` / `0x1420c1340`.
+    // (3) `0x1420c0f10` / `0x1420c14c0`.
     loop {
         let mut changed = 0;
         for y in 0..=h {
@@ -680,13 +680,13 @@ pub fn height_pass(map: &mut TileMap, files: &dyn crate::generate::Files) -> Res
     Ok(())
 }
 
-/// `0x1420c19d0`, after the fill and the overlays: plain tiles (`0x1420c1650`: not inheriting,
+/// `0x1420c1b50`, after the fill and the overlays: plain tiles (`0x1420c17d0`: not inheriting,
 /// edges empty or wildcards, one ground on all four corners) on a ground that does not take
 /// heights (`.gt` flag 1 clear) are re-levelled. Every other tile counts as reached. (1)
-/// `0x1420c1c10`, per cell row by row: the neighbours left, right, above and below the cell
+/// `0x1420c1d90`, per cell row by row: the neighbours left, right, above and below the cell
 /// that are not plain and whose facing key corner has the tile's ground at a position along the
 /// tile's side give their height plus that corner's key height; one distinct value sets the
-/// tile (`0x1420bfac0`). (2) `0x1420c3330`, until nothing changes: an unreached plain tile
+/// tile (`0x1420bfc40`). (2) `0x1420c34b0`, until nothing changes: an unreached plain tile
 /// whose reached neighbours of the same plain ground give one distinct height takes it.
 pub fn refix_fills(map: &mut TileMap, files: &dyn crate::generate::Files) -> Result<(), crate::generate::GenError> {
     let (w, h) = (map.width as i32, map.height as i32);
@@ -752,7 +752,7 @@ pub fn refix_fills(map: &mut TileMap, files: &dyn crate::generate::Files) -> Res
             }
         }
     };
-    // (1) `0x1420c1c10`.
+    // (1) `0x1420c1d90`.
     for y in 0..h {
         let mut x = 0;
         while x < w {
@@ -799,7 +799,7 @@ pub fn refix_fills(map: &mut TileMap, files: &dyn crate::generate::Files) -> Res
             x += sw.max(1);
         }
     }
-    // (2) `0x1420c3330`.
+    // (2) `0x1420c34b0`.
     loop {
         let mut changed = 0;
         for y in 0..h {

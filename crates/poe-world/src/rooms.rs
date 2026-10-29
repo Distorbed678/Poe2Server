@@ -1,15 +1,15 @@
 //! Room nodes: the room set (`.rs`), edge types (`.et`), ground types (`.gt`) and the
-//! placement of a graph node's room (`0x1420c87a0`). See `docs/re/terrain/tgr.md`,
+//! placement of a graph node's room (`0x1420c8920`). See `docs/re/terrain/tgr.md`,
 //! "Room placement".
 //!
-//! - A node's key (`0x1420d2e20`): each graph edge goes to the side it leaves the node by
-//!   (`0x1420d1220`: towards its first internal point or other node; `|dx| > |dy|` → right/left,
+//! - A node's key (`0x1420d2fa0`): each graph edge goes to the side it leaves the node by
+//!   (`0x1420d13a0`: towards its first internal point or other node; `|dx| > |dy|` → right/left,
 //!   else down/up; sides in key order 0 up, 1 right, 2 down, 3 left); the key holds the edges'
 //!   `.et` per side, nothing else.
-//! - Candidates (`0x1420c76d0`): the room set's entries for the node's room type (one per room
+//! - Candidates (`0x1420c7850`): the room set's entries for the node's room type (one per room
 //!   and orientation, `.rs` order) whose turned edges equal the key's. A fixed-orientation node
 //!   takes every match in its own orientation; an `(any)` node keeps each match's orientation
-//!   when the edges' ground types and heights agree with the room's corners (`0x1420b87b0`).
+//!   when the edges' ground types and heights agree with the room's corners (`0x1420b8930`).
 //! - One is drawn by weight; it is centred on the node's tile, clamped to the map, and must fit
 //!   and not overlap an earlier room, otherwise every entry of that room and orientation is
 //!   dropped and another drawn.
@@ -30,7 +30,7 @@ fn norm(p: &str) -> String {
     p.trim_matches('"').to_ascii_lowercase().replace('\\', "/")
 }
 
-/// `.et` data the room matching reads (`0x1429195a0` → `0x141d03d80`/`0x141d03f20`).
+/// `.et` data the room matching reads (`0x1429197e0` → `0x141d03f00`/`0x141d040a0`).
 #[derive(Debug, Clone, Default)]
 pub struct EdgeType {
     pub name: String,
@@ -45,7 +45,7 @@ pub struct EdgeType {
     /// Third number (flag 8, `+0x48`): edge tiles cross sides in the middle.
     pub centred: bool,
     /// Fourth number (`+0x4d`): edge tiles take their exits from a coordinate hash
-    /// (`0x1421969e0`) instead of the path's curve.
+    /// (`0x142196b30`) instead of the path's curve.
     pub hashed: bool,
     /// The fourth number itself (`+0x4d`): pass A records a slot for the exit wiggle when it
     /// is at least 2 (1 on a room's border line).
@@ -78,7 +78,7 @@ impl EdgeType {
             .map(|l| l.split_whitespace().filter_map(|v| v.parse().ok()).collect())
             .unwrap_or_default();
         let rest: Vec<&str> = lines.clone().collect();
-        // `0x1429195a0`: after height change, size and the centring flag come `random_wiggle`,
+        // `0x1429197e0`: after height change, size and the centring flag come `random_wiggle`,
         // `can_end` and `force_height_zero` as numbers.
         let can_end = nums.get(4).is_some_and(|&v| v != 0) || rest.iter().any(|l| l.split_whitespace().any(|t| t == "can_end"));
         let virtual_edge = lines.next().is_some_and(|l| l == "virtual");
@@ -108,7 +108,7 @@ impl EdgeType {
     }
 }
 
-/// `.gt` flags (`0x142918970`): the numbers line's five bools as bits 0..4 (default
+/// `.gt` flags (`0x142918bb0`): the numbers line's five bools as bits 0..4 (default
 /// 1 1 1 1 0); bit 7 when bools 3..5 are all 0 and the name contains Abyss/Water/Pool/Void.
 pub fn ground_flags(text: &str) -> u8 {
     let mut lines = text.lines().map(str::trim).filter(|l| !l.is_empty());
@@ -293,7 +293,7 @@ impl EdgeView for PlacedGraph<'_> {
     }
 }
 
-/// `0x142f10760`: angle (0x8000 = 180°) by `127·cos + 127`.
+/// `0x142f10780`: angle (0x8000 = 180°) by `127·cos + 127`.
 const ANGLE: [u16; 255] = [
     32768, 31458, 30914, 30496, 30143, 29831, 29549, 29289, 29046, 28818, 28601, 28395,
     28197, 28007, 27824, 27647, 27476, 27309, 27147, 26989, 26835, 26684, 26536, 26392,
@@ -319,7 +319,7 @@ const ANGLE: [u16; 255] = [
     1854, 1310, 0,
 ];
 
-/// `0x1421c4e50`: the angle between two vectors.
+/// `0x1421c5090`: the angle between two vectors.
 pub fn angle_between(a: (i32, i32), b: (i32, i32)) -> u16 {
     if a == (0, 0) || b == (0, 0) {
         return 0;
@@ -340,10 +340,10 @@ pub fn angle_between(a: (i32, i32), b: (i32, i32)) -> u16 {
     ANGLE[i.clamp(0, 0xfe) as usize]
 }
 
-/// Side direction vectors (`0x142f0c608`): up, right, down, left.
+/// Side direction vectors (`0x142f0c660`): up, right, down, left.
 const SIDE_DIR: [(i32, i32); 4] = [(0, -1), (1, 0), (0, 1), (-1, 0)];
 
-/// Side per slot (4 = none) and the key edges (`0x1420d1220`/`0x1420d2e20`).
+/// Side per slot (4 = none) and the key edges (`0x1420d13a0`/`0x1420d2fa0`).
 pub fn node_key(
     g: &dyn EdgeView,
     node: usize,
@@ -369,7 +369,7 @@ pub fn node_key(
         };
         per_side[side].push(i);
     }
-    // `0x1420d15b0`/`0x1420d16c0`: while a side holds several edges, move the edge whose
+    // `0x1420d1730`/`0x1420d1840`: while a side holds several edges, move the edge whose
     // direction is closest to a neighbouring side that is empty (else holds one edge).
     loop {
         let mut moves: Vec<(u16, usize, usize, usize)> = Vec::new();
@@ -416,7 +416,7 @@ pub fn node_key(
     Ok((sides, key))
 }
 
-/// `0x1420b87b0`: whether a turned room key agrees with the node's edges (ground types on each
+/// `0x1420b8930`: whether a turned room key agrees with the node's edges (ground types on each
 /// side of the edge by its direction, heights).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn fits_edges(
@@ -486,7 +486,7 @@ pub(crate) fn fits_edges(
 pub struct RoomCandidate {
     /// Room index (`usize::MAX` for a tile).
     pub room: usize,
-    /// Tile-set index when the node takes a tile (`0x1420c76d0`'s tile branch).
+    /// Tile-set index when the node takes a tile (`0x1420c7850`'s tile branch).
     pub tile: Option<usize>,
     pub orientation: u8,
     pub weight: u32,
@@ -494,7 +494,7 @@ pub struct RoomCandidate {
     pub size: (u8, u8),
 }
 
-/// `0x1420c51c0`: when no room has the node's edges, move one edge to a free side. With two
+/// `0x1420c5340`: when no room has the node's edges, move one edge to a free side. With two
 /// edges the first moves next to it (to the following side if free, else the preceding one);
 /// with three, the edge after the free side moves into it, and if no room matches that, the
 /// edge before it instead. Returns whether a room matches afterwards.
@@ -566,7 +566,7 @@ pub(crate) fn adjust_sides(
     }
 }
 
-/// `0x1420c76d0` for a node with a room type.
+/// `0x1420c7850` for a node with a room type.
 pub fn room_candidates(
     set: &RoomSet,
     tiles: &TileSet,
@@ -578,14 +578,14 @@ pub fn room_candidates(
     let (mut sides, mut key) = node_key(g, node, types, files)?;
     let n = &g.graph.nodes[node];
     let node_o = node_orientation(&n.orientation);
-    // `0x1420c5540`: tiles of the room type as feature, else rooms of that type.
+    // `0x1420c56c0`: tiles of the room type as feature, else rooms of that type.
     let any_match = |key: &TileKey| {
         crate::node_tiles::feature_has_edges(tiles, &n.room_type, &key.edges) || set.rooms.iter().any(|r| {
             r.tag.eq_ignore_ascii_case(&n.room_type)
                 && (0..8u8).any(|o| r.orientations & (1 << o) != 0 && r.key.oriented(o).edges == key.edges)
         })
     };
-    // `0x1420c76d0` skips the side adjustment (`0x1420c51c0`) for a node without a room type.
+    // `0x1420c7850` skips the side adjustment (`0x1420c5340`) for a node without a room type.
     if !n.room_type.is_empty() && !any_match(&key) && !adjust_sides(g, node, &mut sides, &mut key, &any_match, types, files)? {
         return Ok((Vec::new(), sides));
     }
@@ -643,7 +643,7 @@ pub fn room_candidates(
     Ok((out, sides))
 }
 
-/// `0x1420c76d0`'s tile branch for a typed node no room fits: tiles of the room type as feature.
+/// `0x1420c7850`'s tile branch for a typed node no room fits: tiles of the room type as feature.
 #[allow(clippy::too_many_arguments)]
 fn tile_fallback(
     tiles: &TileSet,
@@ -679,7 +679,7 @@ pub struct PlacedRoom {
     pub key: TileKey,
 }
 
-/// `0x1420b8b70`: for a fixed-orientation node, when the room's corners disagree with the
+/// `0x1420b8cf0`: for a fixed-orientation node, when the room's corners disagree with the
 /// edges, turn the side assignment (+1, then −1, then two mirrorings) until they agree.
 pub(crate) fn fix_sides(
     key: &TileKey,
@@ -708,7 +708,7 @@ pub(crate) fn fix_sides(
         return Ok(());
     }
     // [3, 2, 1, 0] after +1, then [3, 2, 1, 0] followed by [1, 0, 3, 2] (the tables at the
-    // end of `0x1420b8b70`).
+    // end of `0x1420b8cf0`).
     const MIRROR_A: [usize; 5] = [3, 2, 1, 0, 4];
     map(sides, &|v| MIRROR_A[(v + 1) & 3]);
     if fits_edges(key, sides, g, node, false, types, files)? {
@@ -722,7 +722,7 @@ pub(crate) fn fix_sides(
     Err(GenError::Unsupported(format!("node {node}: edge to side does not work")))
 }
 
-/// `0x141ef3290`: a node's alignment: an `align<N>` description, else the largest size of its
+/// `0x141ef3410`: a node's alignment: an `align<N>` description, else the largest size of its
 /// edges' types.
 pub(crate) fn node_alignment(
     g: &PlacedGraph,
@@ -746,7 +746,7 @@ pub(crate) fn node_alignment(
     Ok(a)
 }
 
-/// `0x1420c87a0`: draws and places the room of `node` (graph `tiles` in tiles).
+/// `0x1420c8920`: draws and places the room of `node` (graph `tiles` in tiles).
 pub fn place_node(
     set: &RoomSet,
     tile_set: &TileSet,
@@ -762,7 +762,7 @@ pub fn place_node(
         .ok_or_else(|| GenError::Unsupported(format!("node {node} ({:?}): no room fits", g.graph.nodes[node].room_type)))
 }
 
-/// [`place_node`] returning `None` when no entry fits (the client's `0x1420c87a0` then leaves the
+/// [`place_node`] returning `None` when no entry fits (the client's `0x1420c8920` then leaves the
 /// node to the failure list, which the caller explodes or tiles later).
 pub fn place_node_opt(
     set: &RoomSet,
@@ -800,7 +800,7 @@ pub fn place_node_opt(
         }
         let c = list[i].clone();
         let (w, h) = (c.size.0 as i32, c.size.1 as i32);
-        // Centred, then snapped to the node's alignment (`0x141fe7400`), then clamped to the map.
+        // Centred, then snapped to the node's alignment (`0x141fe7580`), then clamped to the map.
         let ro = g.graph.region;
         let c0 = (crate::region::centred(ro, cx, w, true).max(0), crate::region::centred(ro, cy, h, false).max(0));
         let (sx, sy) = crate::region::snap(ro, c0, align);
@@ -817,7 +817,7 @@ pub fn place_node_opt(
         // spiral (`settle`) moves overlapping rooms apart afterwards.
         let overlaps = overlaps && std::env::var_os("POE_OVERLAP").is_some(); // debug: the old rectangle test
         if inside && !overlaps {
-            // `0x1420c59e0`: keep the room off the map border by the largest edge size
+            // `0x1420c5b60`: keep the room off the map border by the largest edge size
             // (twice for virtual edges) on each side its key has an edge.
             let mut key = match c.tile {
                 Some(t) => TileKey::from_tdt(&tile_set.tiles[t].tdt).oriented(c.orientation),
@@ -846,8 +846,8 @@ pub fn place_node_opt(
                 px = px.min(tiles.0 - m - w).max(0);
             }
             let mut orientation = c.orientation;
-            // `0x1420c87a0` turns only `(any)` nodes (orientation byte 8); every other node,
-            // `(best)` included, gets its sides checked against the key (`0x1420b8b70`).
+            // `0x1420c8920` turns only `(any)` nodes (orientation byte 8); every other node,
+            // `(best)` included, gets its sides checked against the key (`0x1420b8cf0`).
             if node_orientation(&g.graph.nodes[node].orientation) != 8 {
                 fix_sides(&key, &mut sides, g, node, types, files)?;
             } else if let Some(d) = crate::node_tiles::quarter_turn(g, node, &sides, (px, py), c.size, tiles) {
@@ -883,7 +883,7 @@ pub fn tsi_entries(bytes: &[u8]) -> HashMap<String, String> {
         .collect()
 }
 
-/// A placed room's repulsion rectangle (`0x1420cb470`): the room in grid cells, grown on each
+/// A placed room's repulsion rectangle (`0x1420cb5f0`): the room in grid cells, grown on each
 /// side with an edge by that edge's size (twice for virtual edges).
 #[derive(Debug, Clone, Copy)]
 pub struct RepelRect {
@@ -896,7 +896,7 @@ pub struct RepelRect {
 
 const REACH: i32 = 0x8a;
 
-/// `0x1420cb7a0`: the push a rectangle gives a point (integer arithmetic as the client's).
+/// `0x1420cb920`: the push a rectangle gives a point (integer arithmetic as the client's).
 pub fn repel_push(r: &RepelRect, node_pos: (i32, i32), p: (i32, i32)) -> (i32, i32) {
     let (px, py) = p;
     let (x0, y0, x1, y1) = (r.x0, r.y0, r.x1, r.y1);
@@ -1052,7 +1052,7 @@ pub fn repel_push(r: &RepelRect, node_pos: (i32, i32), p: (i32, i32)) -> (i32, i
     lab(a, b, dot, a.wrapping_mul(a).wrapping_add(b.wrapping_mul(b)))
 }
 
-/// `0x1420cbe60`: rooms push graph nodes and edge internal points away (each room's own node
+/// `0x1420cbfe0`: rooms push graph nodes and edge internal points away (each room's own node
 /// is pushed off the map border instead), then each room is centred again on its node.
 #[allow(clippy::too_many_arguments)]
 pub fn repel(
@@ -1161,7 +1161,7 @@ pub fn repel(
         if sx < tiles.0 && sx + w <= tiles.0 && sy < tiles.1 && sy + h <= tiles.1 {
             p.pos = (sx, sy);
         }
-        // `0x1420c59e0` with the alignment as the margin.
+        // `0x1420c5b60` with the alignment as the margin.
         let key = p.key.clone();
         let mut margin_of = |side: usize| -> Result<Option<i32>, GenError> {
             Ok(match &key.edges[side] {
@@ -1189,17 +1189,17 @@ pub fn repel(
 }
 
 /// Spiral direction `d` (0..3) under region orientation `ro` as an index into [`SPIRAL_VECTORS`]
-/// (`0x141f8c430`, a 9×9 byte table by orientation clamped to 8).
+/// (`0x141f8c5b0`, a 9×9 byte table by orientation clamped to 8).
 fn spiral_dir(d: u8, ro: u8) -> usize {
     const TABLE: [[u8; 4]; 9] =
         [[0, 1, 2, 3], [1, 2, 3, 0], [2, 3, 0, 1], [3, 0, 1, 2], [0, 3, 2, 1], [1, 0, 3, 2], [2, 1, 0, 3], [3, 2, 1, 0], [0, 1, 2, 3]];
     TABLE[ro.min(8) as usize][d as usize & 3] as usize
 }
 
-/// Up, right, down, left (`0x142f0c608`).
+/// Up, right, down, left (`0x142f0c660`).
 const SPIRAL_VECTORS: [(i32, i32); 4] = [(0, -1), (1, 0), (0, 1), (-1, 0)];
 
-/// `0x1420c9260`, the start of `0x1420c9970`: a room (or tile) whose margin rectangle does not
+/// `0x1420c93e0`, the start of `0x1420c9af0`: a room (or tile) whose margin rectangle does not
 /// fit where the placement and the repulsion left it (cells taken, a non-wildcard edge on the map
 /// border, or corner grounds that disagree with ones already in the lattice) moves in a square
 /// spiral of `align`-sized steps (step counts 1, 1, 2, 2, ... up to 9, directions through the
@@ -1235,7 +1235,7 @@ pub fn settle(
     }
     let border = border[0];
     let border_ok = |x: i32, y: i32| !((x == 0 && border[3]) || (y == 0 && border[0]) || (w + x == mw && border[1]) || (h + y == mh && border[2]));
-    // `0x141d0daf0`: the four corner grounds against the lattice's.
+    // `0x141d0dc70`: the four corner grounds against the lattice's.
     let lattice_ok = |x: i32, y: i32| -> bool {
         let corners = [(x, y, 0), (x + w, y, 1), (x + w, y + h, 2), (x, y + h, 3)];
         corners.iter().all(|&(cx, cy, k)| {

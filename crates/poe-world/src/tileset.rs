@@ -1,10 +1,10 @@
 //! Tile matching: the key a tile or a room slot is matched by, its eight orientations, and the
 //! tile-set index the generator looks keys up in (`docs/re/terrain/tgr.md`).
 //!
-//! A key (`0x141d09900` from a tile, `0x141d08a40` oriented, 0x4e bytes compared) holds the
+//! A key (`0x141d09a80` from a tile, `0x141d08bc0` oriented, 0x4e bytes compared) holds the
 //! edge type of each side with its exit and virtual-exit positions, the size, and the ground
 //! type and height of each corner. Sides and corners are in file order (the `.tdt` header's and
-//! the `.arm` slot's, which agree). The index (`0x141d09ab0`) lists, per feature name and key,
+//! the `.arm` slot's, which agree). The index (`0x141d09c30`) lists, per feature name and key,
 //! `(tile, orientation, weight)` in `.tst` order and orientation order; the generator picks from
 //! a list with `below(total weight)`, so this order is part of the layout.
 
@@ -12,11 +12,11 @@ use std::collections::HashMap;
 
 use crate::tdt::Tdt;
 
-/// `I, R90, R180, R270, FI, FR90, FR180, FR270` (`0x142f08780`).
+/// `I, R90, R180, R270, FI, FR90, FR180, FR270` (`0x142f08770`).
 pub const ORIENTATION_NAMES: [&str; 8] =
     ["I", "R90", "R180", "R270", "FI", "FR90", "FR180", "FR270"];
 
-/// Side permutation per orientation (`0x142f08808`): oriented side `i` is source side `T[o][i]`.
+/// Side permutation per orientation (`0x142f08850`): oriented side `i` is source side `T[o][i]`.
 const SIDES: [[usize; 4]; 8] = [
     [0, 1, 2, 3],
     [3, 0, 1, 2],
@@ -27,7 +27,7 @@ const SIDES: [[usize; 4]; 8] = [
     [2, 1, 0, 3],
     [3, 2, 1, 0],
 ];
-/// Corner permutation per orientation (`0x142f08828`).
+/// Corner permutation per orientation (`0x142f08870`).
 const CORNERS: [[usize; 4]; 8] = [
     [0, 1, 2, 3],
     [3, 0, 1, 2],
@@ -39,7 +39,7 @@ const CORNERS: [[usize; 4]; 8] = [
     [0, 3, 2, 1],
 ];
 
-/// Cell transform per orientation (`0x142f020c8`): (transpose, x source, y source) where a
+/// Cell transform per orientation (`0x142f02118`): (transpose, x source, y source) where a
 /// source 0 mirrors.
 const TRANSFORM: [(bool, u8, u8); 8] = [
     (false, 1, 1),
@@ -53,7 +53,7 @@ const TRANSFORM: [(bool, u8, u8); 8] = [
 ];
 
 /// Where corner point `(u, v)` (0..=w, 0..=h) of a `w × h` piece lands with orientation `o`
-/// (`0x141d0bad0`, same table as [`orient_cell`]).
+/// (`0x141d0bc50`, same table as [`orient_cell`]).
 pub fn orient_point(o: u8, w: i32, h: i32, u: i32, v: i32) -> (i32, i32) {
     let (t, xs, ys) = TRANSFORM[(o & 7) as usize];
     let a = [w - u, u, h - v, v];
@@ -106,7 +106,7 @@ impl TileKey {
         }
     }
 
-    /// The key seen with orientation `o` (`0x141d08a40`).
+    /// The key seen with orientation `o` (`0x141d08bc0`).
     pub fn oriented(&self, o: u8) -> Self {
         let o = (o & 7) as usize;
         let mut k = Self {
@@ -148,7 +148,7 @@ pub struct TileDef {
     pub path: String,
     pub tdt: Tdt,
     /// The key the tile is indexed by: the `.tdt`'s, without grounds whose `.gt` has flag 0x10
-    /// (`0x141d09900`, e.g. river trims).
+    /// (`0x141d09a80`, e.g. river trims).
     pub key: TileKey,
     pub weight: u32,
     /// Allowed orientations (bit per orientation).
@@ -166,7 +166,7 @@ pub struct Candidate {
 pub struct TileSet {
     pub tiles: Vec<TileDef>,
     index: HashMap<(String, TileKey), Vec<Candidate>>,
-    /// The second index (`0x141d09ab0`, node `+0x18`): the keys of tiles whose corners with a
+    /// The second index (`0x141d09c30`, node `+0x18`): the keys of tiles whose corners with a
     /// height and a ground without `.gt` flag 1 are flattened one after the other (cumulative).
     flat: HashMap<(String, TileKey), Vec<Candidate>>,
     /// `.gt` flags of the grounds the tiles use (lower-case path).
@@ -202,7 +202,7 @@ impl TileSet {
         set
     }
 
-    /// Adds one tile after the others (`0x141d09ab0`): one candidate per allowed orientation, in
+    /// Adds one tile after the others (`0x141d09c30`): one candidate per allowed orientation, in
     /// both indexes.
     pub fn add(&mut self, t: TileDef) {
         let i = self.tiles.len();
@@ -245,7 +245,7 @@ impl TileSet {
                 feature
             );
         }
-        // `0x141d0a4c0`: the key, then the flattened-tile index, then the key with the heights
+        // `0x141d0a640`: the key, then the flattened-tile index, then the key with the heights
         // of its corners (a ground without `.gt` flag 1) zeroed, again.
         let feature = feature.to_ascii_lowercase();
         let mut k = key.clone();
@@ -288,7 +288,7 @@ fn key_dump() -> Option<&'static std::sync::Mutex<std::fs::File>> {
     F.get_or_init(|| std::env::var("POE_DUMP_KEYS").ok().and_then(|p| std::fs::File::create(p).ok()).map(std::sync::Mutex::new)).as_ref()
 }
 
-/// The weighted pick the generator does (`0x1415d5960`): `r` in `0..total`.
+/// The weighted pick the generator does (`0x1415d5ae0`): `r` in `0..total`.
 pub fn pick(list: &[Candidate], mut r: u32) -> Option<Candidate> {
     for c in list {
         if r < c.weight {

@@ -1,5 +1,5 @@
-//! Graph layout before tile placement (`0x1420bec40` and what it calls): node jitter inside
-//! Voronoi cells (`0x141ef4720` → `0x141ef3bb0`). See `docs/re/terrain/tgr.md`,
+//! Graph layout before tile placement (`0x1420bedc0` and what it calls): node jitter inside
+//! Voronoi cells (`0x141ef48a0` → `0x141ef3d30`). See `docs/re/terrain/tgr.md`,
 //! "Graph layout".
 //!
 //! The sites are the graph's nodes and then its edges' internal points. Their Voronoi diagram
@@ -54,7 +54,7 @@ impl CellGraph {
         self.nodes.iter().rposition(|&n| n == p)
     }
 
-    /// `0x141f05890`: the node at `p`, else the nearest one (the first at the smallest
+    /// `0x141f05a10`: the node at `p`, else the nearest one (the first at the smallest
     /// squared distance). Clipped edge ends are recomputed from the line equation and can be
     /// a cell away from their vertex.
     fn nearest(&self, p: Pos) -> Option<usize> {
@@ -85,7 +85,7 @@ impl CellGraph {
             .any(|&e| self.edges[e].0 == b || self.edges[e].1 == b)
     }
 
-    /// `0x141f04c50`.
+    /// `0x141f04dd0`.
     fn connect(&mut self, a: usize, b: usize) -> Result<usize, LayoutError> {
         let e = self.edges.len();
         self.edges.push((a, b));
@@ -106,7 +106,7 @@ impl CellGraph {
         Some(self.nodes[if a == n { b } else { a }])
     }
 
-    /// Builds the cell graph of `sites` on a `w × h` cell grid (`0x141ef4720`).
+    /// Builds the cell graph of `sites` on a `w × h` cell grid (`0x141ef48a0`).
     pub fn build(sites: &[Pos], w: i32, h: i32) -> Result<Self, LayoutError> {
         let mut g = Self {
             size: (w, h),
@@ -138,7 +138,7 @@ impl CellGraph {
         for c in [(0, 0), (0, h - 1), (w - 1, 0), (w - 1, h - 1)] {
             g.add_node(c);
         }
-        // Border nodes (`0x141f09c90`): nodes with at most two edges on each side.
+        // Border nodes (`0x141f09e10`): nodes with at most two edges on each side.
         let (mut x0, mut xmax, mut y0, mut ymax) = (vec![], vec![], vec![], vec![]);
         for n in 0..g.nodes.len() {
             if g.degree(n) > 2 {
@@ -173,7 +173,7 @@ impl CellGraph {
         Ok(g)
     }
 
-    /// `0x141ef4490`: a corner takes the site of its neighbour's cell on the `dir` side.
+    /// `0x141ef4610`: a corner takes the site of its neighbour's cell on the `dir` side.
     fn inherit_site(&self, sets: &mut HashMap<usize, SiteSet>, corner: usize, next: usize, dir: i32) {
         let Some(set) = sets.get(&next) else { return };
         if self.degree(next) != 1 {
@@ -192,7 +192,7 @@ impl CellGraph {
         }
     }
 
-    /// `0x141ef3e10`: edges between consecutive border nodes, each added to one cell.
+    /// `0x141ef3f90`: edges between consecutive border nodes, each added to one cell.
     fn chain_border(
         &mut self,
         list: &[usize],
@@ -247,7 +247,7 @@ impl CellGraph {
         }
     }
 
-    /// Triangle weights of a site's cell (`0x141ef3390`): twice-area / 2 of (site, edge);
+    /// Triangle weights of a site's cell (`0x141ef3510`): twice-area / 2 of (site, edge);
     /// a site in a border tile whose cell has an edge lying on that border takes that edge
     /// alone. `tiles` is the graph size in tiles.
     pub fn weights(&self, site: Pos, tiles: Pos) -> Vec<(u32, Pos, Pos)> {
@@ -295,7 +295,7 @@ impl CellGraph {
         out
     }
 
-    /// The random offset for a site (`0x141ef3560`).
+    /// The random offset for a site (`0x141ef36e0`).
     pub fn offset(&self, site: Pos, tiles: Pos, rng: &mut TerrainRng) -> Pos {
         let tri = self.weights(site, tiles);
         if tri.is_empty() {
@@ -336,7 +336,7 @@ pub struct JitterNode {
     pub fix_y: bool,
 }
 
-/// Moves graph nodes and then edge internal points inside their cells (`0x141ef3bb0`).
+/// Moves graph nodes and then edge internal points inside their cells (`0x141ef3d30`).
 /// `points` are the internal points of every edge, in edge order. Returns nothing; positions
 /// are updated in place.
 pub fn jitter(

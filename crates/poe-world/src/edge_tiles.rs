@@ -1,4 +1,4 @@
-//! Edge tiles (`0x1420b6950`): each chain of layout-graph edges between rooms becomes a path
+//! Edge tiles (`0x1420b6ad0`): each chain of layout-graph edges between rooms becomes a path
 //! of edge tiles, found by a tile-level search over an occupancy grid, then each path tile gets
 //! an edge tile from the tile set. Findings: `docs/re/terrain/tgr.md`, "Edge tiles".
 
@@ -50,7 +50,7 @@ pub struct PathInfo {
     pub edges: Vec<usize>,
 }
 
-/// One cell of the occupancy grid (`0x141ef5700`, 0x20-byte records).
+/// One cell of the occupancy grid (`0x141ef5880`, 0x20-byte records).
 #[derive(Debug, Clone, Default)]
 struct Cell {
     /// `+0x0`: path cost; edges add 80 per tile they cross.
@@ -69,7 +69,7 @@ struct Cell {
     open: bool,
 }
 
-/// The client's line walk (`0x141f05980` and its copies): steps along the major axis from `a`
+/// The client's line walk (`0x141f05b00` and its copies): steps along the major axis from `a`
 /// to `b` inclusive.
 fn line(a: Pos, b: Pos, mut f: impl FnMut(Pos)) {
     let steep = (b.0 - a.0).abs() < (b.1 - a.1).abs();
@@ -99,7 +99,7 @@ fn tile_of(p: Pos, size: i32) -> (i32, i32) {
     (x - x % size, y - y % size)
 }
 
-/// Tile key in the path builder (`0x1420b4510`): like [`tile_of`] but valid a little off the map.
+/// Tile key in the path builder (`0x1420b4690`): like [`tile_of`] but valid a little off the map.
 fn path_key(p: Pos, size: i32) -> (i32, i32) {
     let k = |v: i32| {
         let q = ((v as i64 + 23 * size as i64) as u64 / 23) as i32;
@@ -108,7 +108,7 @@ fn path_key(p: Pos, size: i32) -> (i32, i32) {
     (k(p.0), k(p.1))
 }
 
-/// The edge tile stage's state (`0x1420b6950`'s object): occupancy grid, pending paths.
+/// The edge tile stage's state (`0x1420b6ad0`'s object): occupancy grid, pending paths.
 pub struct EdgeTiler<'a> {
     pub g: &'a mut LayoutGraph,
     map: &'a mut TileMap,
@@ -133,7 +133,7 @@ pub struct EdgeTiler<'a> {
 }
 
 impl<'a> EdgeTiler<'a> {
-    /// `0x141ef5700`: cells under room tiles start occupied.
+    /// `0x141ef5880`: cells under room tiles start occupied.
     pub fn new(g: &'a mut LayoutGraph, map: &'a mut TileMap, tileset: &'a TileSet, edges: Vec<EdgeInfo>) -> Self {
         let (w, h) = (map.width, map.height);
         let mut cells = vec![Cell::default(); (w * h) as usize];
@@ -208,7 +208,7 @@ impl<'a> EdgeTiler<'a> {
     }
 
     /// Walks an edge's line tile by tile (size-rounded, inside the map), calling `f` on each
-    /// new tile (`0x141ef6ab0`, `0x141ef6bf0`: one "last tile" per edge).
+    /// new tile (`0x141ef6c30`, `0x141ef6d70`: one "last tile" per edge).
     fn edge_tiles(&self, e: usize, s: i32) -> Vec<(i32, i32)> {
         let n = self.g.edges[e].points.len();
         let mut out = Vec::new();
@@ -228,7 +228,7 @@ impl<'a> EdgeTiler<'a> {
         out
     }
 
-    /// `0x141ef6ab0`: every tile an edge crosses costs 80 more.
+    /// `0x141ef6c30`: every tile an edge crosses costs 80 more.
     fn add_edge_cost(&mut self, e: usize) {
         let s = self.sizes[e];
         for (x, y) in self.edge_tiles(e, s as i32) {
@@ -236,7 +236,7 @@ impl<'a> EdgeTiler<'a> {
         }
     }
 
-    /// `0x141ef6bf0`: a path's own edges are cheaper for its search (−60 on tiles at 80+).
+    /// `0x141ef6d70`: a path's own edges are cheaper for its search (−60 on tiles at 80+).
     fn ease_edge_cost(&mut self, e: usize) {
         let s = self.size;
         for (x, y) in self.edge_tiles(e, s as i32) {
@@ -248,7 +248,7 @@ impl<'a> EdgeTiler<'a> {
         }
     }
 
-    /// `0x141ef7000`: the segment just passed gets 20 cheaper (drawn in the edge's direction).
+    /// `0x141ef7180`: the segment just passed gets 20 cheaper (drawn in the edge's direction).
     fn ease_segment(&mut self, a: Pos, b: Pos, s: u32, backwards: bool) {
         let (a, b) = if backwards { (b, a) } else { (a, b) };
         let mut tiles = Vec::new();
@@ -271,7 +271,7 @@ impl<'a> EdgeTiler<'a> {
         }
     }
 
-    /// `0x141ef67a0`: the end tile next to a room is taken.
+    /// `0x141ef6920`: the end tile next to a room is taken.
     fn take_end(&mut self, e: usize, end: usize) {
         let s = self.sizes[e];
         let ed = &self.g.edges[e];
@@ -289,7 +289,7 @@ impl<'a> EdgeTiler<'a> {
         }
     }
 
-    /// Room tile corner under a cell (`0x141ef5a30`), or the cell itself.
+    /// Room tile corner under a cell (`0x141ef5bb0`), or the cell itself.
     fn room_corner(&self, t: (u32, u32)) -> (u32, u32) {
         if t.0 < self.w && t.1 < self.h {
             if let Some(c) = &self.map.cells[self.idx(t.0, t.1)] {
@@ -299,7 +299,7 @@ impl<'a> EdgeTiler<'a> {
         t
     }
 
-    /// `0x141d0d880`: no room tile in the block.
+    /// `0x141d0da00`: no room tile in the block.
     fn free_of_rooms(&self, x: u32, y: u32, s: u32) -> bool {
         (0..s).all(|j| (0..s).all(|i| self.map.cells.get(self.idx(x + i, y + j)).is_some_and(|c| c.is_none())))
     }
@@ -308,7 +308,7 @@ impl<'a> EdgeTiler<'a> {
         (0..s).any(|j| (0..s).any(|i| self.cells.get(self.idx(x + i, y + j)).is_some_and(|c| c.occupied)))
     }
 
-    /// `0x141ef5ab0`: average cost over the block (plus one).
+    /// `0x141ef5c30`: average cost over the block (plus one).
     fn avg_cost(&self, idx: usize) -> u32 {
         let s = self.size;
         let mut sum = 1u32;
@@ -330,7 +330,7 @@ impl<'a> EdgeTiler<'a> {
         self.open.remove(&(self.cells[idx].f, idx as u32));
     }
 
-    /// `0x141ef5c80`: a search from the seed points (`seeds`, the rest of the path) back to
+    /// `0x141ef5e00`: a search from the seed points (`seeds`, the rest of the path) back to
     /// the tile of `from`; on success the tiles from `from` to the seed reached are appended.
     fn search(&mut self, p: &mut PathInfo, from: Pos, seeds: &[Pos], rng: &mut TerrainRng) -> bool {
         let s = self.size;
@@ -402,7 +402,7 @@ impl<'a> EdgeTiler<'a> {
         false
     }
 
-    /// `0x141ef64f0`: the tiles around a cell (or around the whole room tile on it).
+    /// `0x141ef6670`: the tiles around a cell (or around the whole room tile on it).
     fn neighbours(&self, x: u32, y: u32) -> Vec<(u32, u32)> {
         let s = self.size as i32;
         let (w, h) = match (&self.map.cells[self.idx(x, y)], self.map.piece_at[self.idx(x, y)]) {
@@ -426,7 +426,7 @@ impl<'a> EdgeTiler<'a> {
         out.into_iter().map(|(a, b)| self.room_corner((a as u32, b as u32))).collect()
     }
 
-    /// `0x141ef6250`: try reaching `nb` from `cur`.
+    /// `0x141ef63d0`: try reaching `nb` from `cur`.
     fn relax(&mut self, cur: usize, nb: (u32, u32), goal: (u32, u32), goal_idx: u32, r1: u64, r2: u64) {
         let s = self.size;
         let (x, y) = nb;
@@ -466,7 +466,7 @@ impl<'a> EdgeTiler<'a> {
         self.cells[idx].parent = cur as u32 + 1;
     }
 
-    /// `0x141ef6900`: append the goal and its parents; their blocks become taken.
+    /// `0x141ef6a80`: append the goal and its parents; their blocks become taken.
     fn reconstruct(&mut self, p: &mut PathInfo, goal: (u32, u32)) {
         let s = self.size;
         let gt = (goal.0 as i32, goal.1 as i32);
@@ -489,7 +489,7 @@ impl<'a> EdgeTiler<'a> {
         }
     }
 
-    /// Clamped node tile, moved to the room tile corner (as `0x1420b5250` does for path ends).
+    /// Clamped node tile, moved to the room tile corner (as `0x1420b53d0` does for path ends).
     fn node_tile(&self, n: usize, s: i32) -> (i32, i32) {
         let (x, y) = self.g.nodes[n].pos;
         let x = x.max(0).min(self.w as i32 * 23 - 1);
@@ -504,7 +504,7 @@ impl<'a> EdgeTiler<'a> {
         self.room_corner((t.0 as u32, t.1 as u32))
     }
 
-    /// `0x1420b5250`: find the path's tiles, search by search, backtracking when stuck.
+    /// `0x1420b53d0`: find the path's tiles, search by search, backtracking when stuck.
     fn fit(&mut self, p: &mut PathInfo, rng: &mut TerrainRng) -> bool {
         if p.points.len() < 2 || p.bits.is_empty() {
             return false;
@@ -634,7 +634,7 @@ fn oriented(size: (u8, u8), o: u8) -> (u32, u32) {
     if o & 1 == 1 && o < 8 { (size.1 as u32, size.0 as u32) } else { (size.0 as u32, size.1 as u32) }
 }
 
-/// The chain walk (`0x1420c4960`): along an edge's points, then on through degree-2 nodes.
+/// The chain walk (`0x1420c4ae0`): along an edge's points, then on through degree-2 nodes.
 struct ChainIter {
     cur: usize,
     start: usize,
@@ -682,7 +682,7 @@ impl ChainIter {
 }
 
 impl EdgeTiler<'_> {
-    /// `0x1420b6660` (after the end points): edge costs, taken ends and the two start lists.
+    /// `0x1420b67e0` (after the end points): edge costs, taken ends and the two start lists.
     fn categorise(&mut self) -> (Vec<(usize, usize)>, Vec<(usize, usize)>) {
         let (mut first, mut second) = (Vec::new(), Vec::new());
         for e in 0..self.g.edges.len() {
@@ -704,7 +704,7 @@ impl EdgeTiler<'_> {
         (first, second)
     }
 
-    /// `0x1420b3fd0`: the room tiles under two cells touch.
+    /// `0x1420b4150`: the room tiles under two cells touch.
     fn rooms_touch(&self, a: (i32, i32), b: (i32, i32)) -> bool {
         let room = |t: (i32, i32)| -> Option<(i32, i32, i32, i32)> {
             if (t.0 as u32) >= self.w || (t.1 as u32) >= self.h {
@@ -723,7 +723,7 @@ impl EdgeTiler<'_> {
         (sy + sh == fy || fy + fh == sy) && sx <= fx + fw && fx <= sx + sw
     }
 
-    /// `0x1420b41b0`: a chain that stays inside the end tiles of two touching rooms.
+    /// `0x1420b4330`: a chain that stays inside the end tiles of two touching rooms.
     fn trivial_chain(&mut self, e: usize, end: usize, last: usize, s: i32) -> bool {
         let a = tile_of(self.g.nodes[self.g.endpoint(e, end)].pos, s);
         let b = tile_of(self.g.nodes[last].pos, s);
@@ -740,7 +740,7 @@ impl EdgeTiler<'_> {
         true
     }
 
-    /// `0x1420b43b0`: a free dead end inside the map repeats its position as an edge point.
+    /// `0x1420b4530`: a free dead end inside the map repeats its position as an edge point.
     fn extend_dead_end(&mut self, n: usize) {
         let node = &self.g.nodes[n];
         if node.fixed || node.virtual_end || self.degree(n) != 1 {
@@ -760,7 +760,7 @@ impl EdgeTiler<'_> {
         }
     }
 
-    /// `0x1420b4510`: the chain's points from `end` of `e` to `last`, one per tile, loops cut.
+    /// `0x1420b4690`: the chain's points from `end` of `e` to `last`, one per tile, loops cut.
     fn build_path(&mut self, e: usize, end: usize, last: usize) -> PathInfo {
         let s = self.sizes[e] as i32;
         let mut p = PathInfo { final_node: last, edge: e, end, ..Default::default() };
@@ -821,7 +821,7 @@ impl EdgeTiler<'_> {
         p
     }
 
-    /// `0x1420b5f30`: turn the chain starting at `end` of `e` into a path.
+    /// `0x1420b60b0`: turn the chain starting at `end` of `e` into a path.
     fn start_chain(&mut self, e: usize, end: usize, rng: &mut TerrainRng) -> Result<(), String> {
         if self.tilised[e] {
             return Ok(());
@@ -859,11 +859,11 @@ impl EdgeTiler<'_> {
         Ok(())
     }
 
-    /// The loop branch of `0x1420b5f30`: the chain that ends where it started is split in two
+    /// The loop branch of `0x1420b60b0`: the chain that ends where it started is split in two
     /// halves at the middle point (the first keeps points `0..=n/2`, the second takes the rest
     /// and the second edge of the first edge's far node); both are fitted as loops, the second
     /// half's tiles (without its first and last) are appended to the first, a closing duplicate
-    /// is dropped, and the tiles are made at once (`0x1420b7f30`).
+    /// is dropped, and the tiles are made at once (`0x1420b80b0`).
     fn tilise_loop(&mut self, mut a: PathInfo, e: usize, end: usize, rng: &mut TerrainRng) -> Result<(), String> {
         let n = a.points.len();
         let half = n / 2;
@@ -901,7 +901,7 @@ impl EdgeTiler<'_> {
         Ok(())
     }
 
-    /// `0x1420b6950`: all chains into paths, in the client's order (see [`Self::order`]).
+    /// `0x1420b6ad0`: all chains into paths, in the client's order (see [`Self::order`]).
     pub fn run(&mut self, rng: &mut TerrainRng) -> Result<(), String> {
         let (mut first, second) = self.categorise();
         rng.below(first.len() as u32);
@@ -981,7 +981,7 @@ impl EdgeTiler<'_> {
         (s, s)
     }
 
-    /// `0x1420b78d0`: the side of `t` that `nb` lies on (0 north, 1 east, 2 south, 3 west).
+    /// `0x1420b7a50`: the side of `t` that `nb` lies on (0 north, 1 east, 2 south, 3 west).
     fn side(&self, t: (i32, i32), nb: (i32, i32), s: i32) -> Result<usize, String> {
         let (tw, th) = self.tile_size_at(t, s);
         if nb.0 == t.0 + tw {
@@ -1012,7 +1012,7 @@ impl EdgeTiler<'_> {
         Ok(3)
     }
 
-    /// `0x141f9e990`: where the room exit on `nb`'s tile meets side `side` of `t`.
+    /// `0x141f9eb10`: where the room exit on `nb`'s tile meets side `side` of `t`.
     fn room_exit(&self, t: (i32, i32), nb: (i32, i32), side: usize, s: i32) -> Result<u8, String> {
         let i = self.idx(nb.0 as u32, nb.1 as u32);
         let (Some(c), Some(p)) = (&self.map.cells[i], self.map.piece_at[i]) else {
@@ -1031,7 +1031,7 @@ impl EdgeTiler<'_> {
         if flipped {
             e = 3 * dim(own) - e - 1;
         }
-        // `0x141d08470`: the virtual exit seen with the orientation.
+        // `0x141d085f0`: the virtual exit seen with the orientation.
         let virtual_exit = |side: usize| -> i32 {
             let own = own_side(o, side);
             let v = tdt.edge_distances[4 + own] as i32;
@@ -1096,7 +1096,7 @@ impl EdgeTiler<'_> {
         Ok(v as u8)
     }
 
-    /// `0x1420b7f30`: an edge tile for every inner tile of a path.
+    /// `0x1420b80b0`: an edge tile for every inner tile of a path.
     fn place_path(&mut self, p: &PathInfo, rng: &mut TerrainRng) -> Result<(), String> {
         let info = self.edges[p.edge].clone();
         let s = info.size as i32;
@@ -1139,7 +1139,7 @@ impl EdgeTiler<'_> {
                     };
                 }
             }
-            // `0x1420b7d70`: grounds either side of the edge, the missing corner of a turn.
+            // `0x1420b7ef0`: grounds either side of the edge, the missing corner of a turn.
             let rev = p.end != 0;
             for (side, flag) in [(side_in, rev), (side_out, !rev)] {
                 let (mut a, mut b) = (side, (side + 1) & 3);
@@ -1178,7 +1178,7 @@ impl EdgeTiler<'_> {
     }
 }
 
-/// `0x141d08470`: a tile's virtual exit on map side `side` with orientation `o`.
+/// `0x141d085f0`: a tile's virtual exit on map side `side` with orientation `o`.
 pub fn virtual_exit(tdt: &crate::tdt::Tdt, o: u8, side: usize) -> i32 {
     let own = own_side(o, side);
     let dim = if own & 1 == 0 { tdt.size.0 } else { tdt.size.1 } as i32;
@@ -1186,7 +1186,7 @@ pub fn virtual_exit(tdt: &crate::tdt::Tdt, o: u8, side: usize) -> i32 {
     if (4..8).contains(&o) && v < 3 * dim { 3 * dim - v - 1 } else { v }
 }
 
-/// `0x141d00fd0(1, 1, side, inverse orientation)`: a tile's own side shown at map side `side`.
+/// `0x141d01150(1, 1, side, inverse orientation)`: a tile's own side shown at map side `side`.
 pub fn own_side_pub(o: u8, side: usize) -> usize {
     own_side(o, side)
 }
@@ -1203,7 +1203,7 @@ fn own_side(o: u8, side: usize) -> usize {
     (s.wrapping_add(A[o2.min(8)]).wrapping_add(B[o2.min(8)]) % 4) as usize
 }
 
-/// `0x1420b7490`: where a path's smoothed line crosses each pair of neighbouring tiles, as an
+/// `0x1420b7610`: where a path's smoothed line crosses each pair of neighbouring tiles, as an
 /// offset from the middle of their shared side (f32, like the client).
 fn crossings(tiles: &[(i32, i32)], size: u32) -> Vec<(f32, f32)> {
     let h = (size >> 1) & 0x7fff_ffff;
@@ -1234,7 +1234,7 @@ fn crossings(tiles: &[(i32, i32)], size: u32) -> Vec<(f32, f32)> {
     out
 }
 
-/// `0x1420b70e0`: [`crossings`] for a loop: no end padding, the ten control points of crossing
+/// `0x1420b7260`: [`crossings`] for a loop: no end padding, the ten control points of crossing
 /// `i` are the tile centres `i - 4 ..= i + 5` taken round the loop, and there is one crossing per
 /// tile.
 fn crossings_loop(tiles: &[(i32, i32)], size: u32) -> Vec<(f32, f32)> {
@@ -1262,7 +1262,7 @@ fn crossings_loop(tiles: &[(i32, i32)], size: u32) -> Vec<(f32, f32)> {
     out
 }
 
-/// `0x1420b7ba0`: which third of a side the crossing falls in.
+/// `0x1420b7d20`: which third of a side the crossing falls in.
 fn crossing_exit(side: usize, v: (f32, f32), size: u32) -> u8 {
     let t = (size as u64 * 23) as f32 / 6.0;
     let half = size >> 1;
@@ -1281,7 +1281,7 @@ fn crossing_exit(side: usize, v: (f32, f32), size: u32) -> u8 {
     r as u8
 }
 
-/// `0x1421969e0`: crossing position from a coordinate hash.
+/// `0x142196b30`: crossing position from a coordinate hash.
 fn hashed_exit(x: i32, y: i32, side: u32, size: u32) -> u8 {
     let (x, y) = (x as u32, y as u32);
     let i = match side {

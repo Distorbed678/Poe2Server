@@ -76,7 +76,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("topology {pick}: {dgr}");
     let graph = Graph::parse_bytes(&Files::read(data.files(), &dgr)?)?;
 
-    // Edge existence (`0x141feeaf0`): exist % 0 removes the edge without a draw.
+    // Edge existence (`0x141feec70`): exist % 0 removes the edge without a draw.
     let removed: Vec<bool> = graph
         .edges
         .iter()
@@ -207,7 +207,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     println!("room-pass pieces differing from the trace: {bad} of {}", map.pieces.len());
 
-    // Edge ends at the rooms' exits (`0x1420c5750`, `0x1420c5b50`).
+    // Edge ends at the rooms' exits (`0x1420c58d0`, `0x1420c5cd0`).
     let mut route: Vec<RouteEdge> = Vec::new();
     let mut route_index = vec![usize::MAX; graph.edges.len()];
     for (i, e) in graph.edges.iter().enumerate() {
@@ -269,7 +269,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let mut v1 = at(p.key.virtual_exits[side]);
                 let mut v2 = at(p.key.exits[side]);
                 let which = (!from) as usize;
-                // `0x1420c6860`: order the pair by the side of the edge they fall on.
+                // `0x1420c69e0`: order the pair by the side of the edge they fall on.
                 let n = placed_graph.nodes[node];
                 let q = if from {
                     r.points.first().copied().unwrap_or(r.ends[1])
@@ -285,7 +285,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     std::mem::swap(&mut v1, &mut v2);
                 }
                 let m = ((v1.0 + v2.0) / 2, (v2.1 + v1.1) / 2);
-                // `0x1420c5b50`: and by the side of the exit direction.
+                // `0x1420c5cd0`: and by the side of the exit direction.
                 let d = SIDE_DIR[side];
                 if (v1.1 - (d.1 + m.1)) * (m.0 - (d.0 + m.0)) - (v1.0 - (d.0 + m.0)) * (m.1 - (d.1 + m.1)) < 0 {
                     std::mem::swap(&mut v1, &mut v2);
@@ -344,7 +344,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     }
 
-    // The layout graph in the client's numbering (`0x141ef2800` splits room nodes per exit).
+    // The layout graph in the client's numbering (`0x141ef2980` splits room nodes per exit).
     let mut lg = poe_world::smoothing::LayoutGraph::default();
     for (i, _) in graph.nodes.iter().enumerate() {
         let mut slots = [None; 4];
@@ -354,7 +354,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 slots[k] = Some(route_index[ei]);
             }
         }
-        // `0x1420c7400`: next to a virtual edge in the topology graph.
+        // `0x1420c7580`: next to a virtual edge in the topology graph.
         let mut virtual_end = false;
         for &ei in &graph.nodes[i].edges {
             virtual_end |= types.edge(files, &graph.edges[ei as usize].edge_type)?.virtual_edge;
@@ -479,8 +479,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     println!("graph after split: {same} same, {diff} different");
 
-    // Up to tile placement: rounding, border nodes (`0x1420cade0`), slot compaction, rounding,
-    // end points (`0x1420b6660`).
+    // Up to tile placement: rounding, border nodes (`0x1420caf60`), slot compaction, rounding,
+    // end points (`0x1420b67e0`).
     poe_world::smoothing::round_corners(&mut lg);
     for n in 0..graph.nodes.len() {
         if !graph.nodes[n].room_type.is_empty() {
@@ -561,8 +561,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     println!("graph before tiles: {same} same, {diff} different");
 
-    // Edge tiles (`0x1420b6950`): chains into tile paths; compare the path tiles with the
-    // client's edge tile placements (`place` lines at 0x1420b85bf, in path order).
+    // Edge tiles (`0x1420b6ad0`): chains into tile paths; compare the path tiles with the
+    // client's edge tile placements (`place` lines at 0x1420b873f, in path order).
     let mut infos = Vec::new();
     for e in &lg.edges {
         let et = types.edge(files, &e.edge_type)?;
@@ -615,23 +615,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let lattice_point = |p: &poe_world::generate::LatticePoint| (p.ground.clone(), p.height, p.flags);
     compare_lattice(&map, &export_dir, "borders", lattice_point)?;
-    // Border floods (`0x1420b94d0`).
+    // Border floods (`0x1420b9650`).
     poe_world::lattice::border_floods(&mut map, &master.tiles);
     compare_lattice(&map, &export_dir, "flood", lattice_point)?;
-    // Unwalkable corners (`0x141fe0fd0`; the height fix-ups of `0x1420c0a60` change nothing
+    // Unwalkable corners (`0x141fe1150`; the height fix-ups of `0x1420c0be0` change nothing
     // with all heights 0).
     poe_world::lattice::mark_unwalkable(&mut map, &master.tiles);
     compare_lattice(&map, &export_dir, "heights", lattice_point)?;
     poe_world::lattice::settle(&mut map, None);
     compare_lattice(&map, &export_dir, "92ce0", lattice_point)?;
-    // The driver clears flag 4 again; `0x141f92ce0`, `0x1420bdae0` and `0x1420be360` change
+    // The driver clears flag 4 again; `0x141f92e60`, `0x1420bdc60` and `0x1420be4e0` change
     // nothing in the Riverbank.
     for p in &mut map.lattice {
         p.flags &= !4;
     }
     compare_lattice(&map, &export_dir, "fill", lattice_point)?;
 
-    // Fill pass (`0x141f8f930`).
+    // Fill pass (`0x141f8fab0`).
     let pieces_before_fill = map.pieces.len();
     let fill_rooms = match poe_world::fill::fill_pass(&mut map, &mut master, files, &mut rng) {
         Ok(rooms) => {
@@ -643,7 +643,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Vec::new()
         }
     };
-    // De-repetition (`0x141fdd7c0`): node rooms, then fill rooms.
+    // De-repetition (`0x141fdd940`): node rooms, then fill rooms.
     use poe_world::generate::RoomPlacement;
     let mut room_list: Vec<RoomPlacement> = placed
         .iter()
@@ -654,7 +654,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     poe_world::generate::derepeat_pass(&mut map, &master, &room_list, &mut rng);
     println!("de-repetition: {} re-picks", map.pieces.len() - pieces_before_derepeat);
 
-    // Outer buffer (`0x141fd8360`) and the final layout against the client export.
+    // Outer buffer (`0x141fd84e0`) and the final layout against the client export.
     let tsi_text = poe_world::text_utf16(&Files::read(files, &tsi_path)?);
     let margins = poe_world::outer_buffer::Margins::parse(&tsi_text);
     let edge_types = master.edge_type_table(files)?;

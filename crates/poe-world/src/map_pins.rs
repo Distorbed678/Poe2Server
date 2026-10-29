@@ -2,8 +2,7 @@
 //! hub): where each area of an act sits on the act's world map. The natural topology choice reads
 //! the directions between connected pins, so it needs these positions.
 //!
-//! The client lays the act's world map out in a town's prepare phase (0.5.5e.hotfix1 `0x141fa5a80`,
-//! 0.5.5e `0x141fa5900`, seed = the generation state's seed): it picks one of the world-map area's
+//! The client lays the act's world map out in a town's prepare phase (`0x141fa5a80`, seed = the generation state's seed): it picks one of the world-map area's
 //! topologies with [`lcg_index`], loads its graph (seeded preparation: offsets, comma-list room
 //! types, existence rolls, shuffle groups) and walks its nodes without generating the map
 //! ([`graph_objects`]), recording where objects whose type is a pin's `MetadataId` land: the

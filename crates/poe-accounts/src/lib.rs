@@ -22,7 +22,7 @@ pub use sqlite::SqliteAccounts;
 /// Argon2 cost parameters (see [`SqliteAccounts::with_params`]).
 pub use argon2::Params;
 
-/// What the client puts on the wire as `password_hash` (`0x1421bbd70`): SHA-256 over the
+/// What the client puts on the wire as `password_hash` (`0x1421bbec0`): SHA-256 over the
 /// UTF-16LE bytes of the password, no salt.
 pub fn password_digest(password: &str) -> [u8; 32] {
     let bytes: Vec<u8> = password.encode_utf16().flat_map(u16::to_le_bytes).collect();

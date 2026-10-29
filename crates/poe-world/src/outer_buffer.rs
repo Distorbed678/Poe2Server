@@ -1,4 +1,4 @@
-//! The outer buffer (`0x141fd8360`): the map is the region plus the master's
+//! The outer buffer (`0x141fd84e0`): the map is the region plus the master's
 //! `OuterBufferSize` margins; corner grounds and heights are carried out into the margins, then
 //! each margin strip is tiled from the region's border outward: an edge tile where a border
 //! tile's edge crosses the border (picked from the tile set), otherwise the ground's first fill
@@ -23,7 +23,7 @@ pub struct Margins {
 }
 
 impl Margins {
-    /// `OuterBufferSize` from a `.tsi` (top, right, bottom, left; `0x1429285e0`: a missing
+    /// `OuterBufferSize` from a `.tsi` (top, right, bottom, left; `0x142928820`: a missing
     /// right or bottom copies the top, a missing left copies the right).
     pub fn parse(tsi_text: &str) -> Margins {
         let line = tsi_text.lines().map(str::trim).find(|l| l.starts_with("OuterBufferSize"));
@@ -73,7 +73,7 @@ impl Pass<'_> {
         }
     }
 
-    /// Copy height and ground to an unset corner (flag 2; `0x141d0e130`).
+    /// Copy height and ground to an unset corner (flag 2; `0x141d0e2b0`).
     fn carry(&mut self, x: i32, y: i32, h: i32, g: &Option<String>) {
         let Some(i) = self.map.point_index(x, y) else { return };
         let p = &mut self.map.lattice[i];
@@ -157,7 +157,7 @@ impl Pass<'_> {
         }
     }
 
-    /// `0x141fd5cd0`: the edge type crossing side `side` of a placed cell, where the cell's
+    /// `0x141fd5e50`: the edge type crossing side `side` of a placed cell, where the cell's
     /// offset along that side is `off` (mirrored on the far sides); for virtual edges, the split
     /// type whose exit crosses. Returns it with the (adjusted) offset.
     fn border_edge(&self, x: i32, y: i32, side: usize, mut off: i32) -> Option<(String, i32)> {
@@ -184,7 +184,7 @@ impl Pass<'_> {
         within(key.virtual_exits[side]).then(|| (et.splits[1].0.clone(), off))
     }
 
-    /// `0x141d083d0`: a placed cell's tile exit on map side `side`.
+    /// `0x141d08550`: a placed cell's tile exit on map side `side`.
     fn exit(&self, x: i32, y: i32, side: usize) -> i32 {
         let i = self.map.index(x, y).unwrap();
         let piece = &self.map.pieces[self.map.piece_at[i].unwrap()];
@@ -245,7 +245,7 @@ impl Pass<'_> {
         }
         let Some((path, o)) = self.master.first_fill_tile(self.files, g1.as_deref())? else { return Ok(None) };
         let tdt = self.master.header(self.files, &path)?.clone();
-        // `0x141fdbd3d`: with an outer ground, a plain first ground whose fill tile has no ground
+        // `0x141fdbebd`: with an outer ground, a plain first ground whose fill tile has no ground
         // of its own (or a non-plain one: `Blank.tdt` from the `default` group) takes the outer
         // ground's fill tile instead (ChayulaLeague_TowerBoss: `Outskirts_Wall_Fill_Large_01`).
         let plain = |m: &TileMap, g: &Option<String>| g.as_ref().is_some_and(|g| m.gt_flags(g) & 5 == 0);
@@ -260,7 +260,7 @@ impl Pass<'_> {
         Ok(Some((path, tdt, if o == 8 { 0 } else { o })))
     }
 
-    /// `0x141f9e5f0` with the map's ground check off: inside the map (one cell of slack) and
+    /// `0x141f9e770` with the map's ground check off: inside the map (one cell of slack) and
     /// every cell free.
     fn fits(&self, x: i32, y: i32, size: (u8, u8), o: u8) -> bool {
         let (w, h) = if o & 1 == 1 && o < 8 { (size.1 as i32, size.0 as i32) } else { (size.0 as i32, size.1 as i32) };
@@ -511,7 +511,7 @@ fn preload_headers(map: &TileMap, master: &mut Master, files: &dyn Files) -> Res
     Ok(())
 }
 
-/// `0x141fd8360`: the region map placed inside its outer buffer and the margins tiled.
+/// `0x141fd84e0`: the region map placed inside its outer buffer and the margins tiled.
 /// `outer_ground` is the master's `OuterGroundType`; `repair` levels its fill tiles (dungeons).
 pub fn outer_buffer(
     region: &TileMap,
@@ -567,7 +567,7 @@ pub fn outer_buffer(
     Ok(map)
 }
 
-/// `0x141fd5ff0` + `0x141fd8360` for a subgraph: `map` is its reserved window (the region at
+/// `0x141fd6170` + `0x141fd84e0` for a subgraph: `map` is its reserved window (the region at
 /// `rect` inside its margins); corners set in the region count as height-set, then the outer
 /// fill and the margin strips.
 #[allow(clippy::too_many_arguments)]
@@ -605,7 +605,7 @@ pub fn outer_buffer_window(
     Ok(())
 }
 
-/// `0x141fd5ff0` on one graph's rectangle of an already embedded map (a subgraph's window):
+/// `0x141fd6170` on one graph's rectangle of an already embedded map (a subgraph's window):
 /// set corners there count as height-set, then the outer ground's fill.
 pub fn outer_fill(map: &mut TileMap, rect: (i32, i32, i32, i32), at: (i32, i32), ground: &str, repair: bool, master: &mut Master, files: &dyn Files) -> Result<(), GenError> {
     for y in rect.1..=rect.3 {
@@ -620,8 +620,8 @@ pub fn outer_fill(map: &mut TileMap, rect: (i32, i32, i32, i32), at: (i32, i32),
     fill_black(map, rect, at, ground, repair, master, files)
 }
 
-/// `0x141fd5ff0`: region cells still empty (dungeon grid cells without a room) take the outer
-/// ground's first fill tile (`0x141fd6990`; orientation "any" counts as 0). A 3×3 tile on a
+/// `0x141fd6170`: region cells still empty (dungeon grid cells without a room) take the outer
+/// ground's first fill tile (`0x141fd6b10`; orientation "any" counts as 0). A 3×3 tile on a
 /// region whose corner and size are 1 mod 3 is aligned one cell outside the region (and may
 /// overhang it by one). With `repair` and an outer ground whose heights do not follow the tiles
 /// (no `.gt` flag 1), each new tile takes the middle of its cell's set corner heights (cells
@@ -640,7 +640,7 @@ fn fill_black(map: &mut TileMap, rect: (i32, i32, i32, i32), at: (i32, i32), gro
     let (x0, y0, w, h) = (rect.0, rect.1, rect.2 - rect.0, rect.3 - rect.1);
     let aligned = (tw, th) == (3, 3) && (x0 + at.0).rem_euclid(3) == 1 && (y0 + at.1).rem_euclid(3) == 1 && w % 3 == 1 && h % 3 == 1;
     let a = aligned as i32;
-    // `0x141fd6990`: inside the region (one cell of slack when aligned) and free.
+    // `0x141fd6b10`: inside the region (one cell of slack when aligned) and free.
     let fits = |map: &TileMap, x: i32, y: i32| {
         let (lo, hi_x, hi_y) = if aligned { (-1, w + 1, h + 1) } else { (0, w, h) };
         x >= lo && y >= lo && x + tw <= hi_x && y + th <= hi_y && (0..th).all(|dy| (0..tw).all(|dx| match map.index(x0 + x + dx, y0 + y + dy) {
@@ -650,7 +650,7 @@ fn fill_black(map: &mut TileMap, rect: (i32, i32, i32, i32), at: (i32, i32), gro
     };
     let ground = ground.to_ascii_lowercase();
     if let (true, Some(ht)) = (repair && map.gt_flags(&ground) & 1 == 0, master.outer_fill_height) {
-        // The repair is skipped: every grid tile takes the override height (`0x141fd6990`).
+        // The repair is skipped: every grid tile takes the override height (`0x141fd6b10`).
         for y in -a..h - h % th {
             for x in -a..w - w % tw {
                 if !fits(map, x, y) {
@@ -697,7 +697,7 @@ fn fill_black(map: &mut TileMap, rect: (i32, i32, i32, i32), at: (i32, i32), gro
     let mut fixed: Vec<(i32, i32)> = Vec::new();
     let mut waiting: Vec<(i32, i32)> = Vec::new();
     let mut ready: Vec<(i32, i32, i32)> = Vec::new();
-    // `0x141fd7060`: cells on the fill tile grid.
+    // `0x141fd71e0`: cells on the fill tile grid.
     let scan = |map: &TileMap, c: (i32, i32), waiting: &mut Vec<(i32, i32)>, ready: &mut Vec<(i32, i32, i32)>| {
         if (c.0 + a) % tw != 0 || (c.1 + a) % th != 0 {
             return;
@@ -764,7 +764,7 @@ fn fill_black(map: &mut TileMap, rect: (i32, i32, i32, i32), at: (i32, i32), gro
             eprintln!("cells {y} {}", cells.join(" "));
         }
     }
-    // `0x141fd71c0` rounds. A listed cell whose tile did not fit stays empty, but its record
+    // `0x141fd7340` rounds. A listed cell whose tile did not fit stays empty, but its record
     // still takes the height and its 1×1 square's corners are set (ChayulaLeague_TowerBoss: the
     // raise travels through such a cell to the parent's fill row above a subgraph window).
     let mut empty_h: HashMap<(i32, i32), i32> = HashMap::new();

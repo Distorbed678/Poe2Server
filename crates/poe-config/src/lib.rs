@@ -926,7 +926,7 @@ pub struct InstanceConfig {
     #[serde(default = "default_tick_ms")]
     pub tick_ms: u64,
     /// First entity id an instance hands out (one counter per instance, shared by all
-    /// players): official 0.5.5e instances give players 12000 and up (areas' own objects have
+    /// players): official instances give players 12000 and up (areas' own objects have
     /// lower ids).
     #[serde(default = "default_first_entity_id")]
     pub first_entity_id: u32,
@@ -956,7 +956,7 @@ fn default_tick_ms() -> u64 {
 
 /// `[movement]`: tuning of the server-side movement simulation (`poe-game`'s `Locomotion`).
 /// Everything else (skill ids, walking speed, roll distance) comes from game data; the defaults
-/// here are the values of the official 0.5.5e captures.
+/// here are the values of the official captures.
 #[derive(Debug, Clone, Deserialize)]
 pub struct MovementConfig {
     /// `BuffDefinitions` rows of the three buffs a sprint adds (official captures: 2758, 2737,
@@ -1387,7 +1387,7 @@ mod tests {
         std::fs::write(&bad, text).unwrap();
         let e = Config::load_in(&bad, &root).unwrap_err().to_string();
         assert!(
-            e.contains("9.9.9z") && e.contains("not a supported build") && e.contains("0.5.5e"),
+            e.contains("9.9.9z") && e.contains("not a supported build") && e.contains("0.5.5e.hotfix1"),
             "{e}"
         );
         let _ = std::fs::remove_dir_all(&dir);

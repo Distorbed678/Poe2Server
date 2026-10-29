@@ -1,4 +1,4 @@
-//! Prints a dungeon master's room-size map per door type (`0x141f98bb0`): `cargo run --release
+//! Prints a dungeon master's room-size map per door type (`0x141f98d30`): `cargo run --release
 //! -p poe-world --example dungeon_sizes -- <room set .rs path>`.
 
 use std::path::Path;

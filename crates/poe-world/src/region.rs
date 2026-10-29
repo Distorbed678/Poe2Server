@@ -1,12 +1,12 @@
-//! Region orientation: a topology may be laid out turned or mirrored (`0x141ff89e0` picks it,
-//! `0x141d14990` turns the graph). The table at `0x142f020c8` (three bytes per orientation)
-//! drives the point transform, the centring of even-sized placements (`0x1420c87a0`,
-//! `0x1420cbe60`) and the alignment snap (`0x141fe7400`).
+//! Region orientation: a topology may be laid out turned or mirrored (`0x141ff8b60` picks it,
+//! `0x141d14b10` turns the graph). The table at `0x142f02118` (three bytes per orientation)
+//! drives the point transform, the centring of even-sized placements (`0x1420c8920`,
+//! `0x1420cbfe0`) and the alignment snap (`0x141fe7580`).
 
 use crate::graph::Graph;
 use crate::tileset::ORIENTATION_NAMES;
 
-/// `0x142f020c8`: per orientation (0..8; 8 = none) the bytes `(a, b, c)`.
+/// `0x142f02118`: per orientation (0..8; 8 = none) the bytes `(a, b, c)`.
 pub const TABLE: [[u8; 3]; 9] = [
     [0, 1, 1],
     [1, 0, 1],
@@ -19,7 +19,7 @@ pub const TABLE: [[u8; 3]; 9] = [
     [0, 1, 1],
 ];
 
-/// `0x141d00f00`: orientation `o` followed by `r`.
+/// `0x141d01080`: orientation `o` followed by `r`.
 pub fn compose(o: u8, r: u8) -> u8 {
     const T: [[u8; 8]; 8] = [
         [0, 1, 2, 3, 4, 5, 6, 7],
@@ -37,7 +37,7 @@ pub fn compose(o: u8, r: u8) -> u8 {
     T[o as usize][r as usize]
 }
 
-/// A point `(x, y)` of a `w`×`h` area turned by `o` (`0x141d14b30`).
+/// A point `(x, y)` of a `w`×`h` area turned by `o` (`0x141d14cb0`).
 pub fn turn_point(o: u8, w: i32, h: i32, x: i32, y: i32) -> (i32, i32) {
     let [a, b, c] = TABLE[o.min(8) as usize];
     let v = [w - x - 1, x, h - y - 1, y];
@@ -60,7 +60,7 @@ pub fn centred(o: u8, c: i32, size: i32, x: bool) -> i32 {
     c - ((size >> 1) - ((size - 1) & 1) * f)
 }
 
-/// `0x141fe7400`: `(x, y)` snapped to multiples of `a`; a remainder above half rounds up, one of
+/// `0x141fe7580`: `(x, y)` snapped to multiples of `a`; a remainder above half rounds up, one of
 /// exactly half by the orientation.
 pub fn snap(o: u8, p: (i32, i32), a: i32) -> (i32, i32) {
     if a <= 1 {
@@ -80,7 +80,7 @@ pub fn snap(o: u8, p: (i32, i32), a: i32) -> (i32, i32) {
     (p.0 - p.0 % a + if up_x { a } else { 0 }, p.1 - p.1 % a + if up_y { a } else { 0 })
 }
 
-/// `0x1421c3d00`: the orientation for a draw `v` among those in `mask` (bit per orientation).
+/// `0x1421c3f40`: the orientation for a draw `v` among those in `mask` (bit per orientation).
 pub fn pick(mask: u8, v: u32) -> u8 {
     if mask == 0 || mask == 0xff {
         return (v & 7) as u8;
@@ -89,9 +89,9 @@ pub fn pick(mask: u8, v: u32) -> u8 {
     allowed[(v as usize) % allowed.len()]
 }
 
-/// `0x141d14990`: turns a graph by `o` (positions, node orientations, odd orientations swap
+/// `0x141d14b10`: turns a graph by `o` (positions, node orientations, odd orientations swap
 /// width and height). `symmetric` says whether an edge type is the same seen from either
-/// side; mirrored orientations flip the chirality of the other edges (`0x141d14d10`).
+/// side; mirrored orientations flip the chirality of the other edges (`0x141d14e90`).
 pub fn turn_graph(g: &mut Graph, o: u8, symmetric: &dyn Fn(&str) -> bool) {
     if o == 0 || o >= 8 {
         return;
@@ -100,7 +100,7 @@ pub fn turn_graph(g: &mut Graph, o: u8, symmetric: &dyn Fn(&str) -> bool) {
     for n in &mut g.nodes {
         (n.x, n.y) = turn_point(o, w, h, n.x, n.y);
         // The random offset ranges (values 5..9: x min, y min, x max, y max; node +0x78..+0x84)
-        // turn with the position as vectors (`0x141d14b30`), then each axis' pair is put in order.
+        // turn with the position as vectors (`0x141d14cb0`), then each axis' pair is put in order.
         if n.values.len() > 8 {
             let [a, b, c] = TABLE[o.min(8) as usize];
             let turn_vec = |x: i32, y: i32| {

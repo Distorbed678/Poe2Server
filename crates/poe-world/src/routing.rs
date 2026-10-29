@@ -1,19 +1,19 @@
-//! Edge routing (`0x1420cdc30`): graph edges (rivers, paths) are routed tile by tile between
+//! Edge routing (`0x1420cddb0`): graph edges (rivers, paths) are routed tile by tile between
 //! the rooms' exits over a random cost grid. See `docs/re/terrain/tgr.md`, "Repulsion,
 //! exits and routing".
 //!
-//! 1. After each room pass (`0x1420c9970`) the room's edges end at its exits
-//!    (`0x1420c5b50`): exit `e` on a side is tile `e / 3`, cell `[3, 11, 19][e % 3]` along the
+//! 1. After each room pass (`0x1420c9af0`) the room's edges end at its exits
+//!    (`0x1420c5cd0`): exit `e` on a side is tile `e / 3`, cell `[3, 11, 19][e % 3]` along the
 //!    side (sides 2 and 3 counted backwards); a virtual edge ends between its virtual exit and
 //!    its exit. The edge's end offset is the side's direction (one tile out of the room), and
-//!    internal points inside the room are dropped (`0x1420c5750`).
+//!    internal points inside the room are dropped (`0x1420c58d0`).
 //! 2. Cost grid: `below(1024)` per tile, +1024 on the border; tiles already placed are
 //!    occupied.
-//! 3. Every edge reserves the straight lines between its waypoints (`0x1420ce390`; start +
+//! 3. Every edge reserves the straight lines between its waypoints (`0x1420ce510`; start +
 //!    offset, internal points, end + offset): the line's tiles get +1 use (blocked for other
 //!    edges) and the tiles beside it, up to the edge's margin, extra cost.
-//! 4. Edges are routed in graph order (`0x1420cd460`): per leg, its reservation is lifted and
-//!    A* (`0x1420cd110`, 4 neighbours, Manhattan × 100, open set ordered by (f, tile index);
+//! 4. Edges are routed in graph order (`0x1420cd5e0`): per leg, its reservation is lifted and
+//!    A* (`0x1420cd290`, 4 neighbours, Manhattan × 100, open set ordered by (f, tile index);
 //!    g is the tile's own 100 + cost, not accumulated — a client quirk) runs from the leg's end
 //!    back to its start; the path is reserved, and
 //!    every 6th tile adds an internal point at a random cell of that tile.
@@ -24,7 +24,7 @@ use crate::{generate::TileMap, rng::TerrainRng};
 
 pub type Pos = (i32, i32);
 
-/// Side directions (`0x142f0c608`): up, right, down, left.
+/// Side directions (`0x142f0c660`): up, right, down, left.
 pub const SIDE_DIR: [Pos; 4] = [(0, -1), (1, 0), (0, 1), (-1, 0)];
 /// Exit cell within its tile (`0x142f0df10`).
 pub const EXIT_CELL: [i32; 3] = [3, 11, 19];
@@ -97,7 +97,7 @@ pub enum RouteError {
 }
 
 impl Router {
-    /// The cost grid (`0x1420cdc30`, first part).
+    /// The cost grid (`0x1420cddb0`, first part).
     pub fn new(w: i32, h: i32, map: &TileMap, rng: &mut TerrainRng) -> Self {
         let mut tiles: Vec<Tile> = (0..w * h)
             .map(|_| Tile {
@@ -126,7 +126,7 @@ impl Router {
         }
     }
 
-    /// `0x1420ccc80`: the tile gets `delta` uses, the tiles beside it (perpendicular `perp`)
+    /// `0x1420cce00`: the tile gets `delta` uses, the tiles beside it (perpendicular `perp`)
     /// up to `margin` away graded extra cost.
     fn mark_tile(&mut self, p: Pos, delta: i32, margin: i32, perp: Pos) {
         let inside = |x: i32, y: i32| x >= 0 && y >= 0 && x < self.w && y < self.h;
@@ -149,7 +149,7 @@ impl Router {
         }
     }
 
-    /// `0x1420ccdc0`: marks the tiles of the line `a → b` (Bresenham along the major axis).
+    /// `0x1420ccf40`: marks the tiles of the line `a → b` (Bresenham along the major axis).
     fn mark_line(&mut self, a: Pos, b: Pos, delta: i32, margin: i32) {
         let adx = (b.0 - a.0).abs();
         let ady = (b.1 - a.1).abs();
@@ -187,7 +187,7 @@ impl Router {
         self.tiles.iter().map(|t| (t.cost, t.uses, t.occupied)).collect()
     }
 
-    /// `0x1420ce390`: reserves an edge's straight legs.
+    /// `0x1420ce510`: reserves an edge's straight legs.
     pub fn reserve(&mut self, e: &RouteEdge) {
         let n = e.points.len();
         for i in 0..=n {
@@ -195,7 +195,7 @@ impl Router {
         }
     }
 
-    /// `0x1420cd110`: A* from `start` to `goal`.
+    /// `0x1420cd290`: A* from `start` to `goal`.
     fn astar(&mut self, start: Pos, goal: Pos) -> bool {
         for n in &mut self.nodes {
             *n = Node::default();
@@ -257,7 +257,7 @@ impl Router {
         false
     }
 
-    /// `0x1420cd460`: routes one edge; on success its internal points are replaced.
+    /// `0x1420cd5e0`: routes one edge; on success its internal points are replaced.
     pub fn route(&mut self, e: &mut RouteEdge, rng: &mut TerrainRng) -> bool {
         let w = self.w;
         let n = e.points.len();
@@ -319,7 +319,7 @@ impl Router {
     }
 }
 
-/// Reserves and routes every edge in order, retrying failures (`0x1420cdc30`).
+/// Reserves and routes every edge in order, retrying failures (`0x1420cddb0`).
 pub fn route_all(
     router: &mut Router,
     edges: &mut [RouteEdge],

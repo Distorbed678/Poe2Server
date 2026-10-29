@@ -146,7 +146,7 @@ pub struct MovementConfig {
 }
 
 impl MovementConfig {
-    /// The official values of the 0.5.5e captures; `buff_rows` are the three sprint buff rows
+    /// The official values of the captures; `buff_rows` are the three sprint buff rows
     /// from the buff definitions (game data).
     pub fn new(skills: SkillIds, buff_rows: [u16; 3]) -> Self {
         Self {
@@ -949,7 +949,7 @@ impl Locomotion {
         // Verified (2026-10-20): a standing roll gets the same batch and ends in Idle with no
         // `MoveAck`. The client rolls along the WASD vector when a key is held, else towards
         // the cursor (`target`, steered every 2 frames); `target` is the cursor either way.
-        // The client's roll heading (`0x141b76c20` neighbourhood, `0x141b8bc20`): the held input
+        // The client's roll heading (`0x141b76da0` neighbourhood, `0x141b8bda0`): the held input
         // vector, else the direction to the action's target, and the entity's facing when the
         // target is the player's own cell.
         self.roll_cursor = offset;
@@ -2966,7 +2966,7 @@ mod tests {
     #[test]
     fn a_roll_with_the_cursor_on_the_player_goes_along_the_facing() {
         // The client takes the entity's facing when the target is its own cell
-        // (`0x141b8bc20`); the roll used to be dropped.
+        // (`0x141b8bda0`); the roll used to be dropped.
         let mut r = Rig::new((50, 50));
         r.tick(&[dir(0, -180)]);
         r.run(5);

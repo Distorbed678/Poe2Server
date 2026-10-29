@@ -398,7 +398,7 @@ mod tests {
     use super::*;
     use crate::{Config, edit::set_values};
 
-    const MINIMAL: &str = "[game]\nversion = \"0.5.5e\"\ngame_dir = \"g\"\nschema = \"s\"\nprotocol_dir = \"p\"\n[network]\npublic_host = \"h\"\n[network.login]\nbind = \"0.0.0.0:1\"\n[network.instance]\nbind = \"0.0.0.0:2\"\npublic_port = 2\n[database]\npath = \"d\"\n[accounts]\nname_prefix = \"Exile\"\nmax_characters = 1\n[gateway]\nregion = \"r\"\ndisplay_name = \"n\"\n";
+    const MINIMAL: &str = "[game]\nversion = \"0.5.5e.hotfix1\"\ngame_dir = \"g\"\nschema = \"s\"\nprotocol_dir = \"p\"\n[network]\npublic_host = \"h\"\n[network.login]\nbind = \"0.0.0.0:1\"\n[network.instance]\nbind = \"0.0.0.0:2\"\npublic_port = 2\n[database]\npath = \"d\"\n[accounts]\nname_prefix = \"Exile\"\nmax_characters = 1\n[gateway]\nregion = \"r\"\ndisplay_name = \"n\"\n";
 
     #[test]
     fn keys_are_unique_and_defaults_pass_their_own_checks() {

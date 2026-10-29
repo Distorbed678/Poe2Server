@@ -19,7 +19,7 @@ use serde_json::{Value, json};
 
 const MOVE_SKILL: u32 = 0x2000_2909;
 const ROLL_SKILL: u32 = 0x8000_0040;
-/// Buff rows of the sprint, as in the 0.5.5e buff definitions (the tests' stand-in for game
+/// Buff rows of the sprint, as in the game's buff definitions (the tests' stand-in for game
 /// data).
 const BUFF_ROWS: [u16; 3] = [2758, 2737, 2853];
 

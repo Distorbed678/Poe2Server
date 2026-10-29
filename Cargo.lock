@@ -1887,11 +1887,11 @@ dependencies = [
 
 [[package]]
 name = "poe-hook-mod-api"
-version = "0.3.0"
+version = "0.4.0"
 
 [[package]]
 name = "poe-hook-mods"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "poe-hook-mod-api",
  "semver",
@@ -1903,7 +1903,7 @@ dependencies = [
 
 [[package]]
 name = "poe-hook-shared"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "hmac",
  "log",
@@ -1918,7 +1918,7 @@ dependencies = [
 
 [[package]]
 name = "poe-hook-sig"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "iced-x86",
  "serde",

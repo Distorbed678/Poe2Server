@@ -1,12 +1,12 @@
 //! Doodads (`docs/re/terrain/doodads.md` in the hub): the objects a room (`.arm`) brings to the map, and
 //! the doodad hash the client reports.
 //!
-//! `TerrainGen_Doodads` (`0x141ff5550`) walks every region's room placements (the list the
+//! `TerrainGen_Doodads` (`0x141ff56d0`) walks every region's room placements (the list the
 //! de-repetition pass also uses, region +0x58, 0x38 bytes each) and calls `TerrainGen_TileDoodads`
-//! (`0x141ff3310`) for each. A placement's doodad entries are the room's `doodads`; the cell
-//! of each comes from `0x141fe78d0`: the entry's cell inside the room, turned by the placement's
-//! orientation (table `0x142f020c8`) within the room's `w × h` tiles, plus the placement's
-//! corner. [`resolve`] then follows each entry's `AOSet` picks (`0x141fe7520`, drawing from the
+//! (`0x141ff3490`) for each. A placement's doodad entries are the room's `doodads`; the cell
+//! of each comes from `0x141fe7a50`: the entry's cell inside the room, turned by the placement's
+//! orientation (table `0x142f02118`) within the room's `w × h` tiles, plus the placement's
+//! corner. [`resolve`] then follows each entry's `AOSet` picks (`0x141fe76a0`, drawing from the
 //! layout's random stream, in placement order). Entries whose object type has `+0x2d0 == 0` add
 //! `y + murmur(path) + (x << 16)` to the doodad hash; static types stamp their hull into the
 //! collision grid ([`crate::collision`]).
@@ -45,14 +45,14 @@ pub struct Doodad {
     pub entry_flip: bool,
     /// The arm entry's scale.
     pub entry_scale: f32,
-    /// Mirrored hull (placement XOR pick XOR entry flag; `0x141fe78d0`); set by [`resolve`].
+    /// Mirrored hull (placement XOR pick XOR entry flag; `0x141fe7a50`); set by [`resolve`].
     pub flip: bool,
     /// Entry scale times the `AOSet` scale pick; set by [`resolve`].
     pub scale: f32,
 }
 
-/// `0x141fe78d0`: the cell of an entry `(ex, ey)` of a room of `w × h` tiles turned by
-/// orientation `o`, relative to the placement's corner. The table at `0x142f020c8` (three bytes
+/// `0x141fe7a50`: the cell of an entry `(ex, ey)` of a room of `w × h` tiles turned by
+/// orientation `o`, relative to the placement's corner. The table at `0x142f02118` (three bytes
 /// per orientation) says which of `(w·23 - ex - 1, ex, h·23 - ey - 1, ey)` give x and y.
 pub fn turn_cell(ex: i32, ey: i32, w: i32, h: i32, o: u8) -> (i32, i32) {
     const T: [[usize; 3]; 9] = [
@@ -73,7 +73,7 @@ pub fn turn_cell(ex: i32, ey: i32, w: i32, h: i32, o: u8) -> (i32, i32) {
     (x, y)
 }
 
-/// The entry's angle after the placement's turn (`0x141ff3310`/`0x141fe78d0`): mirrored
+/// The entry's angle after the placement's turn (`0x141ff3490`/`0x141fe7a50`): mirrored
 /// orientations (4..7) negate it, each quarter turn adds π/2, then it is wrapped into `0..=2π`.
 pub fn turn_angle(radians: f32, o: u8) -> f32 {
     use std::f32::consts::{FRAC_PI_2, TAU};
@@ -116,7 +116,7 @@ pub fn room_doodads(room: &Room, origin: (i32, i32), o: u8) -> Vec<Doodad> {
 }
 
 /// Whether objects of type `kind` count for the hash (`+0x2d0 == 0` and `+0x2d4` accepted on
-/// the type's data, `0x141ff3310`): the type exists (a template `.ot`, or an `.ao` extending
+/// the type's data, `0x141ff3490`): the type exists (a template `.ot`, or an `.ao` extending
 /// one) and its merged `BaseEvents` sets neither `server_only` nor `client_only` (the side flag
 /// that `+0x2d0` holds) and no `league_category` (`+0x2d4`: 0x39 without one; with one it must
 /// equal the area's league category, which is 0 for areas without league mechanics rolled).
@@ -142,7 +142,7 @@ pub fn type_counts(gd: &poe_data::GameData, kind: &str) -> bool {
 }
 
 /// What the doodad pass reads from an object file (`.ao`): its `AOSet` component, merged over the
-/// `extends` chain (`FUN_141d5ada0` looks the component up, `0x141fe7520` uses it).
+/// `extends` chain (`FUN_141d5af20` looks the component up, `0x141fe76a0` uses it).
 #[derive(Debug, Clone, Default)]
 pub struct AoInfo {
     /// Some file of the chain declares `AOSet` (for example through `Metadata/AOSetParent`).
@@ -277,7 +277,7 @@ impl<'a> AoCache<'a> {
     }
 }
 
-/// `0x1421c3d00`: the orientation `u` selects among those the mask allows (bit `i` for
+/// `0x1421c3f40`: the orientation `u` selects among those the mask allows (bit `i` for
 /// orientation `i`); a mask of 0 or 0xff takes `u & 7`.
 fn orientation_pick(mask: u8, u: u32) -> u8 {
     if (1..0xff).contains(&mask) {
@@ -288,11 +288,11 @@ fn orientation_pick(mask: u8, u: u32) -> u8 {
     }
 }
 
-/// `0x141fe7520`: follows the `AOSet` choices of a doodad's object file (one `below(total)` draw
-/// per level, `0x141fe75b7`) until a file without choices; `None` when a `null` choice (or an
+/// `0x141fe76a0`: follows the `AOSet` choices of a doodad's object file (one `below(total)` draw
+/// per level, `0x141fe7737`) until a file without choices; `None` when a `null` choice (or an
 /// empty set) ends the chain: the client then skips the entry. A file without an `AOSet` or with
 /// `fixed_ao` entries ends the chain, and the last set seen then draws for its rotation
-/// (`0x200`), orientation (`0x348`), scale (`0x200`, `0x141fe775c`) and translation (two `0x200`).
+/// (`0x200`), orientation (`0x348`), scale (`0x200`, `0x141fe78dc`) and translation (two `0x200`).
 /// Returns the angle and cell offset that adds to the entry.
 struct Pick {
     angle: f32,

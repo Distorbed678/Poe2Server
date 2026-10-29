@@ -1,12 +1,12 @@
 //! Overlays (master `Overlays` `.toy`, master +0x200): rooms laid over finished terrain where
-//! their root key fits it, e.g. road bends over straight road tiles. `0x141fa0ac0` builds the
-//! context and the occupancy grid, `0x141fa1a70` runs the passes of one phase (1 before the
-//! fill, 2 after it), `0x141fa1e60` lists candidate positions, `0x141fa23e0` places.
+//! their root key fits it, e.g. road bends over straight road tiles. `0x141fa0c40` builds the
+//! context and the occupancy grid, `0x141fa1bf0` runs the passes of one phase (1 before the
+//! fill, 2 after it), `0x141fa1fe0` lists candidate positions, `0x141fa2560` places.
 //!
 //! `.toy`: `version 1`, then passes separated by blank lines. A pass starts with a header,
 //! `<phase 1> <phase 2> [<phase 3>] [Random|FileOrder|SizeOrder] [±flag…]`, followed by
 //! entries `<weight> "<.arm>" [±flag…] [!exclusion…] [limit=N] [required=N] [rotations…]`
-//! (`0x141f9f4c0`).
+//! (`0x141f9f640`).
 
 use std::collections::{BTreeMap, HashMap};
 
@@ -17,7 +17,7 @@ use crate::{
     tileset::{ORIENTATION_NAMES, TileKey},
 };
 
-/// Overlay flags (`0x142f0c018`): kinds of occupied cells an overlay may cover, plus
+/// Overlay flags (`0x142f0c020`): kinds of occupied cells an overlay may cover, plus
 /// `MatchAllTileKeys` (0x40).
 const FLAG_NAMES: [&str; 7] = [
     "OverlayTileOverlays",
@@ -54,7 +54,7 @@ pub struct ToyPass {
     pub entries: Vec<ToyEntry>,
 }
 
-/// `+name`/`-name` on a flag byte (`0x141f9f330`); false when not an overlay flag.
+/// `+name`/`-name` on a flag byte (`0x141f9f4b0`); false when not an overlay flag.
 fn apply_flag(flags: &mut u8, token: &str) -> bool {
     let (on, name) = match token.as_bytes().first() {
         Some(b'+') => (true, &token[1..]),
@@ -157,7 +157,7 @@ struct Group {
     total: u32,
 }
 
-/// The overlay state of one region (`0x141fa0ac0`).
+/// The overlay state of one region (`0x141fa0c40`).
 pub struct Overlays {
     passes: Vec<(ToyPass, Vec<Group>)>,
     rooms: Vec<(String, Room)>,
@@ -167,9 +167,9 @@ pub struct Overlays {
     width: i32,
     height: i32,
     /// A `.dgr` graph: candidate positions are scanned cell by cell (the generator flag
-    /// `+0x90` bit 0 turns the 3-tile stride off, `0x141fa1e60`).
+    /// `+0x90` bit 0 turns the 3-tile stride off, `0x141fa1fe0`).
     pub dungeon: bool,
-    /// Dungeon: tiles the refill placed that the exit wiggle may move (the fill listener `0x14209a2c0`).
+    /// Dungeon: tiles the refill placed that the exit wiggle may move (the fill listener `0x14209a440`).
     pub wiggle: Vec<(i32, i32)>,
     /// Overlays placed per room (for `limit=`).
     counts: HashMap<usize, u32>,
@@ -191,7 +191,7 @@ pub struct RoomRect {
     pub feature: bool,
     pub described: bool,
     /// Feature rooms whose `.arm` overlap equals the master's mark bit 4 on the rectangle
-    /// shrunk by this many cells per side (`0x141fa0ac0`); 0 marks the whole rectangle.
+    /// shrunk by this many cells per side (`0x141fa0c40`); 0 marks the whole rectangle.
     pub inset: i32,
 }
 
@@ -253,7 +253,7 @@ impl Overlays {
             }
             groups.retain(|g| g.total != 0);
             if pass.order == 2 {
-                // `SizeOrder` (`0x141f9f4c0`, insertion or merge sort `0x141fc45c0`): largest
+                // `SizeOrder` (`0x141f9f640`, insertion or merge sort `0x141fc4740`): largest
                 // key first by area, then width, then height; equal ones keep their order.
                 groups.sort_by_key(|g| std::cmp::Reverse((g.key.size.0 as u32 * g.key.size.1 as u32, g.key.size.0, g.key.size.1)));
             }
@@ -313,7 +313,7 @@ impl Overlays {
         }
     }
 
-    /// `0x141fa1a70`: the passes of phase `phase` (1 or 2).
+    /// `0x141fa1bf0`: the passes of phase `phase` (1 or 2).
     #[allow(clippy::too_many_arguments)]
     pub fn run(&mut self, phase: u8, map: &mut TileMap, master: &mut Master, types: &mut TerrainTypes, files: &dyn Files, rng: &mut TerrainRng) -> Result<(), GenError> {
         for (_, r) in &self.rooms {
@@ -348,7 +348,7 @@ impl Overlays {
         Ok(())
     }
 
-    /// `0x141fa1e60`: every position the group fits, on a 3-tile grid when its key has an edge
+    /// `0x141fa1fe0`: every position the group fits, on a 3-tile grid when its key has an edge
     /// of size 3.
     #[allow(clippy::too_many_arguments)]
     fn collect(&self, g: &Group, gi: usize, map: &TileMap, master: &mut Master, types: &mut TerrainTypes, files: &dyn Files, out: &mut Candidates) -> Result<(), GenError> {
@@ -392,8 +392,8 @@ impl Overlays {
         Ok(())
     }
 
-    /// `0x141fa1830`: inside the region, over cells the group's flags allow, covering whole
-    /// pieces, and the key fits the terrain (`0x141f9d200` with margin 1).
+    /// `0x141fa19b0`: inside the region, over cells the group's flags allow, covering whole
+    /// pieces, and the key fits the terrain (`0x141f9d380` with margin 1).
     fn fits(&self, g: &Group, (x, y): (i32, i32), map: &TileMap, master: &mut Master, types: &mut TerrainTypes, files: &dyn Files) -> Result<bool, GenError> {
         let (w, h) = (g.key.size.0 as i32, g.key.size.1 as i32);
         if x >= self.width || y >= self.height || x + w - 1 >= self.width || y + h - 1 >= self.height {
@@ -408,7 +408,7 @@ impl Overlays {
             }
         }
         // Cells of tiles without a piece (pasted from a subgraph or a fill): their tile size
-        // from the header (`0x141d0dc40` reads every record's tile data).
+        // from the header (`0x141d0ddc0` reads every record's tile data).
         let mut sizes: HashMap<String, (u8, u8)> = HashMap::new();
         for yy in y..y + h {
             for xx in x..x + w {
@@ -430,11 +430,11 @@ impl Overlays {
         Ok(code == 0)
     }
 
-    /// `0x141fa23e0`: draws positions until none are left; at each, a group that still fits,
+    /// `0x141fa2560`: draws positions until none are left; at each, a group that still fits,
     /// then a room of it (or nothing, padded to 100), its orientation and its height.
     #[allow(clippy::too_many_arguments)]
     fn place(&mut self, phase: u8, groups: &[Group], mut cands: Candidates, map: &mut TileMap, master: &mut Master, types: &mut TerrainTypes, files: &dyn Files, rng: &mut TerrainRng) -> Result<(), GenError> {
-        // Phase 2 passes the refill flag (`0x141fa23e0` param 3); the `.dgr` tile pass calls
+        // Phase 2 passes the refill flag (`0x141fa2560` param 3); the `.dgr` tile pass calls
         // phase 1 without it, so the flag is whatever the register held (set in the traces).
         let refill = phase == 2 || self.dungeon;
         let mut total: u32 = cands.0.values().map(|c| c.0).sum();
@@ -499,9 +499,9 @@ impl Overlays {
                 if !room.exclusions.is_empty() && !self.has_features(&room.exclusions, (pos.0, pos.1, pos.0 + w, pos.1 + h), map, master, files)? {
                     continue;
                 }
-                // `0x141fa23e0`: without `MatchAllTileKeys` an entry counts once; with it once
+                // `0x141fa2560`: without `MatchAllTileKeys` an entry counts once; with it once
                 // per orientation of the entry (the ones turning the group's key) whose room
-                // keys all sit on the laid tiles (`0x141fa3780`). The orientation itself is
+                // keys all sit on the laid tiles (`0x141fa3900`). The orientation itself is
                 // drawn later from the whole mask.
                 if g.flags & 0x40 == 0 {
                     options.push((Some((ri, 0xff)), room.weight));
@@ -550,7 +550,7 @@ impl Overlays {
             };
             // The tiles under it go (phase 2 keeps a list of every cell they covered, sorted by
             // x then y, to fill again afterwards), its corner points are cleared, and the room
-            // is placed like any room (`0x141f8e6c0`).
+            // is placed like any room (`0x141f8e840`).
             let mut taken: BTreeMap<(i32, i32), (String, u8, i16, bool)> = BTreeMap::new();
             for yy in pos.1..pos.1 + h {
                 for xx in pos.0..pos.0 + w {
@@ -584,7 +584,7 @@ impl Overlays {
             }
             let before_pieces = map.pieces.len();
             room_pass_oriented(map, master, &self.rooms[room.room].1, pos, o, true, height, rng)?;
-            // The fill listener `0x14209a2c0` sees every tile an overlay room places as well.
+            // The fill listener `0x14209a440` sees every tile an overlay room places as well.
             if self.dungeon {
                 let mut w = crate::dungeon_tiles::Wiggles::default();
                 for pc in map.pieces[before_pieces..].to_vec() {
@@ -606,7 +606,7 @@ impl Overlays {
 }
 
 impl Overlays {
-    /// `0x141fa3470` (a toy entry's `!Name` arguments): the tiles that start inside the rectangle
+    /// `0x141fa35f0` (a toy entry's `!Name` arguments): the tiles that start inside the rectangle
     /// and carry a feature name include every listed name, each tile counting for one.
     fn has_features(&self, names: &[String], (x0, y0, x1, y1): (i32, i32, i32, i32), map: &TileMap, master: &mut Master, files: &dyn Files) -> Result<bool, GenError> {
         let mut want: Vec<String> = names.to_vec();
@@ -627,7 +627,7 @@ impl Overlays {
         Ok(want.is_empty())
     }
 
-    /// `0x141fa3780` (`MatchAllTileKeys`): every `k` slot of the room, turned by `o` and laid at
+    /// `0x141fa3900` (`MatchAllTileKeys`): every `k` slot of the room, turned by `o` and laid at
     /// `pos`, sits on a tile that starts there with the same feature name and the same key.
     fn matches_all_keys(&self, room: &Room, pos: (i32, i32), o: u8, map: &TileMap, master: &mut Master, files: &dyn Files) -> Result<bool, GenError> {
         let (w, h) = (room.width() as i32, room.height() as i32);
@@ -660,7 +660,7 @@ impl Overlays {
                 if tdt.feature.clone().unwrap_or_default() != tag {
                     return Ok(false);
                 }
-                // The laid tile's key drops grounds with `.gt` flag 0x10 (`0x141d09900`); the
+                // The laid tile's key drops grounds with `.gt` flag 0x10 (`0x141d09a80`); the
                 // slot's key keeps them.
                 let mut tk = TileKey::from_tdt(tdt);
                 if std::env::var_os("POE_MATCHKEY_RAW").is_none() {
@@ -681,7 +681,7 @@ impl Overlays {
         Ok(true)
     }
 
-    /// Phase 2, after an overlay room went in (`0x141fa23e0`): every cell the removed tiles
+    /// Phase 2, after an overlay room went in (`0x141fa2560`): every cell the removed tiles
     /// covered, in x then y order, that is empty again is filled like the fill pass does
     /// (ground of its corner; the fill is walkable when that ground is none or has `.gt` flag 4).
     /// A cell that holds the `OverlayBlank` tile gets its old tile back when that was 1x1 and
@@ -714,7 +714,7 @@ impl Overlays {
     }
 }
 
-/// Candidate positions keyed `x·0x10000 + y` (`0x141fa20b0`): summed weight and the groups.
+/// Candidate positions keyed `x·0x10000 + y` (`0x141fa2230`): summed weight and the groups.
 #[derive(Default)]
 struct Candidates(BTreeMap<u32, (u32, Vec<(usize, u32)>)>);
 
@@ -726,7 +726,7 @@ impl Candidates {
     }
 }
 
-/// `0x141d0dc40`: the rectangle holds at least one tile and every tile it touches lies inside it.
+/// `0x141d0ddc0`: the rectangle holds at least one tile and every tile it touches lies inside it.
 fn covers_whole_pieces(map: &TileMap, (x0, y0, x1, y1): (i32, i32, i32, i32), sizes: &HashMap<String, (u8, u8)>) -> bool {
     if std::env::var("POE_DBG_PIECES").ok().is_some_and(|v| v == format!("{x0},{y0}")) {
         for y in y0..y1 {
@@ -795,7 +795,7 @@ fn corner(map: &TileMap, x: i32, y: i32) -> (Option<String>, i32) {
     }
 }
 
-/// `0x141f9d200`: 0 when `key` fits the terrain at `pos` (corner grounds, one consistent height
+/// `0x141f9d380`: 0 when `key` fits the terrain at `pos` (corner grounds, one consistent height
 /// difference, edges against the neighbouring tiles); else the failing check's code.
 #[allow(clippy::too_many_arguments)]
 pub fn room_fits(map: &TileMap, pos: (i32, i32), key: &TileKey, wild: bool, margin: i32, master: &mut Master, types: &mut TerrainTypes, files: &dyn Files) -> Result<u32, GenError> {
@@ -806,7 +806,7 @@ pub fn room_fits(map: &TileMap, pos: (i32, i32), key: &TileKey, wild: bool, marg
     }
     let corners = [(x, y), (x + w, y), (x + w, y + h), (x, y + h)];
     let key_ground = |i: usize| key.grounds[i].clone().filter(|g| map.gt_flags(g) & 0x10 == 0);
-    // `0x141f9cfc0`
+    // `0x141f9d140`
     let mut odd = 0;
     if std::env::var("POE_DBG_FITG").ok().is_some_and(|v| v == format!("{},{}", pos.0, pos.1)) { eprintln!("FITG {:?} lattice {:?} key {:?} flags {:?}", pos, corners.iter().map(|&(cx, cy)| corner(map, cx, cy).0).collect::<Vec<_>>(), key.grounds, map.ground_flags.iter().filter(|(k, _)| k.contains("black_inside") || k.contains("cavern_abyss")).collect::<Vec<_>>()); }
     for (s, &(cx, cy)) in corners.iter().enumerate() {
@@ -821,7 +821,7 @@ pub fn room_fits(map: &TileMap, pos: (i32, i32), key: &TileKey, wild: bool, marg
             } else if let Some(ag) = &a {
                 let fa = map.gt_flags(ag);
                 // `+0x25` bit 0 of the ground (the name `SynthesisBackground`) passes here; it is not
-                // the Abyss/Water name bit 0x80 (`0x142918970`), and no 0.5.5e ground has it.
+                // the Abyss/Water name bit 0x80 (`0x142918bb0`), and no ground of this build has it.
                 if false {
                     true
                 } else if fa & 5 == 0 && b.as_ref().is_some_and(|bg| map.gt_flags(bg) & 5 == 0) {
@@ -843,7 +843,7 @@ pub fn room_fits(map: &TileMap, pos: (i32, i32), key: &TileKey, wild: bool, marg
     }
     let mut diffs: Vec<i32> = Vec::new();
     for (s, &(cx, cy)) in corners.iter().enumerate() {
-        // Raw grounds here (`0x141f9d200` reads the lattice and key grounds without the
+        // Raw grounds here (`0x141f9d380` reads the lattice and key grounds without the
         // `.gt` flag 0x10 filter).
         let (_, ah) = corner(map, cx, cy);
         let a = map.point_index(cx, cy).and_then(|i| map.lattice[i].ground.clone());
@@ -877,7 +877,7 @@ pub fn room_fits(map: &TileMap, pos: (i32, i32), key: &TileKey, wild: bool, marg
     Ok(0)
 }
 
-/// The cell just outside side `side` of a key at `pos`, `i` tiles along it (`0x141f9c540`).
+/// The cell just outside side `side` of a key at `pos`, `i` tiles along it (`0x141f9c6c0`).
 fn outside(pos: (i32, i32), key: &TileKey, side: usize, i: i32) -> (i32, i32) {
     let (x, y) = pos;
     match side {
@@ -888,7 +888,7 @@ fn outside(pos: (i32, i32), key: &TileKey, side: usize, i: i32) -> (i32, i32) {
     }
 }
 
-/// `0x141f9cee0`
+/// `0x141f9d060`
 #[allow(clippy::too_many_arguments)]
 fn side_fits(map: &TileMap, pos: (i32, i32), key: &TileKey, side: usize, wild: bool, master: &mut Master, types: &mut TerrainTypes, files: &dyn Files) -> Result<bool, GenError> {
     let Some(e) = &key.edges[side] else {
@@ -907,7 +907,7 @@ fn side_fits(map: &TileMap, pos: (i32, i32), key: &TileKey, side: usize, wild: b
     Ok(true)
 }
 
-/// `0x141f9c800`: whether a neighbouring tile has an edge crossing into this (edge-less) side.
+/// `0x141f9c980`: whether a neighbouring tile has an edge crossing into this (edge-less) side.
 fn edge_crosses(map: &TileMap, pos: (i32, i32), key: &TileKey, side: usize, master: &mut Master, types: &mut TerrainTypes, files: &dyn Files) -> Result<bool, GenError> {
     let len = if side % 2 == 0 { key.size.0 } else { key.size.1 };
     let start = if side % 2 == 0 { pos.0 } else { pos.1 };
@@ -939,7 +939,7 @@ fn edge_crosses(map: &TileMap, pos: (i32, i32), key: &TileKey, side: usize, mast
     Ok(false)
 }
 
-/// `0x141f9c600`: whether an existing edge type joins the key's.
+/// `0x141f9c780`: whether an existing edge type joins the key's.
 fn edges_join(a: &str, b: &str, types: &mut TerrainTypes, files: &dyn Files) -> Result<bool, GenError> {
     let ta = types.edge(files, a)?.clone();
     let tb = types.edge(files, b)?.clone();
@@ -952,7 +952,7 @@ fn edges_join(a: &str, b: &str, types: &mut TerrainTypes, files: &dyn Files) -> 
     })
 }
 
-/// `0x141f9ca30`: the key's exit on `side` meets a matching edge of the neighbouring tile at
+/// `0x141f9cbb0`: the key's exit on `side` meets a matching edge of the neighbouring tile at
 /// the same place, and no other neighbouring edge enters the side.
 #[allow(clippy::too_many_arguments)]
 fn exit_fits(map: &TileMap, pos: (i32, i32), key: &TileKey, side: usize, wild: bool, virtual_exit: bool, master: &mut Master, types: &mut TerrainTypes, files: &dyn Files) -> Result<bool, GenError> {
@@ -1032,8 +1032,8 @@ fn exit_fits(map: &TileMap, pos: (i32, i32), key: &TileKey, side: usize, wild: b
     Ok(true)
 }
 
-/// `0x141fa10b0`: the height (storeys) an overlay room is placed at. Every `k` slot's corners on
-/// the room's border are looked up on the terrain (turned with the room, `0x142f020c8`); where
+/// `0x141fa1230`: the height (storeys) an overlay room is placed at. Every `k` slot's corners on
+/// the room's border are looked up on the terrain (turned with the room, `0x142f02118`); where
 /// the lattice point has its height set, `terrain − corner height` is a candidate. A corner whose
 /// ground is none or has `.gt` flag 1 must agree with every other such corner (else the room does
 /// not fit: None); the others vote, and the most frequent value wins when no such corner
