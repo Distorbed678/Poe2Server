@@ -1974,3 +1974,15 @@ async fn admins_create_accounts() {
     let (st, _) = f.call("POST", "/api/v1/admin/accounts", Some(&p), Some(json!({"username": "zed", "password": "correct horse"}))).await;
     assert_eq!(st, StatusCode::FORBIDDEN);
 }
+
+#[tokio::test]
+async fn local_metrics_only_for_this_computer() {
+    let f = fixture();
+    f.state.metrics.push(sample(1000, 3));
+    let (st, body) = call_from(&f, "GET", "/api/v1/local/metrics", "127.0.0.1:4000", &[], None).await;
+    assert_eq!(st, StatusCode::OK, "{body}");
+    assert_eq!(body["latest"]["players"], 3);
+    assert_eq!(body["latest"]["net_out_bps"], 3400);
+    let (st, _) = call_from(&f, "GET", "/api/v1/local/metrics", "10.0.0.2:4000", &[], None).await;
+    assert_eq!(st, StatusCode::FORBIDDEN);
+}

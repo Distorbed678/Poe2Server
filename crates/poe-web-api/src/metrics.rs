@@ -124,3 +124,40 @@ pub async fn get(
         samples: samples.into_iter().map(Into::into).collect(),
     }))
 }
+
+/// `GET /local/metrics`: the newest sample, for the launcher that hosts the server.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct LocalMetrics {
+    /// `[metrics] enabled`.
+    pub enabled: bool,
+    /// Seconds since the server started.
+    pub uptime_secs: u64,
+    /// The newest sample (absent before the first one and when metrics are off).
+    pub latest: Option<MetricsPoint>,
+}
+
+/// The newest metrics sample, without a token, for a direct request from the server's own
+/// computer only (the launcher that hosts the server shows it; the same check as `/setup`).
+#[utoipa::path(get, path = "/api/v1/local/metrics", tag = "public",
+    responses((status = 200, body = LocalMetrics),
+        (status = 403, description = "not a direct request from this computer", body = crate::ErrorBody)))]
+pub async fn local(
+    State(s): State<WebState>,
+    crate::setup::Peer(peer): crate::setup::Peer,
+    headers: axum::http::HeaderMap,
+) -> Result<Json<LocalMetrics>, ApiError> {
+    if !crate::setup::is_local(peer, &headers) {
+        return Err(ApiError::forbidden("only for the computer the server runs on"));
+    }
+    let enabled = s.config.metrics.enabled;
+    let latest = if enabled {
+        s.metrics.query(None, usize::MAX).pop().map(Into::into)
+    } else {
+        None
+    };
+    Ok(Json(LocalMetrics {
+        enabled,
+        uptime_secs: s.started.elapsed().as_secs(),
+        latest,
+    }))
+}

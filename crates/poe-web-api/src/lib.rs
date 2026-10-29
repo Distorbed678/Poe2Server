@@ -115,6 +115,7 @@ pub fn router(state: WebState) -> Router {
         .route("/admin/bans", get(bans::list).post(bans::create))
         .route("/admin/bans/{id}/lift", post(bans::lift))
         .route("/admin/metrics", get(metrics::get))
+        .route("/local/metrics", get(metrics::local))
         .route("/admin/mods", get(mods::admin_list))
         .route("/admin/motd", post(motd::set))
         .route("/admin/config", get(configfile::get))

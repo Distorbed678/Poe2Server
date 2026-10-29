@@ -2929,6 +2929,37 @@
         ]
       }
     },
+    "/api/v1/local/metrics": {
+      "get": {
+        "tags": [
+          "public"
+        ],
+        "summary": "The newest metrics sample, without a token, for a direct request from the server's own\ncomputer only (the launcher that hosts the server shows it; the same check as `/setup`).",
+        "operationId": "local",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocalMetrics"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "not a direct request from this computer",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/login": {
       "post": {
         "tags": [
@@ -4100,6 +4131,37 @@
             ],
             "format": "int32",
             "description": "Forced topology (1-based); absent: the client's choice.",
+            "minimum": 0
+          }
+        }
+      },
+      "LocalMetrics": {
+        "type": "object",
+        "description": "`GET /local/metrics`: the newest sample, for the launcher that hosts the server.",
+        "required": [
+          "enabled",
+          "uptime_secs"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "`[metrics] enabled`."
+          },
+          "latest": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/MetricsPoint",
+                "description": "The newest sample (absent before the first one and when metrics are off)."
+              }
+            ]
+          },
+          "uptime_secs": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Seconds since the server started.",
             "minimum": 0
           }
         }
