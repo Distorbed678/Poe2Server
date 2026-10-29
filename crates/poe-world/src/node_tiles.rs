@@ -519,13 +519,16 @@ fn place(lg: &mut LayoutGraph, region: u8, t: &NodeTile, master: &Master, map: &
 
 /// `0x1420cb200`: before routing, a junction (or a virtual node no tile fits) gets one point
 /// 23 cells out of the node on each edge's side (`0x1420d1220`), after its edges drop the
-/// points within 23 cells of it (`0x1420c6b80`).
+/// points within twice that of it (`0x1420c6b80` with radius `2 · 23`: hotfix `0x1420cb3c8`
+/// passes `esi + esi`; MapCrimsonShores 921210055: a junction's exit point 27 cells from the
+/// next junction is dropped).
 pub fn explode(g: &mut crate::rooms::PlacedGraph, node: usize, tiles: (i32, i32), types: &mut TerrainTypes, files: &dyn Files) -> Result<(), GenError> {
     const R: i32 = 23;
+    let drop_r = if std::env::var_os("POE_EXPLODE_R1").is_some() { R } else { 2 * R };
     let (nx, ny) = g.nodes[node];
     let near = |p: &(i32, i32)| {
         let (dx, dy) = ((p.0 - nx).abs(), (p.1 - ny).abs());
-        ((dx * dx + dy * dy) as u32) < (R * R) as u32
+        ((dx * dx + dy * dy) as u32) < (drop_r * drop_r) as u32
     };
     let slots = EdgeView::slots(&*g, node);
     for e in slots.into_iter().flatten() {

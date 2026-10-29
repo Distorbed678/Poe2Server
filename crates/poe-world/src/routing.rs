@@ -341,7 +341,14 @@ pub fn route_reserved(
     while !todo.is_empty() {
         let mut failed = Vec::new();
         for &i in &todo {
+            let before = std::env::var_os("POE_DBG_ROUTE").map(|_| edges[i].points.clone());
             let ok = router.route(&mut edges[i], rng);
+            // `POE_DBG_ROUTE`: like the trace's `route_edge` lines.
+            if let Some(before) = before {
+                let e = &edges[i];
+                let f = |v: &[Pos]| v.iter().map(|p| format!("{},{}", p.0, p.1)).collect::<Vec<_>>().join(" ");
+                eprintln!("ROUTE {},{}->{},{} ok={} before [{}]\t{}", e.ends[0].0, e.ends[0].1, e.ends[1].0, e.ends[1].1, ok as u8, f(&before), f(&e.points));
+            }
             if !ok {
                 failed.push(i);
                 router.reserve(&edges[i]);

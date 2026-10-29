@@ -1844,9 +1844,11 @@ fn build_tgr(files: &dyn crate::generate::Files, graph: &Graph, removed: Vec<boo
     for p in &mut map.lattice {
         p.flags &= !4;
     }
+    probe(Stage::Lattice("bdae0", &map));
     // League mechanics' rooms (`0x1420bd890`, `0x1420be940`), before the overlays.
     let league_rooms = files.league_rooms();
     let pre_rooms = if league_rooms.is_empty() { Vec::new() } else { crate::fill::place_league_rooms(&mut map, &mut master, files, &league_rooms, rng)? };
+    probe(Stage::Lattice("be360", &map));
     // Overlays before and after the fill (`0x141fa1a70`).
     let mut overlays = match rel("Overlays") {
         Some(toy) => {
@@ -1861,6 +1863,15 @@ fn build_tgr(files: &dyn crate::generate::Files, graph: &Graph, removed: Vec<boo
                         inset: 0,
                     }
                 })
+                // League rooms placed before the overlays (`0x1420bdae0`, e.g. a stone circle)
+                // join the generator's room list as feature rooms, their inner rectangle shrunk
+                // by the room's own overlap (MapCaldera: the client marks a 3x3 stone circle 8,
+                // its centre 4).
+                .chain(pre_rooms.iter().filter(|r| std::env::var_os("POE_NO_LEAGUE_RECTS").is_none() && !r.room.arm.tag.is_empty()).map(|r| {
+                    let (w, h) = (r.room.width() as i32, r.room.arm.grid.len() as i32);
+                    let (w, h) = if r.orientation & 1 == 1 { (h, w) } else { (w, h) };
+                    crate::overlay::RoomRect { rect: (r.origin.0, r.origin.1, r.origin.0 + w, r.origin.1 + h), feature: true, described: false, inset: r.room.arm.dimensions.uint1.unwrap_or(0) as i32 }
+                }))
                 .collect();
             Some(crate::overlay::Overlays::new(files, &toy, &map, &mut master, &rects, files.special_tile(2))?)
         }

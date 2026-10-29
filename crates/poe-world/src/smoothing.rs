@@ -537,6 +537,21 @@ fn round(g: &mut LayoutGraph, ctx: &mut RoundCtx, mut e: usize, mut dir: usize) 
 
 /// `0x1420b3bd0`: one rounding pass over the graph; returns whether anything changed.
 fn round_all(g: &mut LayoutGraph) -> bool {
+    // `POE_DBG_ROUND`: each edge's points before and after the pass.
+    let before: Option<Vec<Vec<Pos>>> = std::env::var_os("POE_DBG_ROUND").map(|_| (0..g.edges.len()).map(|e| (1..=g.len(e)).map(|i| g.p(e, i)).collect()).collect());
+    let changed = round_all_inner(g);
+    if let Some(before) = before {
+        for (e, b) in before.iter().enumerate() {
+            let a: Vec<Pos> = (1..=g.len(e)).map(|i| g.p(e, i)).collect();
+            if &a != b {
+                eprintln!("ROUND edge {e}: {b:?} -> {a:?}");
+            }
+        }
+    }
+    changed
+}
+
+fn round_all_inner(g: &mut LayoutGraph) -> bool {
     let mut ctx = RoundCtx::default();
     let mut ones = Vec::new();
     let mut many = Vec::new();
